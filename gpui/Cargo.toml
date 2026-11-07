@@ -1,0 +1,27 @@
+[package]
+name = "dragonfruit-gpui"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# The first real frontend slice: one GPUI line (`bite-gpui`, because
+# `gpui_interop` is published against it), a zero-copy wgpu viewport, and an
+# STL loader. The UI is raw GPUI, matching the DragonFruit tokens.
+
+[dependencies]
+gpui = { package = "bite-gpui", version = "1.25", default-features = false, features = ["platform"] }
+gpui_interop = { version = "0.2", features = ["gpui", "wgpu"] }
+gpui_wgpu = { package = "bite-gp-wgpu", version = "1.25" }
+wgpu = "30.0.1"
+bytemuck = { version = "1", features = ["derive"] }
+glam = "0.30"
+anyhow = "1"
+raw-window-handle = "0.6"
+rfd = "0.15"
+dragonfruit-mesh-core = { path = "../rust/dragonfruit-mesh-core" }
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2
