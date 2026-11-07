@@ -33,7 +33,7 @@ use gpui::{Div, FontWeight, IntoElement, SharedString, div, prelude::*, px, rgb,
 
 use gpui_core::icons::icon;
 use gpui_ui::panel_fields::*;
-use gpui_ui::ui::section_label;
+use gpui_ui::ui::{ButtonSize, ButtonSpec, ButtonVariant, button_with, section_label};
 use gpui_core::theme::*;
 
 /// `OrganicCutMode`.
@@ -706,31 +706,25 @@ fn tenon_card(view: &OrganicCutView, actions: &OrganicCutActions, busy: bool) ->
                             .text_color(rgb(TEXT_MUTED))
                             .child("Moved off centre"),
                     )
-                    .child(
-                        div()
-                            .id("organic-tenon-center")
-                            .h(px(24.0))
-                            .px(px(11.0))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .rounded(px(RADIUS_SM))
-                            .border_1()
-                            .border_color(rgb(BORDER_SUBTLE))
-                            .bg(rgb(SURFACE_1))
-                            .text_size(px(FONT_MD))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(rgb(TEXT_STRONG))
-                            .cursor_pointer()
-                            .when(!busy, |this| {
-                                this.hover(|s| s.bg(rgb(SURFACE_2))).on_click(move |_, _, _| {
-                                    let mut next = base.clone();
-                                    next.tenon_anchor = None;
-                                    change(next);
-                                })
+                    .child({
+                        // `Button variant="secondary" size="auto"` with `!h-6
+                        // whitespace-nowrap px-1.5 text-[10px]`.
+                        let center = button_with(
+                            "organic-tenon-center",
+                            "Center",
+                            &ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Auto),
+                        )
+                        .h(px(24.0));
+                        if busy {
+                            center.cursor_not_allowed()
+                        } else {
+                            center.on_click(move |_, _, _| {
+                                let mut next = base.clone();
+                                next.tenon_anchor = None;
+                                change(next);
                             })
-                            .child("Center"),
-                    ),
+                        }
+                    }),
             );
         }
 
@@ -1033,34 +1027,25 @@ fn loops_card(view: &OrganicCutView, actions: &OrganicCutActions, busy: bool) ->
         let is_active = summary.index == view.active_loop_index;
         let incomplete = summary.point_count < 3;
         let index = summary.index;
-        let (border, background, text) = if is_active {
-            active_mode_style()
+        // `Button variant="secondary" size="auto"` with `!h-7 !min-w-7
+        // whitespace-nowrap px-1.5 text-[10px]`.
+        let mut spec = ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Xs);
+        if is_active {
+            let (border, background, text) = active_mode_style();
+            spec = spec.fill(background, border, text);
         } else if incomplete {
-            (BORDER_SUBTLE, SURFACE_1, TEXT_MUTED)
-        } else {
-            (BORDER_SUBTLE, SURFACE_1, TEXT_STRONG)
-        };
-        let chip = div()
-            .id(gpui::ElementId::named_usize("organic-loop-chip", index))
-            .h(px(28.0))
-            .min_w(px(28.0))
-            .px(px(11.0))
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded(px(RADIUS_SM))
-            .border_1()
-            .border_color(rgb(border))
-            .bg(rgb(background))
-            .text_size(px(FONT_MD))
-            .font_weight(FontWeight::SEMIBOLD)
-            .text_color(rgb(text))
-            .child(format!("{}", index + 1));
+            spec = spec.fill(SURFACE_1, BORDER_SUBTLE, TEXT_MUTED);
+        }
+        let chip = button_with(
+            gpui::ElementId::named_usize("organic-loop-chip", index),
+            format!("{}", index + 1),
+            &spec,
+        )
+        .min_w(px(28.0));
         let chip = if busy {
             chip.opacity(0.6).cursor_not_allowed()
         } else {
-            chip.cursor_pointer()
-                .when(incomplete && !is_active, |this| this.border_dashed())
+            chip.when(incomplete && !is_active, |this| this.border_dashed())
                 .on_click(move |_, _, _| select(index))
         };
         chips = chips.child(chip);
@@ -1068,27 +1053,16 @@ fn loops_card(view: &OrganicCutView, actions: &OrganicCutActions, busy: bool) ->
 
     let add = actions.on_add_loop.clone();
     let add_enabled = !busy && view.can_add_loop;
-    let add_chip = div()
-        .id("organic-loop-add")
-        .h(px(28.0))
-        .min_w(px(28.0))
-        .px(px(11.0))
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded(px(RADIUS_SM))
-        .border_1()
-        .border_color(rgb(BORDER_SUBTLE))
-        .bg(rgb(SURFACE_1))
-        .text_size(px(FONT_MD))
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(rgb(TEXT_STRONG))
-        .child("+");
+    // `Button variant="secondary" size="auto"` with `!h-7 !min-w-7
+    // whitespace-nowrap px-1.5 text-[11px]`.
+    let add_chip = button_with(
+        "organic-loop-add",
+        "+",
+        &ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Xs),
+    )
+    .min_w(px(28.0));
     let add_chip = if add_enabled {
-        add_chip
-            .cursor_pointer()
-            .hover(|s| s.bg(rgb(SURFACE_2)))
-            .on_click(move |_, _, _| add())
+        add_chip.on_click(move |_, _, _| add())
     } else {
         add_chip.opacity(0.6).cursor_not_allowed()
     };

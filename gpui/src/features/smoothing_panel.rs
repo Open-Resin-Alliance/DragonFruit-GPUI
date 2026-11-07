@@ -26,11 +26,10 @@
 use std::rc::Rc;
 
 use gpui::{
-    Div, FontWeight, IntoElement, SharedString, div, linear_color_stop, linear_gradient, prelude::*,
-    px, rgb, rgba,
+    Div, IntoElement, SharedString, div, linear_color_stop, linear_gradient, prelude::*, px, rgb,
+    rgba,
 };
 
-use gpui_core::icons::icon;
 use gpui_ui::panel_fields::*;
 use gpui_ui::ui::{ButtonSize, ButtonSpec, ButtonVariant, button_with, section_header, sub_card_with};
 use gpui_core::theme::*;
@@ -409,31 +408,15 @@ pub fn smoothing_body(state: &SmoothingState, actions: &SmoothingActions) -> imp
     );
 
     // ── Restore defaults ────────────────────────────────────────────────────
+    // `Button variant="secondary" size="auto"` with `w-full !h-8 px-3 text-xs
+    // inline-flex items-center justify-center gap-1.5`; the icon is `h-3 w-3`
+    // in `currentColor`.
     let restore = actions.on_restore_defaults.clone();
-    body.child(
-        div()
-            .id("smoothing-restore")
-            .w_full()
-            .h(px(32.0))
-            .px(px(11.0))
-            .pt(px(5.0))
-            .pb(px(7.0))
-            .flex()
-            .items_center()
-            .justify_center()
-            .gap(px(6.0))
-            .rounded(px(RADIUS_SM))
-            .border_1()
-            .border_color(rgb(BORDER_SUBTLE))
-            .bg(rgb(SURFACE_1))
-            .text_size(px(FONT_MD))
-            .font_weight(FontWeight::SEMIBOLD)
-            .line_height(px(FONT_MD))
-            .text_color(rgb(TEXT_STRONG))
-            .cursor_pointer()
-            .hover(|s| s.bg(rgb(SURFACE_2)))
-            .on_click(move |_, _, _| restore())
-            .child(icon("rotate-ccw", 12.0, TEXT_MUTED))
-            .child("Restore defaults"),
-    )
+    let spec = ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Sm)
+        .full()
+        .gap(6.0)
+        .icon("rotate-ccw", 12.0, TEXT_STRONG);
+    body.child(button_with("smoothing-restore", "Restore defaults", &spec).on_click(move |_, _, _| {
+        restore()
+    }))
 }

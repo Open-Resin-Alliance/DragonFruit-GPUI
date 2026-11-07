@@ -1790,25 +1790,13 @@ fn delete_dialog(preset_name: &str, entity: &WeakEntity<DragonFruit>) -> Div {
     };
     let actions = {
         let confirm_entity = entity.clone();
-        let mut delete = div()
-            .id("as-delete-confirm")
-            .flex()
-            .items_center()
-            .justify_center()
-            .h(px(36.0))
-            .px(px(11.0))
-            .rounded(px(RADIUS_SM))
-            .border_1()
-            .border_color(rgb(mix(DANGER, BORDER_SUBTLE, 0.55)))
-            .bg(rgb(mix(DANGER, SURFACE_1, 0.12)))
-            .text_size(px(FONT_MD))
-            .font_weight(FontWeight::SEMIBOLD)
-            .line_height(px(FONT_MD))
-            .text_color(rgb(DANGER))
-            .cursor_pointer()
-            .hover(|style| style.bg(rgb(mix(DANGER, SURFACE_1, 0.22))))
-            .child("Delete");
-        delete = delete.on_click(move |_, _, cx| {
+        // `Button size="md"` (secondary) with the danger inline `style`.
+        let spec = ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Md).fill(
+            mix(DANGER, SURFACE_1, 0.12),
+            mix(DANGER, BORDER_SUBTLE, 0.55),
+            DANGER,
+        );
+        let delete = button_with("as-delete-confirm", "Delete", &spec).on_click(move |_, _, cx| {
             edit(|state| {
                 // `deleteActiveAutoSupportPreset`: the store clears the
                 // selection; the dialog falls back to the balanced built-in.
@@ -1860,27 +1848,19 @@ fn name_dialog(dialog: &NameDialog, entity: &WeakEntity<DragonFruit>) -> Div {
 
     let confirm_entity = entity.clone();
     let confirm_name = dialog.name.clone();
-    let mut confirm = div()
-        .id("as-name-confirm")
-        .flex()
-        .items_center()
-        .justify_center()
-        .gap(px(6.0))
-        .h(px(36.0))
-        .px(px(11.0))
-        .rounded(px(RADIUS_SM))
-        .border_1()
-        .border_color(rgb(save_border()))
-        .bg(rgb(save_background()))
-        .text_size(px(FONT_MD))
-        .font_weight(FontWeight::SEMIBOLD)
-        .line_height(px(FONT_MD))
-        .text_color(rgb(ACCENT_SECONDARY))
-        .child(icon("check", 14.0, ACCENT_SECONDARY))
-        .child(if is_create { "Create" } else { "Save Name" });
+    // `Button size="md"` with `SAVE_STYLE` and `disabled:opacity-40`.
     let enabled = !confirm_name.trim().is_empty();
-    if enabled {
-        confirm = confirm.cursor_pointer().on_click(move |_, _, cx| {
+    let spec = ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Md)
+        .gap(6.0)
+        .fill(save_background(), save_border(), ACCENT_SECONDARY)
+        .icon("check", 14.0, ACCENT_SECONDARY);
+    let confirm = button_with(
+        "as-name-confirm",
+        if is_create { "Create" } else { "Save Name" },
+        &spec,
+    );
+    let confirm = if enabled {
+        confirm.on_click(move |_, _, cx| {
             edit(|state| {
                 let name = confirm_name.trim().to_string();
                 match state.name_dialog.as_ref().map(|dialog| dialog.mode) {
@@ -1921,10 +1901,10 @@ fn name_dialog(dialog: &NameDialog, entity: &WeakEntity<DragonFruit>) -> Div {
                 state.draft = state.live;
             });
             confirm_entity.update(cx, |_, cx| cx.notify()).ok();
-        });
+        })
     } else {
-        confirm = confirm.opacity(0.4).cursor_not_allowed();
-    }
+        confirm.opacity(0.4).cursor_not_allowed()
+    };
 
     let actions = div()
         .flex()

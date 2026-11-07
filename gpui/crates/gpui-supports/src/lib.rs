@@ -8,9 +8,12 @@
 //!
 //! # PORT DEVIATIONS
 //!
-//! - **Instancing becomes baking.** three.js draws one `CylinderGeometry` per
-//!   radius bucket and multiplies it by a per-instance matrix; here each shaft
-//!   is emitted into one triangle list. Same silhouette, one draw.
+//! - **Instancing is kept, in `instance`.** `InstancedShaftGroup.tsx` draws one
+//!   `cylinderGeometry` per batch and multiplies by a per-instance matrix; the
+//!   port keeps the same unit meshes and per-instance matrices in
+//!   [`instance::SupportBatches`], so a support set is one `draw_indexed` per
+//!   primitive. [`mesh::SupportMesh`] is the flattening fallback for tests and
+//!   for the smoke run.
 //! - **Curved shafts are truncated.** `InstancedShaftGroup` renders a bezier
 //!   shaft as a `TubeGeometry` warped along the curve; [`mesh::SupportMesh`]
 //!   builds straight shafts only until the curve types are ported.
@@ -20,9 +23,11 @@
 //! - **Colour is not baked.** the source writes per-instance colours through
 //!   `instanceColorWriter.ts`; the viewport applies its own material.
 
+pub mod instance;
 pub mod mesh;
 pub mod primitives;
 
+pub use instance::{DiskInstance, NodeInstance, ShaftInstance, SupportBatches};
 pub use mesh::{SupportMesh, SupportNode, SupportShaft};
 pub use primitives::{cone, cylinder, disk, sphere};
 
