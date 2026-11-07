@@ -792,7 +792,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let n_dot_l = max(dot(n, key_dir), 0.0);
     let cavity = pow(1.0 - n_dot_l, 1.35);
     let fake_ao = 1.0 - cavity * 0.2;
-    let baked = clamp(in.ao, 0.0, 1.0);
+    let baked = mix(1.0, clamp(in.ao, 0.0, 1.0), 0.85);
     let color = base * lighting * fake_ao * baked + spec;
     return vec4<f32>(color, 1.0);
 }

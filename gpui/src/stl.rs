@@ -6,6 +6,7 @@ use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 use dragonfruit_mesh_core::mesh::{IndexedMesh, Vec3};
+use dragonfruit_mesh_core::refine::{refine_long_edges_with_budget, refinement_budget};
 use dragonfruit_mesh_core::vertex_occlusion::bake_smoothed_vertex_occlusion;
 use glam::Vec3 as GVec3;
 
@@ -43,6 +44,21 @@ pub fn load_stl(path: &Path) -> Result<MeshData> {
         bail!("{} welded to an empty mesh", path.display());
     }
 
+    let mut min = Vec3::new(f32::MAX, f32::MAX, f32::MAX);
+    let mut max = Vec3::new(f32::MIN, f32::MIN, f32::MIN);
+    for p in &mesh.positions {
+        min = min.min(*p);
+        max = max.max(*p);
+    }
+
+    // The app refines faces longer than 2% of the diagonal before deriving
+    // per-vertex data, so a coarse face does not carry one AO value across a
+    // wedge. Same threshold, same budget.
+    let diagonal = max.sub(min).length();
+    let max_edge = (diagonal * 0.02).max(0.01);
+    let budget = refinement_budget(mesh.triangles.len());
+    let mesh = refine_long_edges_with_budget(&mesh, max_edge, 8, budget);
+
     // The app's bake: 32 rays, turned fan, one graph smoothing pass.
     let ao = bake_smoothed_vertex_occlusion(&mesh, 32, None);
 
@@ -69,12 +85,6 @@ pub fn load_stl(path: &Path) -> Result<MeshData> {
         }
     }
 
-    let mut min = Vec3::new(f32::MAX, f32::MAX, f32::MAX);
-    let mut max = Vec3::new(f32::MIN, f32::MIN, f32::MIN);
-    for p in &mesh.positions {
-        min = min.min(*p);
-        max = max.max(*p);
-    }
     let center = GVec3::new(
         (min.x + max.x) * 0.5,
         (min.y + max.y) * 0.5,
