@@ -296,7 +296,7 @@ impl DragonFruit {
 
         let mut app = Self {
             mesh: None,
-            camera: Rc::new(RefCell::new(Camera::fit(glam::Vec3::ZERO, 60.0))),
+            camera: Rc::new(RefCell::new(Camera::parked(glam::Vec3::new(0.0, 0.0, 110.0)))),
             viewport: Rc::new(RefCell::new(None)),
             drag: Rc::new(Cell::new(None)),
             last: Rc::new(Cell::new((0.0, 0.0))),
@@ -422,6 +422,10 @@ impl DragonFruit {
         self.layer = 0.0;
         self.lower_layer = 0.0;
         self.mode = Mode::Prepare;
+        // Models going to zero resets the camera home (`useStlLoadCameraIntro`).
+        self.camera
+            .borrow_mut()
+            .home(glam::Vec3::new(0.0, 0.0, 110.0));
     }
 
     /// Raise a toast for `TOAST_DURATION_MS`, replacing the current one.
@@ -666,7 +670,9 @@ impl Render for DragonFruit {
                     last.set((event.position.x.0, event.position.y.0));
                     let mut camera = camera.borrow_mut();
                     match button {
-                        MouseButton::Right => camera.orbit(dx, dy),
+                        MouseButton::Right => {
+                            camera.orbit(dx, dy, window.viewport_size().height.0.max(1.0))
+                        }
                         MouseButton::Middle => {
                             camera.pan(dx, dy, window.viewport_size().height.0.max(1.0))
                         }

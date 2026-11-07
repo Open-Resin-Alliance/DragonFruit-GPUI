@@ -59,6 +59,18 @@ impl Camera {
         }
     }
 
+    /// The empty scene's parked pose: `useStlLoadCameraIntro`'s default camera,
+    /// the build-volume centre plus `(-220, -220, +260)`.
+    pub fn parked(target: Vec3) -> Self {
+        let mut camera = Self::fit(target, 60.0);
+        let offset = Vec3::new(-220.0, -220.0, 260.0);
+        camera.target = target;
+        camera.distance = offset.length();
+        camera.pitch = (offset.z / offset.length()).asin();
+        camera.yaw = offset.y.atan2(offset.x);
+        camera
+    }
+
     pub fn eye(&self) -> Vec3 {
         let cp = self.pitch.cos();
         self.target
@@ -100,13 +112,15 @@ impl Camera {
         (near, (far - near).normalize())
     }
 
-    pub fn orbit(&mut self, dx: f32, dy: f32) {
-        self.pending_yaw -= dx * 0.008 * ROTATE_SPEED;
+    /// OrbitControls: `2π * rotateSpeed / clientHeight` radians per pixel.
+    pub fn orbit(&mut self, dx: f32, dy: f32, viewport_height: f32) {
+        let factor = std::f32::consts::TAU * ROTATE_SPEED / viewport_height.max(1.0);
+        self.pending_yaw -= dx * factor;
         // OrbitControls leaves the polar range at its default 0..π, so a
         // straight top-down view is reachable; only the look-at singularity
         // (forward parallel to up) is excluded.
         const LIMIT: f32 = std::f32::consts::FRAC_PI_2 - 0.001;
-        self.pending_pitch += dy * 0.008 * ROTATE_SPEED;
+        self.pending_pitch += dy * factor;
     }
 
     /// OrbitControls' screen-space pan: `panSpeed * (2 * distance *
@@ -121,8 +135,9 @@ impl Camera {
     }
 
     pub fn zoom(&mut self, delta: f32) {
-        // OrbitControls' wheel scale: `0.95^zoomSpeed` per wheel step.
-        self.pending_zoom += delta * ZOOM_SPEED;
+        // OrbitControls' wheel scale: `0.95^zoomSpeed` per wheel event, one
+        // step regardless of the event's magnitude.
+        self.pending_zoom += delta.signum() * ZOOM_SPEED;
     }
 
     /// `CameraHomeResetController`: the home pose is the orbit target plus
