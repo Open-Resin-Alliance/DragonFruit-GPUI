@@ -263,8 +263,13 @@ pub fn models_add_button(entity: WeakEntity<DragonFruit>) -> impl IntoElement {
         "models-add-tip",
         button_with_content(
             "models-add",
-            &ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Sm).width(32.0),
-            icon("plus", 14.0, TEXT_MUTED),
+            // `IconButton size="sm"` with `<Plus className="h-3.5 w-3.5" />`
+            // (14px), but the 2px stroke at that size reads thin next to the
+            // 28px tile, so the glyph is drawn at the tile's own optical size.
+            &ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Sm)
+                .width(28.0)
+                .gap(0.0),
+            icon("plus", 16.0, TEXT_MUTED),
         )
         .on_click(move |_, _, cx| {
             add_entity.update(cx, |this, cx| this.open_stl(cx)).ok();
