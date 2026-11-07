@@ -1967,7 +1967,7 @@ fn axis_arrows(metrics: &PlateMetrics) -> Vec<[f32; 6]> {
         };
     }
     for (dir, base_hex, tip_hex) in axes {
-        let base = srgb_linear(base_hex);
+        let _base = srgb_linear(base_hex);
         let tip = srgb_linear(tip_hex);
         let helper = if dir[2].abs() > 0.9 {
             [1.0, 0.0, 0.0]
@@ -1984,17 +1984,10 @@ fn axis_arrows(metrics: &PlateMetrics) -> Vec<[f32; 6]> {
                 origin[2] + dir[2] * t + (u[2] * cos + v[2] * sin) * radius,
             ]
         };
-        // The source draws the gradient from the canvas bottom (dark) to its
-        // top (light) and three.js samples v=0 at the canvas bottom, so each
-        // geometry runs dark at its base to light at its tip.
-        let shade = |t: f32, span: f32| -> [f32; 3] {
-            let k = (t / span).clamp(0.0, 1.0);
-            [
-                base[0] + (tip[0] - base[0]) * k,
-                base[1] + (tip[1] - base[1]) * k,
-                base[2] + (tip[2] - base[2]) * k,
-            ]
-        };
+        // Solid colour per axis: the gradient's per-vertex interpolation read
+        // as faceted on the 12-sided cones, so the arrows use the bright end
+        // of each gradient instead.
+        let shade = |_t: f32, _span: f32| -> [f32; 3] { tip };
         let tip_point = [
             origin[0] + dir[0] * total,
             origin[1] + dir[1] * total,
@@ -3084,27 +3077,33 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     // through the model, where `camera_pos - world` flips sign per fragment.
     let head_dir = normalize(uniforms.headlight_dir);
 
+    // `Lights` in SceneEnvironment.tsx with `useSceneCollectionManager`'s
+    // defaults: ambient 0.28, directional 1.12 from +Z, its 0.15 fill from -Z
+    // in #90a7ff, a #f6e8ff/#3e415c hemisphere at 0.6x ambient, and the
+    // camera-forward headlight at 1.0.
     let key_dir = normalize(vec3<f32>(0.0, 0.0, 1.0));
     let fill_dir = normalize(vec3<f32>(0.0, 0.0, -1.0));
     let sky = vec3<f32>(0.965, 0.910, 1.0);
     let ground = vec3<f32>(0.243, 0.255, 0.361);
-    let hemi = mix(ground, sky, n.z * 0.5 + 0.5);
+    let hemi = mix(ground, sky, n.z * 0.5 + 0.5) * 0.168;
 
-    let ambient = hemi * 0.25;
-    let key = vec3<f32>(1.0) * max(dot(n, key_dir), 0.0) * 1.2;
-    let fill = vec3<f32>(0.565, 0.655, 1.0) * max(dot(n, fill_dir), 0.0) * 0.168;
-    let head = vec3<f32>(1.0) * max(dot(n, head_dir), 0.0) * 1.0;
-    let lighting = (ambient + key + fill + head) / 3.14159265;
+    let ambient = vec3<f32>(0.28);
+    let key = vec3<f32>(1.0) * 1.12 * max(dot(n, key_dir), 0.0);
+    let fill = vec3<f32>(0.565, 0.655, 1.0) * 0.168 * max(dot(n, fill_dir), 0.0);
+    let head = vec3<f32>(1.0) * 1.0 * max(dot(n, head_dir), 0.0);
+    let irradiance = ambient + hemi + key + fill + head;
 
     let base = uniforms.base_color;
     let f0 = mix(vec3<f32>(0.04), base, 0.02);
-    let spec = (specular(n, view_dir, key_dir, 0.9, f0) * 1.2 * max(dot(n, key_dir), 0.0)
-        + specular(n, view_dir, head_dir, 0.9, f0) * 1.0 * max(dot(n, head_dir), 0.0)) * 1.5;
+    // `meshStandardMaterial` defaults: roughness 0.9, metalness 0.02.
+    let spec = specular(n, view_dir, key_dir, 0.9, f0) * 1.12 * max(dot(n, key_dir), 0.0)
+        + specular(n, view_dir, fill_dir, 0.9, f0) * 0.168 * max(dot(n, fill_dir), 0.0)
+        + specular(n, view_dir, head_dir, 0.9, f0) * 1.0 * max(dot(n, head_dir), 0.0);
     let n_dot_l = max(dot(n, key_dir), 0.0);
     let cavity = pow(1.0 - n_dot_l, 1.35);
     let fake_ao = 1.0 - cavity * 0.2;
     let baked = mix(1.0, clamp(in.ao, 0.0, 1.0), 0.85);
-    let color = base * lighting * fake_ao * baked + spec;
+    let color = base * irradiance / 3.14159265 * fake_ao * baked + spec;
     return vec4<f32>(color, 1.0);
 }
 "#;
