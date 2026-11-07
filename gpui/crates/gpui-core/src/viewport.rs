@@ -3095,10 +3095,11 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
 
     let base = uniforms.base_color;
     let f0 = mix(vec3<f32>(0.04), base, 0.02);
-    // `meshStandardMaterial` defaults: roughness 0.9, metalness 0.02.
-    let spec = specular(n, view_dir, key_dir, 0.9, f0) * 1.12 * max(dot(n, key_dir), 0.0)
-        + specular(n, view_dir, fill_dir, 0.9, f0) * 0.168 * max(dot(n, fill_dir), 0.0)
-        + specular(n, view_dir, head_dir, 0.9, f0) * 1.0 * max(dot(n, head_dir), 0.0);
+    // `DEFAULT_MATERIAL_ROUGHNESS` is 0.55 (the 0.9 is only the prop fallback),
+    // metalness 0.02. No extra multiplier: the old 1.5 boost was the hotspot.
+    let spec = specular(n, view_dir, key_dir, 0.55, f0) * 1.12 * max(dot(n, key_dir), 0.0)
+        + specular(n, view_dir, fill_dir, 0.55, f0) * 0.168 * max(dot(n, fill_dir), 0.0)
+        + specular(n, view_dir, head_dir, 0.55, f0) * 1.0 * max(dot(n, head_dir), 0.0);
     let n_dot_l = max(dot(n, key_dir), 0.0);
     let cavity = pow(1.0 - n_dot_l, 1.35);
     let fake_ao = 1.0 - cavity * 0.2;

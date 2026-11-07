@@ -16,6 +16,13 @@ pub struct Camera {
     goal_target: Vec3,
 }
 
+// `cameraFeelPreset = 'precise'`: rotateSpeed 0.72, panSpeed 0.82,
+// zoomSpeed 1.25, dampingFactor 0.15.
+const ROTATE_SPEED: f32 = 0.72;
+const PAN_SPEED: f32 = 0.82;
+const ZOOM_SPEED: f32 = 1.25;
+const DAMPING: f32 = 0.15;
+
 impl Camera {
     pub fn fit(center: Vec3, radius: f32) -> Self {
         let fov_y = 45f32.to_radians();
@@ -76,24 +83,25 @@ impl Camera {
     }
 
     pub fn orbit(&mut self, dx: f32, dy: f32) {
-        self.goal_yaw -= dx * 0.008;
+        self.goal_yaw -= dx * 0.008 * ROTATE_SPEED;
         // OrbitControls leaves the polar range at its default 0..π, so a
         // straight top-down view is reachable; only the look-at singularity
         // (forward parallel to up) is excluded.
         const LIMIT: f32 = std::f32::consts::FRAC_PI_2 - 0.001;
-        self.goal_pitch = (self.goal_pitch + dy * 0.008).clamp(-LIMIT, LIMIT);
+        self.goal_pitch = (self.goal_pitch + dy * 0.008 * ROTATE_SPEED).clamp(-LIMIT, LIMIT);
     }
 
     pub fn pan(&mut self, dx: f32, dy: f32) {
         let forward = (self.goal_target - self.eye()).normalize();
         let right = forward.cross(Vec3::Z).normalize();
         let up = right.cross(forward).normalize();
-        let scale = self.goal_distance * 0.0016;
+        let scale = self.goal_distance * 0.0016 * PAN_SPEED;
         self.goal_target += right * (-dx * scale) + up * (dy * scale);
     }
 
     pub fn zoom(&mut self, delta: f32) {
-        self.goal_distance = (self.goal_distance * (1.0 - delta * 0.1)).clamp(0.01, 1.0e6);
+        self.goal_distance =
+            (self.goal_distance * (1.0 - delta * 0.1 * ZOOM_SPEED)).clamp(0.01, 1.0e6);
     }
 
     /// `CameraHomeResetController`: the home pose is the orbit target plus
@@ -123,7 +131,6 @@ impl Camera {
     /// One frame of OrbitControls-style damping (dampingFactor 0.12). Returns
     /// whether the camera is still moving, so the caller can request a frame.
     pub fn step(&mut self) -> bool {
-        const DAMPING: f32 = 0.12;
         let mut moving = false;
         let mut approach = |value: &mut f32, goal: f32| {
             let delta = goal - *value;
