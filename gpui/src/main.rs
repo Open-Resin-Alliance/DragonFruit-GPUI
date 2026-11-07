@@ -203,6 +203,15 @@ impl Render for DragonFruit {
             glam::Quat::from_rotation_z(self.rotate_z),
             glam::Vec3::from_array(self.translate),
         );
+        let gizmo = if self.active_tool < 3 {
+            self.mesh.as_ref().map(|mesh| {
+                model_matrix
+                    .transform_point3(mesh.center)
+                    .to_array()
+            })
+        } else {
+            None
+        };
         let show_layers = viewport::ViewLayers {
             grid: self.show_grid,
             plate: self.show_plate,
@@ -259,6 +268,7 @@ impl Render for DragonFruit {
                 &supports.borrow(),
                 show_layers,
                 model_matrix,
+                gizmo,
                 &canvas_camera.borrow(),
                 base_color,
                 width,

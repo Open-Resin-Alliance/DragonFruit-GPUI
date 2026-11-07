@@ -95,6 +95,9 @@ pub struct Viewport {
     support_ptr: usize,
     model_uniform: wgpu::Buffer,
     model_bind: wgpu::BindGroup,
+    gizmo_buffer: wgpu::Buffer,
+    gizmo_vertex_count: u32,
+    gizmo_origin: [f32; 3],
 }
 
 impl Viewport {
@@ -697,6 +700,14 @@ impl Viewport {
             support_ptr: 0,
             model_uniform,
             model_bind,
+            gizmo_buffer: device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("viewport gizmo"),
+                size: 24,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }),
+            gizmo_vertex_count: 0,
+            gizmo_origin: [f32::NAN; 3],
         })
     }
 
@@ -712,6 +723,7 @@ impl Viewport {
         supports: &[[f32; 3]],
         layers: ViewLayers,
         model: glam::Mat4,
+        gizmo: Option<[f32; 3]>,
         camera: &Camera,
         base_color: [f32; 3],
         width: u32,
@@ -782,6 +794,40 @@ impl Viewport {
             0,
             bytemuck::cast_slice(&model.to_cols_array_2d()),
         );
+        match gizmo {
+            Some(origin) if origin != self.gizmo_origin => {
+                self.gizmo_origin = origin;
+                let length = 25.0;
+                let axes = [
+                    ([1.0, 0.0, 0.0], [1.0, 0.05, 0.05]),
+                    ([0.0, 1.0, 0.0], [0.05, 1.0, 0.05]),
+                    ([0.0, 0.0, 1.0], [0.05, 0.2, 1.0]),
+                ];
+                let mut vertices = Vec::new();
+                for (dir, color) in axes {
+                    vertices.push([origin[0], origin[1], origin[2], color[0], color[1], color[2]]);
+                    vertices.push([
+                        origin[0] + dir[0] * length,
+                        origin[1] + dir[1] * length,
+                        origin[2] + dir[2] * length,
+                        color[0],
+                        color[1],
+                        color[2],
+                    ]);
+                }
+                self.gizmo_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("viewport gizmo"),
+                    contents: bytemuck::cast_slice(&vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+                self.gizmo_vertex_count = vertices.len() as u32;
+            }
+            None => {
+                self.gizmo_origin = [f32::NAN; 3];
+                self.gizmo_vertex_count = 0;
+            }
+            _ => {}
+        }
         let support_ptr = supports.as_ptr() as usize;
         if support_ptr != self.support_ptr {
             self.support_ptr = support_ptr;
@@ -898,6 +944,11 @@ impl Viewport {
                 pass.set_pipeline(&self.axis);
                 pass.set_vertex_buffer(0, self.support_buffer.slice(..));
                 pass.draw(0..self.support_vertex_count, 0..1);
+            }
+            if self.gizmo_vertex_count > 0 {
+                pass.set_pipeline(&self.axis);
+                pass.set_vertex_buffer(0, self.gizmo_buffer.slice(..));
+                pass.draw(0..self.gizmo_vertex_count, 0..1);
             }
             if let Some(mesh) = &self.mesh {
                 if !below_plate && mesh.footprint_vertex_count > 0 {
