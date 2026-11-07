@@ -55,7 +55,17 @@ substitute. A module without that block has not been audited.
 | `panels` | `layout/FloatingPanelStack.tsx` | in progress |
 | `overlays::layer_slider` | `controls/LayerSlider.tsx` | in progress |
 | `overlays::view_cube` | `SceneCanvas` view cube | in progress |
-| `panel_content` | `controls/ModelManagerPanel.tsx`, `controls/AutoSupportPanel.tsx`, `ExportPanelStack.tsx`, `PrintingPanelStack.tsx` | ported (deviations noted in the module) |
+| `panel_content` | `controls/ModelManagerPanel.tsx`, `controls/AutoSupportPanel.tsx`, `ExportPanelStack.tsx`, `PrintingPanelStack.tsx` | ported |
+| `support_panels` | `IslandsPanel`, `IslandListCard`, `AutoSupportSettingsBody`, `HollowingPanel`, `HolePunchPanel` | ported |
+| `transform_panel`, `arrange_panels`, `smoothing_panel`, `organic_cut_panel` | the matching Prepare panels | ported |
+| `prepare_stack` | `PreparePanelStack.tsx` | ported |
+| `plate_widgets` | `PlateNameLabel.tsx`, `PlateSideButtons.tsx` | ported |
+| `empty_scene` | `EmptySceneState.tsx`, `ModelStatsCard.tsx` | ported |
+| `printing_preview` | `PrintingPreviewPane.tsx` | ported |
+| `notifications` | `NotificationStack.tsx`, `SystemNotificationStack.tsx` | ported |
+| `auto_support_settings` | `AutoSupportSettingsBody.tsx` | ported |
+| `scene_modals` | the scene/dialog modals | in progress |
+| `tool_panels` | adapter mounting the Prepare/Support tool panels | in progress |
 | `settings modal` | `settings/SettingsModal.tsx` | pending |
 | `context menus` | `ui/ContextMenu.tsx` | pending |
 

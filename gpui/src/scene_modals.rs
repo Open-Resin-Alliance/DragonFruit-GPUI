@@ -70,6 +70,19 @@
 //! * **Escape** — `useEscapeToClose` is a window listener at the source. GPUI
 //!   key handling lives in `main.rs`, so the caller decides whether Escape
 //!   dismisses; the dialogs only expose their close callback.
+//! * **Backdrop clicks** — the source's `onBackdropClick` is a `mousedown`
+//!   handler on the backdrop. The GPUI backdrop is a plain layer with no hit
+//!   handler, so a dismissal that a dialog offers only through its backdrop
+//!   (the two unsaved-changes prompts, the import prompts, the repair sheet)
+//!   stays with the caller; the close tile and the actions are wired.
+//! * **Select trigger height** — `SceneMaterialReassignModal` passes
+//!   `selectClassName="w-full h-[32px] px-2 pr-8 text-xs"`; `ui::select_dropdown`
+//!   pins the trigger at the source's 36px `.ui-input` height, so the rows are
+//!   4px taller than the source's.
+//! * **`font-mono`** — the save-error detail block is set in the UI face; no
+//!   monospace family is registered in this port.
+//! * **`sticky top-0`** — the slice-metrics header scrolls with the panel; GPUI
+//!   has no sticky positioning in this port.
 //! * **Not ported here** — the sub-modals `SceneFileModals` mounts from other
 //!   files (`ModelSupportsModal`, `ObsoleteVoxlVersionModal`,
 //!   `ScenePluginMissingModal`, `SceneAutosaveRecoveryModal`,
@@ -83,7 +96,7 @@ use std::rc::Rc;
 
 use gpui::{
     App, BoxShadow, ClickEvent, Div, ElementId, FontWeight, IntoElement, PathBuilder, SharedString,
-    Window, canvas, div, point, prelude::*, px, rgb, rgba,
+    Window, canvas, div, point, prelude::*, px, relative, rgb, rgba,
 };
 
 use crate::icons::icon;
@@ -606,25 +619,8 @@ pub fn new_scene_unsaved_changes_modal(
 
 // ── Scene import placement / hollowing ──────────────────────────────────────
 
-/// The accent `IconChip` the import prompts paint: `color-mix(accent,
-/// border-subtle 45%)` on `color-mix(accent, surface-1 88%)`, glyph `--accent`.
-fn accent_import_chip(icon_name: &str) -> Div {
-    div()
-        .flex()
-        .flex_shrink_0()
-        .items_center()
-        .justify_center()
-        .w(px(36.0))
-        .h(px(36.0))
-        .rounded(px(ROUNDED_MD))
-        .border_1()
-        .border_color(rgb(mix_b(ACCENT, BORDER_SUBTLE, 0.45)))
-        .bg(rgb(mix_b(ACCENT, SURFACE_1, 0.88)))
-        .child(icon(icon_name, 16.0, ACCENT))
-}
-
 /// A two-column button row (`grid grid-cols-2 gap-2`).
-fn two_button_row(left: Div, right: Div) -> Div {
+fn two_button_row(left: impl IntoElement, right: impl IntoElement) -> Div {
     div()
         .flex()
         .gap(px(8.0))
@@ -658,8 +654,6 @@ pub fn scene_import_placement_modal(
         "Choose how to place imported models.",
         move |event, window, cx| header_close(event, window, cx),
     );
-    // The source overrides the tile with the accent mix; `custom_dialog_header`
-    // already takes those colours, so the chip is the same box.
 
     let plural = if model_count == 1 { "" } else { "s" };
     let card = div()
@@ -703,8 +697,8 @@ pub fn scene_import_placement_modal(
             12.0,
             LEADING_RELAXED,
             vec![
-                Run::Strong("Auto-Arrange"),
-                Run::Plain(" will reposition imported models onto free space on the plate."),
+                Run::strong("Auto-Arrange"),
+                Run::plain(" will reposition imported models onto free space on the plate."),
             ],
         ))
         .child(
@@ -712,8 +706,8 @@ pub fn scene_import_placement_modal(
                 12.0,
                 LEADING_RELAXED,
                 vec![
-                    Run::Strong("Load As-Is"),
-                    Run::Plain(" keeps scene coordinates exactly as stored in the file."),
+                    Run::strong("Load As-Is"),
+                    Run::plain(" keeps scene coordinates exactly as stored in the file."),
                 ],
             )),
         );
@@ -725,7 +719,10 @@ pub fn scene_import_placement_modal(
         ButtonSize::Md,
     )
     .w_full()
-    .on_click(move |event, window, cx| on_load_as_is(event, window, cx));
+    .on_click({
+        let close = close.clone();
+        move |event, window, cx| close(event, window, cx)
+    });
     let auto_arrange = button(
         "scene-import-auto-arrange",
         "Auto-Arrange",
@@ -814,8 +811,8 @@ pub fn scene_import_hollowing_modal(
             12.0,
             LEADING_RELAXED,
             vec![
-                Run::Strong("Keep Hollow"),
-                Run::Plain(
+                Run::strong("Keep Hollow"),
+                Run::plain(
                     " builds the stored cavity into each model, so it prints hollow exactly as authored.",
                 ),
             ],
@@ -825,8 +822,8 @@ pub fn scene_import_hollowing_modal(
                 12.0,
                 LEADING_RELAXED,
                 vec![
-                    Run::Strong("Import Solid"),
-                    Run::Plain(
+                    Run::strong("Import Solid"),
+                    Run::plain(
                         " loads the outer shape only. The cavity is kept, so you can apply it later from the Hollowing panel.",
                     ),
                 ],
@@ -848,7 +845,10 @@ pub fn scene_import_hollowing_modal(
         ButtonSize::Md,
     )
     .w_full()
-    .on_click(move |event, window, cx| on_keep_hollow(event, window, cx));
+    .on_click({
+        let close = close.clone();
+        move |event, window, cx| close(event, window, cx)
+    });
 
     let body = div()
         .flex()
@@ -1099,7 +1099,8 @@ pub fn scene_save_choice_modal(
 
 /// One save failure: the title, the message and the optional detail block.
 pub struct SceneSaveError {
-    pub title: SharedString,
+    /// `sceneSaveError.title` — `None` renders the source's `Save error`.
+    pub title: Option<SharedString>,
     pub message: SharedString,
     pub detail: Option<SharedString>,
 }
@@ -1147,7 +1148,7 @@ pub fn scene_save_error_modal(
     // paints the tone's 16px glyph (see PORT DEVIATIONS).
     dialog_modal(
         DIALOG_LG,
-        error.title,
+        error.title.unwrap_or_else(|| "Save error".into()),
         None,
         Some("alert-triangle"),
         IconTone::Warning,
@@ -1900,14 +1901,13 @@ pub fn plate_delete_modal(
 ///
 /// Title `Mesh Issue detected`, subtitle `This mesh isn't a valid solid`,
 /// warning tile, the three explanations, `Dismiss` and `Repair Now` (`Wrench`).
-/// No close tile and backdrop clicks are ignored at the source; the port keeps
-/// the close tile wired to `on_dismiss` because `dialog_modal` always paints it.
+/// The source passes no `onClose` and a no-op `onBackdropClick`, so the close
+/// tile is painted but inert; the user leaves through `Dismiss` or `Repair Now`.
 pub fn manifold_warning_modal(
     on_dismiss: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     on_repair_now: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> Div {
     let dismiss = Rc::new(on_dismiss);
-    let close = dismiss.clone();
     let action_dismiss = dismiss.clone();
 
     let body = div()
@@ -1954,20 +1954,20 @@ pub fn manifold_warning_modal(
                 )
                 .on_click(move |event, window, cx| on_repair_now(event, window, cx)),
             )),
-        move |event, window, cx| close(event, window, cx),
+        |_, _, _| {},
     )
 }
 
 /// `TetrahedralRemeshConfirmModal` — confirms a remesh before it runs.
 ///
 /// Title `Remesh this model?`, subtitle `Rebuilds the surface`, an accent
-/// `Pyramid` tile, the warning strip and `Cancel` / `Remesh`.
+/// `Pyramid` tile, the warning strip and `Cancel` / `Remesh`. The source has no
+/// `onClose` and a no-op backdrop click, so the close tile is inert.
 pub fn tetrahedral_remesh_confirm_modal(
     on_cancel: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     on_confirm: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> Div {
     let cancel = Rc::new(on_cancel);
-    let close = cancel.clone();
     let action_cancel = cancel.clone();
 
     dialog_modal(
@@ -2001,17 +2001,15 @@ pub fn tetrahedral_remesh_confirm_modal(
                 .on_click(move |event, window, cx| action_cancel(event, window, cx)),
             ))
             .child(action_slot(
-                button(
+                tinted_action(
                     "remesh-confirm",
                     "Remesh",
-                    ButtonVariant::TintedAccent,
-                    ButtonSize::Md,
+                    Some(("pyramid", 14.0)),
+                    TintedTone::Accent,
                 )
-                .gap(px(6.0))
-                .child(icon("pyramid", 14.0, ACCENT))
                 .on_click(move |event, window, cx| on_confirm(event, window, cx)),
             )),
-        move |event, window, cx| close(event, window, cx),
+        |_, _, _| {},
     )
 }
 
@@ -2019,13 +2017,13 @@ pub fn tetrahedral_remesh_confirm_modal(
 ///
 /// Title `Shrink-Wrap this model?`, subtitle `Reworks the surface into one
 /// solid`, an accent `RefreshCw` tile, the warning strip and `Cancel` /
-/// `Shrink-Wrap`.
+/// `Shrink-Wrap`. The source has no `onClose` and a no-op backdrop click, so the
+/// close tile is inert.
 pub fn shrink_wrap_confirm_modal(
     on_cancel: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     on_confirm: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> Div {
     let cancel = Rc::new(on_cancel);
-    let close = cancel.clone();
     let action_cancel = cancel.clone();
 
     dialog_modal(
@@ -2059,17 +2057,15 @@ pub fn shrink_wrap_confirm_modal(
                 .on_click(move |event, window, cx| action_cancel(event, window, cx)),
             ))
             .child(action_slot(
-                button(
+                tinted_action(
                     "shrink-wrap-confirm",
                     "Shrink-Wrap",
-                    ButtonVariant::TintedAccent,
-                    ButtonSize::Md,
+                    Some(("refresh-cw", 14.0)),
+                    TintedTone::Accent,
                 )
-                .gap(px(6.0))
-                .child(icon("refresh-cw", 14.0, ACCENT))
                 .on_click(move |event, window, cx| on_confirm(event, window, cx)),
             )),
-        move |event, window, cx| close(event, window, cx),
+        |_, _, _| {},
     )
 }
 
@@ -2106,14 +2102,14 @@ pub fn damaged_model_modal(
                 12.0,
                 LEADING_RELAXED,
                 vec![
-                    Run::Plain(
+                    Run::plain(
                         "We recommend repairing the mesh in a dedicated 3D modeling program such \
                          as ",
                     ),
-                    Run::Strong("Blender"),
-                    Run::Plain(" or "),
-                    Run::Strong("Netfabb"),
-                    Run::Plain(" before importing it into DragonFruit."),
+                    Run::strong("Blender"),
+                    Run::plain(" or "),
+                    Run::strong("Netfabb"),
+                    Run::plain(" before importing it into DragonFruit."),
                 ],
             )),
         action_slot(
@@ -2137,6 +2133,39 @@ pub struct RepairProgressState {
     pub stage: Option<SharedString>,
     /// `state.stages.length` — the number of progress events seen so far.
     pub stage_events: usize,
+}
+
+/// `translateRepairStage` from
+/// `src/components/scene/repairProgressMessages.ts`.
+///
+/// The engine reports a language-neutral stage code; only the label is
+/// translated, and an unknown code falls back to the raw code rather than
+/// rendering blank.
+fn translate_repair_stage(stage: Option<&str>) -> String {
+    let Some(stage) = stage else {
+        return "Starting".into();
+    };
+    match stage {
+        "repair" => "Repairing",
+        "rebuild" => "Rebuilding the surface into a solid",
+        "orient_components" => "Pointing faces the same way",
+        "stitch" => "Joining loose edges",
+        "holes_trivial" => "Closing small holes",
+        "double_faces" => "Removing doubled faces",
+        "orient_holes_stitch" => "Closing gaps",
+        "orient_holes_all_stitch" => "Closing the remaining gaps",
+        "double_faces_after_split" => "Removing doubled faces again",
+        "split_self_intersections" => "Separating surfaces that overlap",
+        "split_non_manifold_edges" => "Separating surfaces that share an edge",
+        "union_overlapping_parts" => "Merging overlapping parts",
+        "filter_components" => "Keeping the largest pieces",
+        "remove_inner_faces" => "Removing faces inside the model",
+        "noise_shells" => "Discarding scraps",
+        "settle" => "Tidying up",
+        "prune_and_classify" => "Separating model and supports",
+        other => other,
+    }
+    .to_string()
 }
 
 /// `repairProgressFraction` — how full the bar is, 0..1.
@@ -2171,10 +2200,7 @@ fn repair_progress_panel(
     let stage_label: SharedString = if cancelling {
         "Stopping at the end of this step…".into()
     } else {
-        state
-            .stage
-            .clone()
-            .unwrap_or_else(|| "Preparing…".into())
+        translate_repair_stage(state.stage.as_deref()).into()
     };
 
     let mut panel = div().flex().flex_col().gap(px(12.0));
@@ -2290,6 +2316,7 @@ pub fn repair_mesh_modal(
             .bg(rgb(mix(SURFACE_1, BLACK, 0.92)))
             .cursor_not_allowed()
             .child(icon("x", 16.0, mix(TEXT_MUTED, SURFACE_2, 0.82)))
+            .into_any_element()
     } else {
         icon_button(
             ElementId::named_usize("repair-mesh", 0),
@@ -2298,6 +2325,7 @@ pub fn repair_mesh_modal(
             IconButtonSize::Md,
         )
         .on_click(move |event, window, cx| header_close(event, window, cx))
+        .into_any_element()
     };
 
     let header = div()
@@ -2406,7 +2434,7 @@ pub fn repair_mesh_modal(
                 .opacity(0.6)
                 .cursor_not_allowed()
                 .child(spinner(14.0))
-                .child(keep_label);
+                .child(keep_label.clone());
         } else {
             el = el
                 .cursor_pointer()
@@ -2416,7 +2444,7 @@ pub fn repair_mesh_modal(
             } else {
                 el.on_click(move |event, window, cx| on_keep_original(event, window, cx))
             };
-            el = el.child(keep_label);
+            el = el.child(keep_label.clone());
         }
         el
     };
@@ -2430,15 +2458,13 @@ pub fn repair_mesh_modal(
             .pt(px(4.0))
             .child(div().flex_1().child(keep))
             .child(div().flex_1().child(
-                button(
+                tinted_action(
                     "repair-mesh-repair",
                     "Repair",
-                    ButtonVariant::TintedAccent,
-                    ButtonSize::Md,
+                    Some(("wrench", 14.0)),
+                    TintedTone::Accent,
                 )
                 .w_full()
-                .gap(px(6.0))
-                .child(icon("wrench", 14.0, ACCENT))
                 .on_click(move |event, window, cx| on_repair(event, window, cx)),
             ))
     };
@@ -3586,6 +3612,7 @@ pub fn history_debug_modal(
         .child(div().ml_auto().child(actions));
 
     // Newest first.
+    let on_jump_to_event = Rc::new(on_jump_to_event);
     let mut timeline = div().flex().flex_col().gap(px(6.0));
     if snapshot.events.is_empty() {
         timeline = timeline.child(
@@ -3770,7 +3797,6 @@ pub fn history_debug_modal(
                 );
 
             let event_id = event.id;
-            let on_jump_to_event = Rc::new(&on_jump_to_event);
             let jump = on_jump_to_event.clone();
             let card = div()
                 .id(ElementId::named_usize("history-event-card", index))
@@ -5039,6 +5065,7 @@ pub fn slice_metrics_debug_modal(
         .bg(rgba(with_alpha(BLACK, 0xb8)))
         .child(
             div()
+                .id("slice-metrics-panel")
                 .relative()
                 .w_full()
                 .max_w(px(1500.0))
@@ -5064,7 +5091,14 @@ fn fixed(value: f64, digits: usize) -> String {
 
 /// `fmt.quantity(value, digits, unit)` — `"{number} {unit}"`.
 fn quantity(value: f64, digits: usize, unit: &str) -> String {
-    format!("{} {unit}", fixed(value, digits))
+    let number = fixed(value, digits);
+    // `UNIT_MESSAGES` in `src/utils/unitFormatting.ts`: most units are
+    // `'{value} {unit}'`, but `percent` has no space and `perSecond` is `'/s'`.
+    match unit {
+        "percent" => format!("{number}%"),
+        "perSecond" => format!("{number} /s"),
+        _ => format!("{number} {unit}"),
+    }
 }
 
 /// `fmt.number(value)` — grouped integer.
@@ -5185,11 +5219,10 @@ fn format_history_label(value: &str) -> String {
         let mut spaced = String::with_capacity(value.len() + 4);
         let chars: Vec<char> = value.chars().collect();
         for (index, ch) in chars.iter().enumerate() {
-            if index > 0
-                && ch.is_ascii_uppercase()
-                && chars[index - 1].is_ascii_lowercase()
-                    || index > 0 && ch.is_ascii_uppercase() && chars[index - 1].is_ascii_digit()
-            {
+            let previous_is_lower_or_digit = index > 0
+                && (chars[index - 1].is_ascii_lowercase()
+                    || chars[index - 1].is_ascii_digit());
+            if index > 0 && ch.is_ascii_uppercase() && previous_is_lower_or_digit {
                 spaced.push(' ');
             }
             spaced.push(*ch);

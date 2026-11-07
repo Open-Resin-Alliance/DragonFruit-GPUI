@@ -726,14 +726,6 @@ impl SizingTier {
             Self::Anchor => "Anchor",
         }
     }
-
-    fn from_id(id: &str) -> Self {
-        match id {
-            "detail" => Self::Detail,
-            "anchor" => Self::Anchor,
-            _ => Self::Structure,
-        }
-    }
 }
 
 // ── Presets ─────────────────────────────────────────────────────────────────
@@ -1274,6 +1266,16 @@ fn half_row(first: AnyElement, second: AnyElement) -> Div {
         .items_stretch()
         .child(div().flex_1().min_w(px(0.0)).child(first))
         .child(div().flex_1().min_w(px(0.0)).child(second))
+}
+
+/// Two cards in one `grid-cols-2` row, stretched to the row's height.
+fn two_cards(first: Div, second: Div) -> Div {
+    div()
+        .flex()
+        .gap(px(12.0))
+        .items_stretch()
+        .child(first.flex_1().min_w(px(0.0)))
+        .child(second.flex_1().min_w(px(0.0)))
 }
 
 /// The card's `grid grid-cols-2 gap-2`, as rows of two.
@@ -2218,6 +2220,7 @@ pub fn auto_support_settings(open: bool, entity: WeakEntity<DragonFruit>) -> imp
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         };
+        let has_changes = guard.has_changes();
         (
             guard.draft,
             guard.presets.clone(),
@@ -2235,8 +2238,8 @@ pub fn auto_support_settings(open: bool, entity: WeakEntity<DragonFruit>) -> imp
             }),
             guard.saved,
             guard.is_built_in(),
-            guard.has_changes(),
-            guard.has_changes(),
+            has_changes,
+            has_changes,
             guard
                 .active_preset()
                 .map(|preset| preset.name.to_string()),
@@ -2296,39 +2299,28 @@ pub fn auto_support_settings(open: bool, entity: WeakEntity<DragonFruit>) -> imp
         policy_cards.push(field_card(section, cells));
     }
 
-    // Six cards fill three rows exactly; the calibration card spans both columns.
-    let mut cards = policy_cards.into_iter();
-    while let (Some(first), Some(second)) = (cards.next(), cards.next()) {
-        grid = grid.child(
-            div()
-                .flex()
-                .gap(px(12.0))
-                .items_stretch()
-                .child(first.flex_1().min_w(px(0.0)))
-                .child(second.flex_1().min_w(px(0.0))),
-        );
+    // Six cards fill three rows exactly — the five policy cards and
+    // Diagnostics — and the calibration card spans both columns below them.
+    let mut cards = policy_cards.into_iter().peekable();
+    while let Some(first) = cards.next() {
+        let second = if cards.peek().is_some() {
+            cards.next().expect("paired card")
+        } else {
+            diagnostics_card(
+                origin_colors,
+                skip_auto_bracing,
+                debug_simple_render,
+                debug_mode,
+                &entity,
+            )
+        };
+        grid = grid.child(two_cards(first, second));
     }
     grid = grid.child(
         div()
             .flex()
-            .gap(px(12.0))
             .items_stretch()
-            .child(
-                diagnostics_card(
-                    origin_colors,
-                    skip_auto_bracing,
-                    debug_simple_render,
-                    debug_mode,
-                    &entity,
-                )
-                .flex_1()
-                .min_w(px(0.0)),
-            )
-            .child(
-                advanced_card(&draft, locked, &entity)
-                    .flex_1()
-                    .min_w(px(0.0)),
-            ),
+            .child(advanced_card(&draft, locked, &entity).flex_1().min_w(px(0.0))),
     );
 
     scroll = scroll.child(grid);

@@ -9,7 +9,7 @@
 //! entity themselves. This module is the adapter between the two:
 //!
 //! * every action closure records its change in a module-local
-//!   [`thread_local!`] [`PanelStore`] and raises a dirty flag;
+//!   `thread_local!` [`PanelStore`] and raises a dirty flag;
 //! * the panel is wrapped in a `div` whose `on_click` runs after the body's own
 //!   click handler (GPUI dispatches mouse listeners in bubble order, leaf first)
 //!   and flushes the store into the entity, then calls `cx.notify()`;
@@ -93,9 +93,10 @@
 //!   `rotate_z`, so X/Y rotation and per-axis scale are recorded in the store but
 //!   only `rotation[2]` and `scale[0]` reach the entity. Uniform scaling starts
 //!   on (`page.tsx`'s `useState(true)`), matching the entity's single scale.
-//!   `Center Selection` puts X/Y at the plate origin (the port has no
-//!   `originMode`/plate-size settings); `Lift`/`Drop` use the mesh's raw minimum
-//!   Z and the source's `PLATE_CLEARANCE_MM` (0.001 mm).
+//!   `Center Selection` targets the plate origin (the port has no
+//!   `originMode`/plate-size settings) and solves the translate that puts the
+//!   mesh's raw bbox centre there. `Lift`/`Drop` use the mesh's raw minimum Z
+//!   and the source's `PLATE_CLEARANCE_MM` (0.001 mm).
 //! * **History.** `on_position_commit`, `on_rotation_complete`,
 //!   `on_scale_commit` and `on_transform_commit` are no-ops: the port has no
 //!   undo history.
@@ -118,9 +119,7 @@ use gpui::{AnyElement, App, IntoElement, MouseButton, WeakEntity, div, prelude::
 use crate::arrange_panels::{
     ArrangeActions, ArrangeState, DuplicateActions, DuplicateState, arrange_body, duplicate_body,
 };
-use crate::organic_cut_panel::{
-    LoopSummary, OrganicCutActions, OrganicCutView, organic_cut_body,
-};
+use crate::organic_cut_panel::{LoopSummary, OrganicCutActions, OrganicCutView, organic_cut_body};
 use crate::panel_content;
 use crate::smoothing_panel::{SmoothingActions, SmoothingState, smoothing_body};
 use crate::support_panels::{
@@ -156,6 +155,9 @@ struct PanelStore {
     /// The mesh's raw minimum Z (`center.z - size.z / 2`), before the model
     /// matrix. `Lift`/`Drop` need it to place the lowest world point.
     mesh_min_z: f32,
+    /// The mesh's raw bbox centre in X/Y, before the model matrix.
+    /// `Center Selection` needs it to put the model on the plate origin.
+    mesh_center: [f32; 2],
 }
 
 impl Default for PanelStore {
@@ -177,6 +179,7 @@ impl Default for PanelStore {
             support_count: 0,
             has_mesh: false,
             mesh_min_z: 0.0,
+            mesh_center: [0.0; 2],
         }
     }
 }
@@ -203,11 +206,7 @@ fn mark_notify(notify: &Rc<Cell<bool>>) {
 /// `tool` is the rail's index: [`crate::rail`]'s `PREPARE_TOOLS` order in
 /// Prepare and `SUPPORT_PANELS` order in Support. See the module docs for the
 /// full table.
-pub fn tool_panel(
-    tool: usize,
-    mode: Mode,
-    entity: WeakEntity<DragonFruit>,
-) -> Option<AnyElement> {
+pub fn tool_panel(tool: usize, mode: Mode, entity: WeakEntity<DragonFruit>) -> Option<AnyElement> {
     match mode {
         Mode::Prepare => prepare_panel(tool, entity),
         Mode::Support => support_panel(tool, entity),
@@ -219,69 +218,92 @@ fn prepare_panel(tool: usize, entity: WeakEntity<DragonFruit>) -> Option<AnyElem
     let transform_dirty = Rc::new(Cell::new(false));
     let notify_dirty = Rc::new(Cell::new(false));
 
-    let body = match tool {
+    let (id, body) = match tool {
         // `transformMgr.transformMode === 'transform'`.
         1 => {
-            let actions =
-                transform_actions(transform_dirty.clone(), notify_dirty.clone());
+            let actions = transform_actions(transform_dirty.clone(), notify_dirty.clone());
             let state = with_store(|store| store.transform.clone());
-            transform_body(&state, &actions).into_any_element()
+            (
+                "tool-panel-transform",
+                transform_body(&state, &actions).into_any_element(),
+            )
         }
         // `transformMgr.transformMode === 'duplicate'`.
         4 => {
             let actions = duplicate_actions(notify_dirty.clone());
             let state = with_store(|store| store.duplicate.clone());
-            duplicate_body(&state, &actions).into_any_element()
+            (
+                "tool-panel-duplicate",
+                duplicate_body(&state, &actions).into_any_element(),
+            )
         }
         // `transformMgr.transformMode === 'arrange'`.
         5 => {
             let actions = arrange_actions(notify_dirty.clone());
             let state = with_store(|store| store.arrange.clone());
-            arrange_body(&state, &actions).into_any_element()
+            (
+                "tool-panel-arrange",
+                arrange_body(&state, &actions).into_any_element(),
+            )
         }
         // `transformMgr.transformMode === 'organicCut'`.
         6 => {
             let actions = organic_actions(notify_dirty.clone());
             let state = with_store(|store| store.organic.clone());
-            organic_cut_body(&state, &actions).into_any_element()
+            (
+                "tool-panel-organic-cut",
+                organic_cut_body(&state, &actions).into_any_element(),
+            )
         }
         // `transformMgr.transformMode === 'smoothing'`.
         7 => {
             let actions = smoothing_actions(notify_dirty.clone());
             let state = with_store(|store| store.smoothing.clone());
-            smoothing_body(&state, &actions).into_any_element()
+            (
+                "tool-panel-smoothing",
+                smoothing_body(&state, &actions).into_any_element(),
+            )
         }
         // Drag (`select`) mounts no panel; On-Face and Mirror are scene tools.
         _ => return None,
     };
 
-    Some(wrap(body, entity, transform_dirty, notify_dirty))
+    Some(wrap(id, body, entity, transform_dirty, notify_dirty))
 }
 
 fn support_panel(tool: usize, entity: WeakEntity<DragonFruit>) -> Option<AnyElement> {
     let transform_dirty = Rc::new(Cell::new(false));
     let notify_dirty = Rc::new(Cell::new(false));
 
-    let body = match tool {
+    let (id, body) = match tool {
         // `supportRailMode === 'islands'`.
         0 => {
             let state = with_store(|store| store.islands.clone());
-            islands_body(&state, entity.clone()).into_any_element()
+            (
+                "tool-panel-islands",
+                islands_body(&state, entity.clone()).into_any_element(),
+            )
         }
         // `supportRailMode === 'manual'`.
         1 => {
             let state = with_store(|store| store.support_settings.clone());
-            support_settings_body(&state, entity.clone()).into_any_element()
+            (
+                "tool-panel-support-settings",
+                support_settings_body(&state, entity.clone()).into_any_element(),
+            )
         }
         // `supportRailMode === 'auto'`.
         2 => {
             let count = with_store(|store| store.support_count);
-            panel_content::supports_body(count, entity.clone()).into_any_element()
+            (
+                "tool-panel-support-auto",
+                panel_content::supports_body(count, entity.clone()).into_any_element(),
+            )
         }
         _ => return None,
     };
 
-    Some(wrap(body, entity, transform_dirty, notify_dirty))
+    Some(wrap(id, body, entity, transform_dirty, notify_dirty))
 }
 
 /// Wrap a body so the store's recorded changes reach the entity.
@@ -291,6 +313,7 @@ fn support_panel(tool: usize, entity: WeakEntity<DragonFruit>) -> Option<AnyElem
 /// `on_click` flushes it. `on_mouse_down` refreshes the entity-backed store
 /// fields first, so the click that follows edits the entity's current values.
 fn wrap(
+    id: &'static str,
     body: AnyElement,
     entity: WeakEntity<DragonFruit>,
     transform_dirty: Rc<Cell<bool>>,
@@ -299,6 +322,7 @@ fn wrap(
     let down_entity = entity.clone();
     let click_entity = entity;
     div()
+        .id(id)
         .w_full()
         .on_mouse_down(MouseButton::Left, move |_, _, cx| {
             sync_from_entity(&down_entity, cx);
@@ -325,6 +349,7 @@ fn sync_from_entity(entity: &WeakEntity<DragonFruit>, cx: &mut App) {
                     store.transform.has_bbox = true;
                     store.transform.original_size = mesh.size;
                     store.mesh_min_z = mesh.center.z - mesh.size[2] * 0.5;
+                    store.mesh_center = [mesh.center.x, mesh.center.y];
                     store.duplicate.active_model_name = Some(mesh.name.clone().into());
                 } else {
                     store.transform.has_bbox = false;
@@ -401,10 +426,17 @@ fn transform_actions(
     let (d, n) = flags!();
     let on_center = Rc::new(move || {
         // `handleCenterSelectedModels` targets the plate centre. The port has no
-        // `originMode`/plate size, and the plate is centred on the origin.
+        // `originMode`/plate size, and the plate is centred on the origin. The
+        // model matrix applies `translate + Rz(rotation) * (scale * raw)`, so
+        // solve for the translate that puts the raw bbox centre at (0, 0).
         with_store(|store| {
-            store.transform.position[0] = 0.0;
-            store.transform.position[1] = 0.0;
+            let angle = store.transform.rotation[2];
+            let (sin, cos) = angle.sin_cos();
+            let scale = store.transform.scale[0];
+            let x = scale * store.mesh_center[0];
+            let y = scale * store.mesh_center[1];
+            store.transform.position[0] = -(cos * x - sin * y);
+            store.transform.position[1] = -(sin * x + cos * y);
         });
         mark(&d, &n);
     });
@@ -461,8 +493,8 @@ fn transform_actions(
     let on_lift = Rc::new(move || {
         with_store(|store| {
             if store.has_mesh {
-                let bottom = store.transform.position[2]
-                    + store.transform.scale[0] * store.mesh_min_z;
+                let bottom =
+                    store.transform.position[2] + store.transform.scale[0] * store.mesh_min_z;
                 store.transform.position[2] += store.transform.lift_distance - bottom;
             }
         });
@@ -473,8 +505,8 @@ fn transform_actions(
     let on_drop = Rc::new(move || {
         with_store(|store| {
             if store.has_mesh {
-                let bottom = store.transform.position[2]
-                    + store.transform.scale[0] * store.mesh_min_z;
+                let bottom =
+                    store.transform.position[2] + store.transform.scale[0] * store.mesh_min_z;
                 store.transform.position[2] += PLATE_CLEARANCE_MM - bottom;
             }
         });
@@ -742,10 +774,10 @@ fn organic_actions(notify_dirty: Rc<Cell<bool>>) -> OrganicCutActions {
             let index = store.organic.loop_count;
             store.organic.loop_count += 1;
             store.organic.active_loop_index = index;
-            store
-                .organic
-                .loop_summaries
-                .push(LoopSummary { index, point_count: 0 });
+            store.organic.loop_summaries.push(LoopSummary {
+                index,
+                point_count: 0,
+            });
         });
         mark_notify(&n);
     });
@@ -758,8 +790,7 @@ fn organic_actions(notify_dirty: Rc<Cell<bool>>) -> OrganicCutActions {
             }
             store.organic.loop_count = store.organic.loop_count.saturating_sub(1);
             if store.organic.active_loop_index >= store.organic.loop_count {
-                store.organic.active_loop_index =
-                    store.organic.loop_count.saturating_sub(1);
+                store.organic.active_loop_index = store.organic.loop_count.saturating_sub(1);
             }
         });
         mark_notify(&n);

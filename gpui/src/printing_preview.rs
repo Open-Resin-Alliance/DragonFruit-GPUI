@@ -108,6 +108,7 @@ const DEFAULT_BUILD_DEPTH_MM: f32 = 89.0;
 ///
 /// The three.js and per-layer-URL props are not modelled — see the module's
 /// `PORT DEVIATIONS`.
+#[derive(Clone)]
 pub struct PrintingPreviewState {
     /// `printingPreviewTotalLayers` — `activeSlice.totalLayers`, `0` when the
     /// plate has not been sliced.

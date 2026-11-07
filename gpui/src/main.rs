@@ -133,6 +133,7 @@ mod plate_widgets;
 mod prepare_stack;
 mod printing_preview;
 mod rail;
+mod scene_modals;
 mod settings;
 mod smoothing_panel;
 mod stl;
@@ -152,8 +153,8 @@ use std::time::Duration;
 
 use camera::Camera;
 use gpui::{
-    App, Bounds, Context, Corners, ExternalPaths, FocusHandle, FontWeight, IntoElement,
-    MouseButton, Render, ScrollDelta, TextRenderingMode, TitlebarOptions, Window,
+    AnyElement, App, Bounds, Context, Corners, ExternalPaths, FocusHandle, FontWeight,
+    IntoElement, MouseButton, Render, ScrollDelta, TextRenderingMode, TitlebarOptions, Window,
     WindowBounds, WindowOptions, div, gpu_canvas, prelude::*, px, relative, rgb, rgba, size,
 };
 use gpui_interop::attach;
@@ -230,6 +231,14 @@ struct DragonFruit {
     mode: Mode,
     show_settings: bool,
     layout: panels::PanelLayout,
+    empty_scene: empty_scene::EmptySceneState,
+    stats: empty_scene::ModelStatsCardState,
+    islands: support_panels::IslandsPanelState,
+    island_list: support_panels::IslandListState,
+    hollowing: support_panels::HollowingState,
+    hole_punch: support_panels::HolePunchState,
+    support_settings: support_panels::SupportSettingsState,
+    printing_preview: printing_preview::PrintingPreviewState,
     /// Upper layer index, `0..=num_layers`.
     layer: f32,
     /// Lower layer index (the second thumb).
@@ -304,6 +313,14 @@ impl DragonFruit {
             mode: Mode::Prepare,
             show_settings: false,
             layout: panels::PanelLayout::new(),
+            empty_scene: empty_scene::EmptySceneState::default(),
+            stats: empty_scene::ModelStatsCardState::default(),
+            islands: support_panels::IslandsPanelState::new(),
+            island_list: support_panels::IslandListState::new(),
+            hollowing: support_panels::HollowingState::new(),
+            hole_punch: support_panels::HolePunchState::new(),
+            support_settings: support_panels::SupportSettingsState::new(),
+            printing_preview: printing_preview::PrintingPreviewState::default(),
             layer: 0.0,
             lower_layer: 0.0,
             cross_section: true,
@@ -888,6 +905,30 @@ impl Render for DragonFruit {
                     .ok();
             })
             .child(canvas)
+            .when(!has_models, |this| {
+                this.child(empty_scene::empty_scene_state(
+                    self.empty_scene.clone(),
+                    entity.clone(),
+                ))
+            })
+            .when(has_models, |this| {
+                this.child(
+                    div()
+                        .absolute()
+                        .bottom(px(4.))
+                        .left(px(4.))
+                        .child(empty_scene::model_stats_card(
+                            self.stats.clone(),
+                            entity.clone(),
+                        )),
+                )
+            })
+            .when(mode == Mode::Printing && has_models, |this| {
+                this.child(printing_preview::printing_preview(
+                    self.printing_preview.clone(),
+                    entity.clone(),
+                ))
+            })
             // `isPrepareDragActive` overlay, inside `#scene-root` and below the
             // floating panels.
             .when(self.drag_active && self.mode == Mode::Prepare, |this| {
@@ -914,23 +955,101 @@ impl Render for DragonFruit {
                     );
                 }
                 match mode {
-                    Mode::Prepare => {}
+                    Mode::Prepare => {
+                        if has_models {
+                            let meta: Option<(&'static str, &'static str, panels::PanelKind)> =
+                                match self.active_tool {
+                                    1 => Some((
+                                        "prepare-transform",
+                                        "Transform",
+                                        panels::PanelKind::Transform,
+                                    )),
+                                    4 => Some((
+                                        "prepare-duplicate",
+                                        "Duplicate",
+                                        panels::PanelKind::Duplicate,
+                                    )),
+                                    5 => Some((
+                                        "prepare-arrange",
+                                        "Arrange",
+                                        panels::PanelKind::Arrange,
+                                    )),
+                                    6 => Some((
+                                        "prepare-split",
+                                        "Organic Cut",
+                                        panels::PanelKind::OrganicCut,
+                                    )),
+                                    7 => Some((
+                                        "prepare-smooth",
+                                        "Smoothing",
+                                        panels::PanelKind::Smoothing,
+                                    )),
+                                    _ => None,
+                                };
+                            if let Some((id, title, kind)) = meta {
+                                if let Some(body) = tool_panels::tool_panel(
+                                    self.active_tool,
+                                    mode,
+                                    entity.clone(),
+                                ) {
+                                    defs.push(
+                                        panels::PanelDef::new(id, title, kind)
+                                            .dock(panels::PanelDock::Right)
+                                            .content(body),
+                                    );
+                                }
+                            }
+                        }
+                    }
                     Mode::Support => {
-                        // The rail's Automatic tool owns the Auto Supports panel;
-                        // the other tools' panels are not ported.
-                        if self.active_tool == 2 {
-                            defs.push(
-                                panels::PanelDef::new(
+                        // `SupportPanelStack`: the rail tool selects the panel.
+                        let meta: Option<(&'static str, &'static str, panels::PanelKind)> =
+                            match self.active_tool {
+                                0 => Some((
+                                    "support-islands",
+                                    "Islands",
+                                    panels::PanelKind::Supports,
+                                )),
+                                1 => Some((
+                                    "support-settings",
+                                    "Support Settings",
+                                    panels::PanelKind::Supports,
+                                )),
+                                2 => Some((
                                     "support-auto",
                                     "Auto Supports (Beta)",
                                     panels::PanelKind::Supports,
-                                )
-                                .dock(panels::PanelDock::Right)
-                                .content(panel_content::supports_body(
-                                    self.supports.borrow().len(),
-                                    entity.clone(),
                                 )),
-                            );
+                                3 => Some((
+                                    "support-hollowing",
+                                    "Hollowing",
+                                    panels::PanelKind::Supports,
+                                )),
+                                _ => None,
+                            };
+                        if let Some((id, title, kind)) = meta {
+                            let body = if self.active_tool == 3 {
+                                Some(
+                                    support_panels::hollowing_body(
+                                        &self.hollowing,
+                                        entity.clone(),
+                                    )
+                                    .into_any_element(),
+                                )
+                            } else {
+                                tool_panels::tool_panel(
+                                    self.active_tool,
+                                    mode,
+                                    entity.clone(),
+                                )
+                            };
+                            if let Some(body) = body {
+                                defs.push(
+                                    panels::PanelDef::new(id, title, kind)
+                                        .dock(panels::PanelDock::Right)
+                                        .content(body),
+                                );
+                            }
                         }
                     }
                     Mode::Export => defs.push(
@@ -1006,6 +1125,10 @@ impl Render for DragonFruit {
             .child(settings::settings_modal(
                 show_settings,
                 self.settings_tab,
+                entity.clone(),
+            ))
+            .child(auto_support_settings::auto_support_settings(
+                self.show_support_settings,
                 entity.clone(),
             ))
             .when(self.toast.is_some(), |this| {
