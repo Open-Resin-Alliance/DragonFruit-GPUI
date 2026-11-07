@@ -50,6 +50,11 @@ pub(super) struct ColorUniform {
 pub(super) struct ModelUniform {
     pub(super) matrix: [[f32; 4]; 4],
     pub(super) clip: [f32; 4],
+    /// Build volume in world mm; `stripe.w` is the enabled flag.
+    pub(super) bounds_min: [f32; 4],
+    pub(super) bounds_max: [f32; 4],
+    /// `(r, g, b)` stripe colour, `w` enabled.
+    pub(super) stripe: [f32; 4],
 }
 
 pub(super) struct GpuMesh {

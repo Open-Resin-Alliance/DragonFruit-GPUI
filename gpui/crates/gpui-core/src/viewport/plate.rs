@@ -674,3 +674,10 @@ pub(super) fn decal_vertices(metrics: &PlateMetrics) -> Vec<[f32; 5]> {
     );
     out
 }
+
+/// `--out-of-bounds-stripe` (`resolveOutOfBoundsStripeColor`), sRGB-linear.
+/// The source falls back to `#b6ff2e` when the variable is absent; the app's
+/// token is the same hue.
+pub(super) fn out_of_bounds_stripe_color() -> [f32; 3] {
+    srgb_linear(0xb6ff2e)
+}

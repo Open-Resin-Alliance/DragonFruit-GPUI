@@ -130,8 +130,18 @@ struct Uniforms {
 struct Model {
     matrix: mat4x4<f32>,
     clip: vec4<f32>,
+    bounds_min: vec4<f32>,
+    bounds_max: vec4<f32>,
+    stripe: vec4<f32>,
 };
 @group(1) @binding(0) var<uniform> model: Model;
+
+/// `StlMesh.tsx`'s out-of-bounds material: diagonal bands of the stripe colour
+/// over white, at `stripeFreq 0.22`.
+fn hazard_stripe(world: vec3<f32>, color: vec3<f32>) -> vec3<f32> {
+    let band = step(0.5, fract((world.x + world.y + world.z) * 0.22));
+    return mix(color, vec3<f32>(1.0), band);
+}
 
 struct VertexOut {
     @builtin(position) position: vec4<f32>,
@@ -259,7 +269,17 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let cavity = pow(1.0 - n_dot_l, 1.35);
     let fake_ao = 1.0 - cavity * 0.2;
     let baked = mix(1.0, clamp(in.ao, 0.0, 1.0), 0.85);
-    let color = base * irradiance / 3.14159265 * fake_ao * baked + spec;
+    var color = base * irradiance / 3.14159265 * fake_ao * baked + spec;
+    // `StlMesh`'s out-of-bounds overlay, folded into this pass instead of a
+    // second draw: the source composites `stripeColor` at 42% over the surface,
+    // which for an opaque model is a 42% mix. The volume is a uniform compare,
+    // so a model that fits pays one branch.
+    if (model.stripe.w > 0.5) {
+        let outside = any(in.world < model.bounds_min.xyz) || any(in.world > model.bounds_max.xyz);
+        if (outside) {
+            color = mix(color, hazard_stripe(in.world, model.stripe.rgb), 0.42);
+        }
+    }
     return vec4<f32>(aces_filmic(color), 1.0);
 }
 "#;

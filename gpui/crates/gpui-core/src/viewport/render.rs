@@ -193,6 +193,37 @@ impl Viewport {
             bytemuck::bytes_of(&ModelUniform {
                 matrix: model.to_cols_array_2d(),
                 clip: [clip_z, 0.0, 0.0, 0.0],
+                bounds_min: [
+                    self.metrics.center_x - self.metrics.plate_width * 0.5,
+                    self.metrics.center_y - self.metrics.plate_depth * 0.5,
+                    0.0,
+                    0.0,
+                ],
+                bounds_max: [
+                    self.metrics.center_x + self.metrics.plate_width * 0.5,
+                    self.metrics.center_y + self.metrics.plate_depth * 0.5,
+                    self.metrics.volume_height,
+                    0.0,
+                ],
+                // The stripe is on only when the model actually escapes the
+                // volume; the AABB test is on the CPU so a fitting model pays
+                // nothing in the shader.
+                stripe: {
+                    let outside = mesh.is_some_and(|mesh| {
+                        let centre = model.transform_point3(mesh.center);
+                        let half = glam::Vec3::from_array(mesh.size) * 0.5;
+                        let min = centre - half;
+                        let max = centre + half;
+                        min.x < self.metrics.center_x - self.metrics.plate_width * 0.5
+                            || max.x > self.metrics.center_x + self.metrics.plate_width * 0.5
+                            || min.y < self.metrics.center_y - self.metrics.plate_depth * 0.5
+                            || max.y > self.metrics.center_y + self.metrics.plate_depth * 0.5
+                            || min.z < 0.0
+                            || max.z > self.metrics.volume_height
+                    });
+                    let color = super::plate::out_of_bounds_stripe_color();
+                    [color[0], color[1], color[2], if outside { 1.0 } else { 0.0 }]
+                },
             }),
         );
         match gizmo {

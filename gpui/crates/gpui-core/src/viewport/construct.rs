@@ -455,7 +455,8 @@ impl Viewport {
             });
         let model_uniform = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("viewport model"),
-            size: 80,
+            // `ModelUniform`: matrix + clip + bounds_min/max + stripe.
+            size: std::mem::size_of::<super::uniforms::ModelUniform>() as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
