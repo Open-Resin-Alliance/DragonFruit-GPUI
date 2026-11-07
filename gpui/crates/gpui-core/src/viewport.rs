@@ -1878,6 +1878,25 @@ fn srgb_linear(hex: u32) -> [f32; 3] {
     [channel(16), channel(8), channel(0)]
 }
 
+/// Push a triangle, flipping the winding when its normal faces inward.
+fn push_tri(
+    out: &mut Vec<[f32; 6]>,
+    a: [f32; 3],
+    b: [f32; 3],
+    c: [f32; 3],
+    color: [f32; 3],
+    outward: [f32; 3],
+) {
+    let ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+    let ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+    let n = cross(ab, ac);
+    let dot = n[0] * outward[0] + n[1] * outward[1] + n[2] * outward[2];
+    let (b, c) = if dot < 0.0 { (c, b) } else { (b, c) };
+    for point in [a, b, c] {
+        out.push([point[0], point[1], point[2], color[0], color[1], color[2]]);
+    }
+}
+
 fn normalize(v: [f32; 3]) -> [f32; 3] {
     let length = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
     if length <= 1e-9 {
@@ -1914,9 +1933,13 @@ fn axis_arrows(metrics: &PlateMetrics) -> Vec<[f32; 6]> {
         ([0.0, 0.0, 1.0], 0x21428d, 0x74a3ff),
     ];
     let mut out: Vec<[f32; 6]> = Vec::new();
-    let mut push = |point: [f32; 3], color: [f32; 3]| {
-        out.push([point[0], point[1], point[2], color[0], color[1], color[2]]);
-    };
+    macro_rules! push {
+        ($point:expr, $color:expr) => {
+            out.push([
+                $point[0], $point[1], $point[2], $color[0], $color[1], $color[2],
+            ])
+        };
+    }
     for (dir, base_hex, tip_hex) in axes {
         let base = srgb_linear(base_hex);
         let tip = srgb_linear(tip_hex);
@@ -1970,28 +1993,33 @@ fn axis_arrows(metrics: &PlateMetrics) -> Vec<[f32; 6]> {
             let p11 = ring(length, shaft_radius, a1);
             let c0 = shade(0.0, length);
             let c1 = shade(length, length);
-            push(p00, c0);
-            push(p10, c1);
-            push(p11, c1);
-            push(p00, c0);
-            push(p11, c1);
-            push(p01, c0);
+            push!(p00, c0);
+            push!(p10, c1);
+            push!(p11, c1);
+            push!(p00, c0);
+            push!(p11, c1);
+            push!(p01, c0);
             // Bottom cap.
-            push(center_at(0.0), c0);
-            push(p01, c0);
-            push(p00, c0);
+            push!(center_at(0.0), c0);
+            push!(p01, c0);
+            push!(p00, c0);
             // The shaft's top cap is omitted: the cone's base cap sits on the
             // same plane, and two coplanar discs z-fight into a bright rim.
             // Cone: `ConeGeometry(headRadius, headLength, 12)`, base capped.
+            // The winding is verified against the outward radial direction so
+            // backface culling never eats a facet.
             let b0 = ring(length, head_radius, a0);
             let b1 = ring(length, head_radius, a1);
             let cone_base = shade(0.0, head_length);
-            push(b0, cone_base);
-            push(b1, cone_base);
-            push(tip_point, shade(head_length, head_length));
-            push(center_at(length), cone_base);
-            push(b1, cone_base);
-            push(b0, cone_base);
+            let cone_tip = shade(head_length, head_length);
+            let center = center_at(length);
+            let radial = normalize([
+                (b0[0] + b1[0]) * 0.5 - center[0],
+                (b0[1] + b1[1]) * 0.5 - center[1],
+                (b0[2] + b1[2]) * 0.5 - center[2],
+            ]);
+            push_tri(&mut out, b0, b1, tip_point, cone_tip, radial);
+            push_tri(&mut out, center, b1, b0, cone_base, [-dir[0], -dir[1], -dir[2]]);
         }
     }
     out

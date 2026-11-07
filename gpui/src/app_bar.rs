@@ -480,7 +480,6 @@ pub fn app_bar(state: AppBarState, entity: WeakEntity<DragonFruit>) -> impl Into
         div(
             relative, flex, flex_1, max_w_430, items_center, gap_10, pr_16, py_6,
             when(actions_disabled, opacity_45),
-            on_mouse_down = move |_, _, cx| cx.stop_propagation(),
         ) {
             { app_menu_button }
             // `h-6 w-px mx-0.5 shrink-0`, `color-mix(border-subtle,
@@ -493,10 +492,7 @@ pub fn app_bar(state: AppBarState, entity: WeakEntity<DragonFruit>) -> impl Into
 
     // ── Centre: the four workflow steps ─────────────────────────────────────
     let steps = ui! {
-        div(
-            relative, flex, min_w_0, flex_1, justify_center, px_8,
-            on_mouse_down = move |_, _, cx| cx.stop_propagation(),
-        ) {
+        div(relative, flex, min_w_0, flex_1, justify_center, px_8) {
             div(relative, w_full, when(actions_disabled, opacity_45)) {
                 div(flex, items_center, justify_center, gap_8) {
                     { step_button(Mode::Prepare, mode, false, actions_disabled, hide_badges, entity.clone()) }
@@ -555,10 +551,7 @@ pub fn app_bar(state: AppBarState, entity: WeakEntity<DragonFruit>) -> impl Into
     );
 
     let right = ui! {
-        div(
-            relative, flex, flex_1, max_w_430, items_center, justify_end, gap_8, pr_3,
-            on_mouse_down = move |_, _, cx| cx.stop_propagation(),
-        ) {
+        div(relative, flex, flex_1, max_w_430, items_center, justify_end, gap_8, pr_3) {
             div(flex, items_center, gap_8, when(actions_disabled, opacity_45)) {
                 { view_mode }
                 { overhang_button }
@@ -568,7 +561,7 @@ pub fn app_bar(state: AppBarState, entity: WeakEntity<DragonFruit>) -> impl Into
             div(ml_4, flex, items_center, gap_4) {
                 { window_button(
                     "caption-min",
-                    WindowControlArea::Min,
+                    CaptionAction::Min,
                     0xf4bf4f,
                     "minimize-2",
                     TintColor::Mix16,
@@ -576,13 +569,13 @@ pub fn app_bar(state: AppBarState, entity: WeakEntity<DragonFruit>) -> impl Into
                 ) }
                 { window_button(
                     "caption-max",
-                    WindowControlArea::Max,
+                    CaptionAction::Max,
                     0x40c463,
                     if maximized { "square" } else { "maximize-2" },
                     TintColor::Mix16,
                     0.86,
                 ) }
-                { window_button("caption-close", WindowControlArea::Close, 0xff6b6b, "x", TintColor::Mix18, 0.88) }
+                { window_button("caption-close", CaptionAction::Close, 0xff6b6b, "x", TintColor::Mix18, 0.88) }
             }
         }
     };
@@ -824,7 +817,10 @@ fn step_button(
     if disabled {
         step = step.cursor_not_allowed();
     } else {
-        step = step.cursor_pointer().on_click(move |_, _, cx| {
+        step = step
+            .cursor_pointer()
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(move |_, _, cx| {
             entity
                 .update(cx, |this, cx| {
                     this.mode = mode;
@@ -932,6 +928,7 @@ fn toolbar_button(
         button = button
             .cursor_pointer()
             .hover(move |style| style.bg(rgb(hover)))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(move |_, _, cx| on_click(cx));
     }
 
@@ -956,7 +953,7 @@ enum TintColor {
 /// surface-1 N%)` — 86% for minimize/maximize, 88% for close.
 fn window_button(
     id: &'static str,
-    area: WindowControlArea,
+    action: CaptionAction,
     tint: u32,
     icon_name: &'static str,
     color: TintColor,
@@ -977,7 +974,12 @@ fn window_button(
             rounded_6, border, cursor_pointer,
             border_color = rgb(mix(tint, BORDER_SUBTLE, 0.45)),
             bg = rgb(mix(tint, SURFACE_1, 1.0 - background_weight)),
-            window_control_area = area,
+            on_mouse_down = move |_, _, cx| cx.stop_propagation(),
+            on_click = move |_, window, _| match action {
+                CaptionAction::Min => window.minimize_window(),
+                CaptionAction::Max => toggle_maximize(window),
+                CaptionAction::Close => window.remove_window(),
+            },
         ) {
             { icon(icon_name, 16., foreground) }
         }
@@ -1627,6 +1629,45 @@ fn printer_menu(
                 .border_color(rgb(BORDER_SUBTLE))
                 .child(show_manager),
         )
+}
+
+#[derive(Clone, Copy)]
+enum CaptionAction {
+    Min,
+    Max,
+    Close,
+}
+
+fn toggle_maximize(window: &mut gpui::Window) {
+    if window.is_maximized() {
+        restore_window(window);
+    } else {
+        window.zoom_window();
+    }
+}
+
+#[cfg(windows)]
+fn restore_window(window: &gpui::Window) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+    let Ok(handle) = raw_window_handle::HasWindowHandle::window_handle(window) else {
+        return;
+    };
+    let RawWindowHandle::Win32(win32) = handle.as_raw() else {
+        return;
+    };
+    unsafe extern "system" {
+        fn ShowWindow(hwnd: isize, cmd: i32) -> i32;
+    }
+    const SW_RESTORE: i32 = 9;
+    unsafe {
+        ShowWindow(win32.hwnd.get(), SW_RESTORE);
+    }
+}
+
+#[cfg(not(windows))]
+fn restore_window(window: &gpui::Window) {
+    window.zoom_window();
 }
 
 /// Starts the native window move. GPUI's `start_window_move` is a no-op on
