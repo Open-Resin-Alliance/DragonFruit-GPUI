@@ -1289,8 +1289,11 @@ fn cube_hit(view: &CubeView, faces: &[FaceProjection], pointer: [f32; 2]) -> Opt
 
 /// `ZUpGizmoHelper`'s quarter-turn arrows: four triangles around the cube, each
 /// turning the camera 90° about the axis it points along.
-const QUARTER_W: f32 = 22.0;
-const QUARTER_H: f32 = 13.0;
+const QUARTER_W: f32 = 26.0;
+const QUARTER_H: f32 = 16.0;
+/// How far each arrow's centre sits from the widget centre. The cube is ~73% of
+/// the widget, so this leaves a small gap rather than a ring at the edge.
+const QUARTER_OFFSET: f32 = CUBE_WIDGET * 0.5 - 12.0;
 /// `ARROW_FADE_FULL_DEGREES` / `ARROW_FADE_ZERO_DEGREES`.
 const ARROW_FADE_FULL_COS: f32 = 0.99452;
 const ARROW_FADE_ZERO_COS: f32 = 0.93969;
@@ -1438,7 +1441,7 @@ pub fn view_cube(
             "cube-turn-up",
             "quarter-down",
             0.0,
-            -CUBE_WIDGET * 0.5 + 2.0,
+            -QUARTER_OFFSET,
             arrow_fade(&camera.borrow()),
             camera.clone(),
             entity.clone(),
@@ -1447,7 +1450,7 @@ pub fn view_cube(
             "cube-turn-down",
             "quarter-up",
             0.0,
-            CUBE_WIDGET * 0.5 - 2.0,
+            QUARTER_OFFSET,
             arrow_fade(&camera.borrow()),
             camera.clone(),
             entity.clone(),
@@ -1455,7 +1458,7 @@ pub fn view_cube(
         .child(quarter_arrow(
             "cube-turn-left",
             "quarter-right",
-            -CUBE_WIDGET * 0.5 + 2.0,
+            -QUARTER_OFFSET,
             0.0,
             arrow_fade(&camera.borrow()),
             camera.clone(),
@@ -1464,7 +1467,7 @@ pub fn view_cube(
         .child(quarter_arrow(
             "cube-turn-right",
             "quarter-left",
-            CUBE_WIDGET * 0.5 - 2.0,
+            QUARTER_OFFSET,
             0.0,
             arrow_fade(&camera.borrow()),
             camera.clone(),
@@ -1510,7 +1513,8 @@ pub fn view_cube(
             let bounds = bounds.clone();
             let camera = camera.clone();
             let hovered_face = hovered_face.clone();
-            move |event, window, _| {
+            let hover_entity = entity.clone();
+            move |event, _window, cx| {
                 let hit = bounds.get().and_then(|bounds| {
                     let size = bounds.size.width.0.min(bounds.size.height.0);
                     let center = [
@@ -1530,7 +1534,10 @@ pub fn view_cube(
                 });
                 if hovered_face.get() != hit {
                     hovered_face.set(hit);
-                    window.refresh();
+                    // `window.refresh()` repaints the tree but does not rebuild
+                    // it, so the gpu canvas kept its old hover; a notify makes the
+                    // cube's pass run again with the new face/edge/corner.
+                    hover_entity.update(cx, |_, cx| cx.notify()).ok();
                 }
             }
         })
