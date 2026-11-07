@@ -3077,6 +3077,11 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     }
     let n = normalize(in.normal);
     let view_dir = normalize(uniforms.camera_pos - in.world);
+    // The headlight is a directional light along the view axis (`ViewHeadlight`
+    // targets `position + viewDir * 100`). Using the uniform keeps the lighting
+    // stable when the ortho dolly carries the camera through the model, where
+    // `camera_pos - world` flips sign per fragment.
+    let head_dir = normalize(-uniforms.headlight_dir);
 
     let key_dir = normalize(vec3<f32>(0.0, 0.0, 1.0));
     let fill_dir = normalize(vec3<f32>(0.0, 0.0, -1.0));
@@ -3087,13 +3092,13 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let ambient = hemi * 0.25;
     let key = vec3<f32>(1.0) * max(dot(n, key_dir), 0.0) * 1.2;
     let fill = vec3<f32>(0.565, 0.655, 1.0) * max(dot(n, fill_dir), 0.0) * 0.168;
-    let head = vec3<f32>(1.0) * max(dot(n, view_dir), 0.0) * 1.0;
+    let head = vec3<f32>(1.0) * max(dot(n, head_dir), 0.0) * 1.0;
     let lighting = (ambient + key + fill + head) / 3.14159265;
 
     let base = uniforms.base_color;
     let f0 = mix(vec3<f32>(0.04), base, 0.02);
-    let spec = (specular(n, view_dir, key_dir, 0.55, f0) * 1.2 * max(dot(n, key_dir), 0.0)
-        + specular(n, view_dir, view_dir, 0.55, f0) * 1.0 * max(dot(n, view_dir), 0.0)) * 1.5;
+    let spec = (specular(n, view_dir, key_dir, 0.9, f0) * 1.2 * max(dot(n, key_dir), 0.0)
+        + specular(n, view_dir, head_dir, 0.9, f0) * 1.0 * max(dot(n, head_dir), 0.0)) * 1.5;
     let n_dot_l = max(dot(n, key_dir), 0.0);
     let cavity = pow(1.0 - n_dot_l, 1.35);
     let fake_ao = 1.0 - cavity * 0.2;
@@ -3267,6 +3272,11 @@ fn vs_main(@location(0) position: vec3<f32>, @location(1) normal: vec3<f32>) -> 
 fn fs_main(in: PlateOut) -> @location(0) vec4<f32> {
     let n = normalize(in.normal);
     let view_dir = normalize(uniforms.camera_pos - in.world);
+    // The headlight is a directional light along the view axis (`ViewHeadlight`
+    // targets `position + viewDir * 100`). Using the uniform keeps the lighting
+    // stable when the ortho dolly carries the camera through the model, where
+    // `camera_pos - world` flips sign per fragment.
+    let head_dir = normalize(-uniforms.headlight_dir);
 
     // `meshStandardMaterial` with the defaults: roughness 1, metalness 0, so F0
     // is the dielectric 0.04 and the diffuse term carries the whole albedo.
