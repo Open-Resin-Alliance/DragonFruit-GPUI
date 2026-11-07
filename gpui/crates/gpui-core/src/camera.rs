@@ -203,20 +203,24 @@ impl Camera {
         // OrbitControls applies the whole pending delta, then decays it.
         let mut moving = false;
         const LIMIT: f32 = std::f32::consts::FRAC_PI_2 - 0.001;
+        // OrbitControls with damping applies `dampingFactor * delta` per frame
+        // and decays the delta, so the geometric series sums to the input. The
+        // whole delta per frame would multiply the motion by 1/damping.
         if self.pending_yaw.abs() > 1e-5 || self.pending_pitch.abs() > 1e-5 {
-            self.yaw += self.pending_yaw;
-            self.pitch = (self.pitch + self.pending_pitch).clamp(-LIMIT, LIMIT);
+            self.yaw += self.pending_yaw * DAMPING;
+            self.pitch = (self.pitch + self.pending_pitch * DAMPING).clamp(-LIMIT, LIMIT);
             self.pending_yaw *= 1.0 - DAMPING;
             self.pending_pitch *= 1.0 - DAMPING;
             moving = true;
         }
         if self.pending_zoom.abs() > 1e-5 {
-            self.distance = (self.distance * 0.95f32.powf(self.pending_zoom)).clamp(0.01, 1.0e6);
+            self.distance = (self.distance * 0.95f32.powf(self.pending_zoom * DAMPING))
+                .clamp(0.01, 1.0e6);
             self.pending_zoom *= 1.0 - DAMPING;
             moving = true;
         }
         if self.pending_pan.length_squared() > 1e-8 {
-            self.target += self.pending_pan;
+            self.target += self.pending_pan * DAMPING;
             self.pending_pan *= 1.0 - DAMPING;
             moving = true;
         }
