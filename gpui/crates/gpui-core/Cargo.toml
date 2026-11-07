@@ -1,0 +1,20 @@
+[package]
+name = "gpui-core"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+gpui = { package = "bite-gpui", version = "1.25", default-features = false, features = ["platform"] }
+gpui_interop = { version = "0.2", features = ["gpui", "wgpu"] }
+wgpu = "30.0.1"
+bytemuck = { version = "1", features = ["derive"] }
+glam = "0.30"
+anyhow = "1"
+raw-window-handle = "0.6"
+rfd = "0.15"
+dragonfruit-mesh-core = { path = "../../../rust/dragonfruit-mesh-core" }
+resvg = "0.45"
+fontdue = "0.9"
+declarative-gpui = "0.3"
+winreg = "0.55"

@@ -1,0 +1,11 @@
+[package]
+name = "gpui-app-bar"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+gpui = { package = "bite-gpui", version = "1.25", default-features = false, features = ["platform"] }
+declarative-gpui = "0.3"
+gpui-core = { path = "../gpui-core" }
+gpui-ui = { path = "../gpui-ui" }

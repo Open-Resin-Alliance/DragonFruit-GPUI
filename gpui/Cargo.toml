@@ -8,6 +8,9 @@ publish = false
 # `gpui_interop` is published against it), a zero-copy wgpu viewport, and an
 # STL loader. The UI is raw GPUI, matching the DragonFruit tokens.
 
+[workspace]
+members = ["crates/*"]
+
 [dependencies]
 gpui = { package = "bite-gpui", version = "1.25", default-features = false, features = ["platform"] }
 gpui_interop = { version = "0.2", features = ["gpui", "wgpu"] }
@@ -22,6 +25,7 @@ dragonfruit-mesh-core = { path = "../rust/dragonfruit-mesh-core" }
 resvg = "0.45"
 fontdue = "0.9"
 declarative-gpui = "0.3"
+winreg = "0.55"
 
 [profile.dev]
 opt-level = 1

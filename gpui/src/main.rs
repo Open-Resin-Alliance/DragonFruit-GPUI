@@ -1,106 +1,179 @@
-//! DragonFruit's GPUI frontend, first slice: a 3D viewport with STL loading.
+//! DragonFruit's GPUI frontend: the editor shell around the 3D viewport.
+//!
+//! # PORT DEVIATIONS
+//!
+//! Diffed against `src/app/page.tsx`, `src/components/layout/TopBar.tsx`,
+//! `src/components/layout/FloatingPanelStack.tsx`, `src/hotkeys/hotkeyConfig.ts`
+//! and the hotkey hooks. Everything below is a gap the shell still carries.
+//!
+//! **Not ported (components the shell used to invent or omit)**
+//! * `EmptySceneState` — with no model the source shows the empty-scene panel
+//!   (load/import buttons, recents, onboarding). The shell renders the bare
+//!   viewport instead; the only way to load a model is the app menu's
+//!   `Import mesh…`, which the source also offers.
+//! * `ModelStatsCard` — the bottom-left stats card (dimensions, volume, print
+//!   time, resin) is not ported. The old bottom-left status text was invented
+//!   and is gone; the source has no status line.
+//! * `PrintingPreviewPane` — printing mode is a two-column split in the source
+//!   (scene left, layer preview right). The shell keeps the full-width scene.
+//! * `NotificationStack` / `SystemNotificationStack` — only the scene-import
+//!   error toast is reproduced (see below); save, history, export, orientation
+//!   and system toasts have no trigger in this build.
+//! * `PrintingModals`, `SceneFileModals`, `SceneMaterialReassignModal`,
+//!   `ModifierModals`, `ManifoldWarningModal`, `TetrahedralRemeshConfirmModal`,
+//!   `ShrinkWrapConfirmModal`, `MeshRepairModals`, the two `StructuredDialogModal`s
+//!   (printer/scene conflict, plate trash), `DiagnosticsModals`,
+//!   `FirstRunOnboarding`, `EditorContextMenu`, `OrganicCutOverlay`,
+//!   `RenderProfilerOverlay` — none are ported.
+//! * The Auto Supports settings dialog (`AutoSupportSettingsBody`, a 1120px
+//!   full-screen dialog) is not ported. The small modal that used to live here
+//!   was invented and has been removed; `panel_content`'s gear still sets
+//!   `show_support_settings`, which nothing renders.
+//! * Prepare's tool panels (`TransformControls`, `AutoRotationPanel`,
+//!   `MeshSmoothingSettingsPanel`, `OrganicCutPanel`, `ArrangePanel`,
+//!   `DuplicatePanel`) and Support's `IslandsPanel`, `SupportSidebar`,
+//!   `HollowingPanel`, `HolePunchPanel` are not mounted. `transform_panel.rs`
+//!   exists but its callbacks take no `cx`, so the shell cannot apply them.
+//! * Export's `SlicingPanel` is not mounted (no slicer).
+//!
+//! **Panel set**
+//! * Models is shown only in Prepare/Support, matching `PreparePanelStack` /
+//!   Support's stack; Export and Printing have no Models panel.
+//! * The panel id is `models` in both modes. The source uses
+//!   `prepare-models` / `support-models` with independent placement, but the
+//!   rail's Models toggle (`rail.rs`) is hard-wired to the `models` id here.
+//! * Support's right-hand panel follows the rail tool: only `Automatic`
+//!   (index 2) has a ported body (`Auto Supports (Beta)`). The other tools
+//!   leave the dock empty because their panels are not ported.
+//! * `panel_stack` derives the rail / layer-slider insets from the panel set
+//!   (`PanelStackInsets::for_panels`). The source also zeroes the left inset
+//!   when the rail is horizontal; the rail's layout lives in `rail.rs` and is
+//!   not readable here, so the column width is always assumed.
+//!
+//! **Hotkeys** (`DEFAULT_KEYBINDINGS`, edge-triggered like `useActionActive`)
+//! * Bound: `CAMERA.TOGGLE_PROJECTION` (o), `CAMERA.FOCUS_PICK` (f),
+//!   `CANVAS.TOOL_SELECT` (q), `TOOL_MODIFY` / `TOOL_MODIFY_LOCAL` (m /
+//!   shift+m), `TOOL_SMOOTH` (s), `TOOL_ARRANGE` (a), `TOOL_DUPLICATE` (d) —
+//!   the canvas tools only in Prepare with a model, as `usePrepareTransformHotkeys`
+//!   gates them — `GLOBAL.DELETE` (Backspace, plus the fixed Delete key),
+//!   `NAVIGATION.LAYER_UP` / `LAYER_DOWN` (Up/Down, and W/S in printing).
+//! * Escape closes the menus and the settings dialog (`useEscapeToClose`).
+//! * Not bound because their features are absent: `SUPPORTS.*` hold actions,
+//!   `PRESETS.SLOT_1..6` (no camera presets), `GLOBAL.UNDO/REDO/SAVE/SAVE_AS`
+//!   (no history or scene files), `DEBUG.*`, `HOLE_PUNCH.*`, `CUT.*`,
+//!   `CAMERA.INTERIOR_VIEW` (the flag lives in `rail.rs`),
+//!   `CANVAS.SELECT_ALL/COPY/PASTE`, `TOOL_MODIFY_LOCAL`'s local-space flag
+//!   (no field), and `TOOL_ARRANGE`'s "arrange all when already active".
+//! * The previous 1–4 mode switch and `R` reset were invented; the registry
+//!   has no mode-switch binding (1–6 are camera presets), so mode changes are
+//!   click-only.
+//! * `FOCUS_PICK` has no hovered-point raycast, so it frames the whole model
+//!   (`Camera::fit`'s distance) rather than the point under the cursor.
+//! * Hotkeys are suppressed while the settings dialog is open. The source
+//!   suppresses only when the event target is editable; GPUI exposes no
+//!   "focused input" query, so the whole dialog is treated as owning the keys.
+//!
+//! **Drag and drop**
+//! * External file drops are wired for Prepare only, matching
+//!   `handlePrepareDrop`. Supported names are `.stl`, `.obj`, `.3mf`, `.voxl`,
+//!   `.lys` (`PREPARE_DROP_EXTENSIONS`); the overlay strings and colours come
+//!   from `page.tsx`.
+//! * Only STL can actually load (`stl.rs`). OBJ/3MF importers are not ported,
+//!   so those drops are accepted by the overlay and then do nothing.
+//! * Scene files (`.voxl`, `.lys`) have no importer, so they raise the
+//!   source's `Unsupported scene file: {name}` toast
+//!   (`reportUnsupportedSceneFile`).
+//! * The source tracks drag depth and hides the overlay when the pointer leaves
+//!   `#scene-root`; GPUI dispatches `on_drag_move` for the whole window, so the
+//!   overlay follows the canvas bounds only.
+//! * `backdrop-filter: blur(1px)` has no GPUI equivalent.
+//!
+//! **Layers / printing**
+//! * `layer` is a layer index in `0..=numLayers`, with `numLayers =
+//!   ceil(bboxHeight / 0.05mm)` — `useSlicingManager`'s uncontrolled 50µm
+//!   default (`layerHeightMicron = 50`). The slider is `min 0, max numLayers,
+//!   step 1`, as `CrossSliderPanel` passes it.
+//! * The cross-section clip is the source's upper plane
+//!   (`zMin + layer*layerHeight + 1e-6`, none at layer 0 or at the top layer)
+//!   and is gated by `cross_section`, in every mode, as `sceneClipStore` does.
+//!   The lower plane has no viewport parameter (`viewport.rs` takes one
+//!   `clip_z`), so the lower thumb is display-only.
+//! * The layer slider is hidden in Printing, as `page.tsx` hides
+//!   `CrossSliderPanel` there; the source's printing scrubber lives in the
+//!   unported `PrintingPreviewPane`.
+//! * Printing is locked by `app_bar` because `has_printing_data` is `false`
+//!   (no slicing pipeline), exactly as a fresh source session locks it; the
+//!   printing panel and clip branch are therefore unreachable until a slicer
+//!   exists.
+//! * `hasSlicedPlate` / `isActiveSliceStale` guards from `handleModeChange`
+//!   cannot be evaluated; the shell enforces only the "no models → Prepare"
+//!   guard.
+//!
+//! **Text / chrome**
+//! * Geist is installed per-user by `fonts::ensure_geist` (the old
+//!   `FR_PRIVATE` registration was not guaranteed to reach DirectWrite), and
+//!   text renders with `TextRenderingMode::Subpixel`; the window background is
+//!   opaque.
+//! * CSS transitions, keyframes and backdrop blur have no GPUI equivalent.
 
 mod app_bar;
+mod arrange_panels;
+mod auto_support_settings;
 mod camera;
+mod empty_scene;
+mod fonts;
 mod icons;
+mod notifications;
+mod organic_cut_panel;
 mod overlays;
+mod panel_content;
+mod panel_fields;
 mod panels;
+mod plate_widgets;
+mod prepare_stack;
+mod printing_preview;
 mod rail;
+mod settings;
+mod smoothing_panel;
 mod stl;
+mod support_panels;
 mod theme;
+mod tool_panels;
+mod transform_panel;
 mod ui;
 mod viewport;
 mod window;
 
 use std::cell::{Cell, RefCell};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Duration;
 
 use camera::Camera;
 use gpui::{
-    App, Bounds, Context, Corners, FocusHandle, FontWeight, IntoElement, MouseButton, Render,
-    ScrollDelta, TitlebarOptions, WeakEntity, Window, WindowBounds, WindowControlArea,
-    WindowOptions, div, gpu_canvas, img, linear_color_stop, linear_gradient, prelude::*, px, rgb,
-    rgba, size, svg,
+    App, Bounds, Context, Corners, ExternalPaths, FocusHandle, FontWeight, IntoElement,
+    MouseButton, Render, ScrollDelta, TextRenderingMode, TitlebarOptions, Window,
+    WindowBounds, WindowOptions, div, gpu_canvas, prelude::*, px, relative, rgb, rgba, size,
 };
 use gpui_interop::attach;
 use gpui_wgpu::{ImportedTextureExt as _, WgpuRenderer};
 use viewport::Viewport;
 
-// DragonFruit dark-theme tokens.
-const BACKGROUND: u32 = 0x0b0f14;
-const SURFACE_0: u32 = 0x111216;
-const BORDER_SUBTLE: u32 = 0x272a33;
-const TEXT_STRONG: u32 = 0xf8f8fb;
-const TEXT_MUTED: u32 = 0xc3c7cf;
-const PRIMARY: u32 = 0xc11f61;
-const PRIMARY_HOVER: u32 = 0xd81d67;
-const ACCENT_CONTRAST: u32 = 0xfff6ff;
-const SURFACE_1: u32 = 0x1a1b21;
-const SURFACE_2: u32 = 0x23252e;
-const ACCENT: u32 = 0xec2a77;
+use crate::theme::*;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum PanelDock {
-    Left,
-    Right,
-    Float,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum PanelKind {
-    Models,
-    Supports,
-    Export,
-    Printing,
-    Info,
-}
-
-#[derive(Clone, Copy)]
-struct PanelDef {
-    id: &'static str,
-    title: &'static str,
-    kind: PanelKind,
-    dock: PanelDock,
-}
-
-fn panel_defs(mode: Mode) -> Vec<PanelDef> {
-    let mut panels = vec![PanelDef {
-        id: "models",
-        title: "Models",
-        kind: PanelKind::Models,
-        dock: PanelDock::Left,
-    }];
-    match mode {
-        Mode::Prepare => {}
-        Mode::Support => panels.push(PanelDef {
-            id: "supports",
-            title: "Auto Supports (Beta)",
-            kind: PanelKind::Supports,
-            dock: PanelDock::Left,
-        }),
-        Mode::Export => panels.push(PanelDef {
-            id: "export",
-            title: "Export",
-            kind: PanelKind::Export,
-            dock: PanelDock::Left,
-        }),
-        Mode::Printing => panels.push(PanelDef {
-            id: "printing",
-            title: "Printing",
-            kind: PanelKind::Printing,
-            dock: PanelDock::Left,
-        }),
-    }
-    panels.push(PanelDef {
-        id: "info",
-        title: "Model info",
-        kind: PanelKind::Info,
-        dock: PanelDock::Right,
-    });
-    panels
-}
+/// `useSlicingManager`'s uncontrolled default: 50 microns.
+const LAYER_HEIGHT_MM: f32 = 0.05;
+/// The scene clip's epsilon from `publishClip`.
+const CLIP_EPSILON_MM: f32 = 1e-6;
+/// `PREPARE_DROP_EXTENSIONS` in `fileHandling.ts` (built-in plugin types).
+const PREPARE_DROP_EXTENSIONS: [&str; 5] = ["stl", "obj", "3mf", "voxl", "lys"];
+/// `sceneFileExtensionLabelsValue` for the built-in scene types.
+const SCENE_FILE_LABELS: &str = "VOXL, LYS";
+/// `ToastViewport offset="1.25rem"`.
+const TOAST_OFFSET: f32 = 20.0;
+/// The source's default toast duration (`emitSceneImportReport`).
+const TOAST_DURATION_MS: u64 = 4200;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Mode {
@@ -120,15 +193,6 @@ impl Mode {
         }
     }
 
-    fn hint(self) -> &'static str {
-        match self {
-            Mode::Prepare => "Arrange model and transforms",
-            Mode::Support => "Build and tune supports",
-            Mode::Export => "Finalize and export output",
-            Mode::Printing => "Inspect sliced layers before printing",
-        }
-    }
-
     fn step(self) -> u32 {
         match self {
             Mode::Prepare => 1,
@@ -139,12 +203,25 @@ impl Mode {
     }
 }
 
+/// One entry of the editor's notification stack. The source keeps a toast per
+/// kind; this build only raises the scene-import report (and export, once
+/// `panel_content` calls [`DragonFruit::show_toast`]).
+#[derive(Clone)]
+pub struct Toast {
+    pub text: String,
+    pub tone: ui::ToastTone,
+    id: u64,
+}
+
 struct DragonFruit {
     mesh: Option<Arc<stl::MeshData>>,
     camera: Rc<RefCell<Camera>>,
     viewport: Rc<RefCell<Option<Viewport>>>,
     drag: Rc<Cell<Option<MouseButton>>>,
     last: Rc<Cell<(f32, f32)>>,
+    /// Written by `app_bar` (New scene) and `panel_content` (export). The
+    /// source has no status line, so the shell does not render it.
+    #[allow(dead_code)]
     status: String,
     loading: bool,
     selected: Rc<Cell<bool>>,
@@ -152,19 +229,19 @@ struct DragonFruit {
     smoke_done: Rc<Cell<bool>>,
     mode: Mode,
     show_settings: bool,
-    collapsed: std::collections::HashMap<&'static str, bool>,
+    layout: panels::PanelLayout,
+    /// Upper layer index, `0..=num_layers`.
     layer: f32,
+    /// Lower layer index (the second thumb).
+    lower_layer: f32,
+    /// The cross-section switch (`crossSectionEnabled`).
+    cross_section: bool,
+    num_layers: u32,
     supports: Rc<RefCell<Vec<[f32; 3]>>>,
     show_grid: bool,
     show_plate: bool,
     show_box: bool,
     overhang_view: bool,
-    left_width: f32,
-    right_width: f32,
-    dock_resize: Rc<Cell<Option<(bool, f32, f32)>>>,
-    panel_dock: std::collections::HashMap<&'static str, PanelDock>,
-    floating_pos: std::collections::HashMap<&'static str, (f32, f32)>,
-    panel_menu: Option<&'static str>,
     logo: Option<PathBuf>,
     translate: [f32; 3],
     rotate_z: f32,
@@ -174,12 +251,35 @@ struct DragonFruit {
     focus: FocusHandle,
     focused: bool,
     show_printer_menu: bool,
-    show_help: bool,
+    /// Set by `panel_content`'s Auto Supports gear; the real dialog is not
+    /// ported, so nothing renders it.
+    #[allow(dead_code)]
     show_support_settings: bool,
     show_app_menu: bool,
+    /// `TopBar`'s view-mode dropdown (`SelectDropdown` under the trigger).
+    show_view_menu: bool,
+    /// `viewType` — the persisted mesh shader the dropdown shows.
+    view_type: app_bar::MeshShaderType,
+    /// Opened by the top bar's monitor button; the printing monitor modal is
+    /// not ported.
+    #[allow(dead_code)]
+    show_monitor: bool,
+    /// The fleet unit picked in the printer menu; the monitor modal is not
+    /// ported.
+    #[allow(dead_code)]
+    select_fleet_unit: Option<String>,
     settings_tab: usize,
     active_tool: usize,
     window_width: f32,
+    /// An OS file drag is over the canvas (`isPrepareDragActive`).
+    drag_active: bool,
+    /// The dragged paths contain no supported extension
+    /// (`isPrepareDragUnsupported`).
+    drag_unsupported: bool,
+    toast: Option<Toast>,
+    toast_seq: u64,
+    /// The window scale factor is logged on the first frame.
+    scale_logged: bool,
 }
 
 impl DragonFruit {
@@ -196,26 +296,23 @@ impl DragonFruit {
             viewport: Rc::new(RefCell::new(None)),
             drag: Rc::new(Cell::new(None)),
             last: Rc::new(Cell::new((0.0, 0.0))),
-            status: "No model loaded".to_owned(),
+            status: String::new(),
             loading: false,
             selected: Rc::new(Cell::new(true)),
             smoke,
             smoke_done: Rc::new(Cell::new(false)),
             mode: Mode::Prepare,
             show_settings: false,
-            collapsed: std::collections::HashMap::new(),
+            layout: panels::PanelLayout::new(),
             layer: 0.0,
+            lower_layer: 0.0,
+            cross_section: true,
+            num_layers: 0,
             supports: Rc::new(RefCell::new(Vec::new())),
             show_grid: true,
             show_plate: true,
             show_box: true,
             overhang_view: false,
-            left_width: 320.0,
-            right_width: 320.0,
-            dock_resize: Rc::new(Cell::new(None)),
-            panel_dock: std::collections::HashMap::new(),
-            floating_pos: std::collections::HashMap::new(),
-            panel_menu: None,
             logo: rasterize_logo(),
             translate: [0.0; 3],
             rotate_z: 0.0,
@@ -225,17 +322,26 @@ impl DragonFruit {
             focus: cx.focus_handle(),
             focused: false,
             show_printer_menu: false,
-            show_help: false,
             show_support_settings: false,
             show_app_menu: false,
+            show_view_menu: false,
+            view_type: app_bar::MeshShaderType::SoftClay,
+            show_monitor: false,
+            select_fleet_unit: None,
             settings_tab: 0,
             active_tool: 0,
             window_width: 0.0,
+            drag_active: false,
+            drag_unsupported: false,
+            toast: None,
+            toast_seq: 0,
+            scale_logged: false,
         };
         if let Some(path) = path {
             match stl::load_stl(&path) {
                 Ok(mesh) => app.set_mesh(mesh),
-                Err(error) => app.status = format!("{error:#}"),
+                // The source logs a failed mesh load to the console only.
+                Err(error) => eprintln!("{error:#}"),
             }
         }
         app
@@ -244,20 +350,18 @@ impl DragonFruit {
     fn set_mesh(&mut self, mesh: stl::MeshData) {
         let mesh = Arc::new(mesh);
         *self.camera.borrow_mut() = Camera::fit(mesh.center, mesh.radius.max(110.0));
-        self.status = format!("{} · {} triangles", mesh.name, mesh.triangles);
-        eprintln!("loaded {}", self.status);
+        // `useSlicingManager`: `numLayers = ceil(heightMm / layerHeightMm)`.
+        self.num_layers = (mesh.size[2] / LAYER_HEIGHT_MM).ceil().max(0.0) as u32;
+        self.layer = 0.0;
+        self.lower_layer = 0.0;
+        self.selected.set(true);
         self.mesh = Some(mesh);
     }
 
-    fn open_stl(&mut self, cx: &mut Context<Self>) {
-        let Some(path) = rfd::FileDialog::new()
-            .add_filter("STL", &["stl"])
-            .pick_file()
-        else {
-            return;
-        };
+    /// Load a mesh file off the UI thread. Mirrors `open_stl`'s background
+    /// load; the source's blocking import overlay is not ported.
+    fn load_path(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         self.loading = true;
-        self.status = format!("Loading {}…", path.display());
         cx.notify();
         cx.spawn(async move |this, cx| {
             let result = cx
@@ -267,7 +371,7 @@ impl DragonFruit {
             this.update(cx, |this, cx| {
                 match result {
                     Ok(mesh) => this.set_mesh(mesh),
-                    Err(error) => this.status = format!("{error:#}"),
+                    Err(error) => eprintln!("{error:#}"),
                 }
                 this.loading = false;
                 cx.notify();
@@ -276,10 +380,101 @@ impl DragonFruit {
         })
         .detach();
     }
+
+    fn open_stl(&mut self, cx: &mut Context<Self>) {
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("STL", &["stl"])
+            .pick_file()
+        else {
+            return;
+        };
+        self.load_path(path, cx);
+    }
+
+    /// `GLOBAL.DELETE` / the fixed `Delete` key: remove the selected model.
+    /// The source deletes the selection (or the active model) through the
+    /// history store; this build has no undo, so the removal is final.
+    fn delete_model(&mut self) {
+        self.mesh = None;
+        self.supports.borrow_mut().clear();
+        self.selected.set(false);
+        self.num_layers = 0;
+        self.layer = 0.0;
+        self.lower_layer = 0.0;
+        self.mode = Mode::Prepare;
+    }
+
+    /// Raise a toast for `TOAST_DURATION_MS`, replacing the current one.
+    fn show_toast(&mut self, text: String, tone: ui::ToastTone, cx: &mut Context<Self>) {
+        self.toast_seq += 1;
+        let id = self.toast_seq;
+        self.toast = Some(Toast { text, tone, id });
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(TOAST_DURATION_MS))
+                .await;
+            this.update(cx, |this, cx| {
+                if this.toast.as_ref().is_some_and(|toast| toast.id == id) {
+                    this.toast = None;
+                    cx.notify();
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// `handleDroppedPrepareFiles`: scene files take the import path, mesh
+    /// files the load path.
+    fn handle_dropped_paths(&mut self, paths: Vec<PathBuf>, cx: &mut Context<Self>) {
+        if self.mode != Mode::Prepare {
+            return;
+        }
+        let supported: Vec<PathBuf> = paths
+            .into_iter()
+            .filter(|path| is_supported_prepare_drop(path))
+            .collect();
+        if supported.is_empty() {
+            return;
+        }
+
+        if let Some(scene) = supported.iter().find(|path| is_scene_file(path)) {
+            // No scene importer exists in this build, so the source's
+            // `reportUnsupportedSceneFile` is the truthful outcome.
+            let name = scene
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or_default()
+                .to_owned();
+            self.show_toast(
+                format!("Unsupported scene file: {name}"),
+                ui::ToastTone::Error,
+                cx,
+            );
+            return;
+        }
+
+        if let Some(stl) = supported
+            .iter()
+            .find(|path| file_extension(path) == "stl")
+        {
+            self.load_path(stl.clone(), cx);
+        }
+    }
 }
 
 impl Render for DragonFruit {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // `handleModeChange`: an empty scene can only be Prepare.
+        if self.mesh.is_none() && self.mode != Mode::Prepare {
+            self.mode = Mode::Prepare;
+        }
+
+        if !self.scale_logged {
+            self.scale_logged = true;
+            eprintln!("window scale factor: {}", window.scale_factor());
+        }
+
         let mesh = self.mesh.clone();
         let click_mesh = self.mesh.clone();
         let supports = self.supports.clone();
@@ -288,22 +483,29 @@ impl Render for DragonFruit {
             glam::Quat::from_rotation_z(self.rotate_z),
             glam::Vec3::from_array(self.translate),
         );
-        let clip_z = if self.mode == Mode::Printing {
-            self.mesh
-                .as_ref()
-                .map(|mesh| {
-                    mesh.center.z - mesh.size[2] * 0.5 + self.layer * mesh.size[2]
-                })
-                .unwrap_or(f32::INFINITY)
+        // `publishClip`'s upper plane: none at layer 0 or at the top layer,
+        // parked (infinite) when the cross-section switch is closed.
+        let clip_z = if self.cross_section && self.mesh.is_some() {
+            let upper = self.layer;
+            let max_layer = self.num_layers as f32;
+            if upper <= 0.0 || upper >= max_layer {
+                f32::INFINITY
+            } else {
+                self.mesh
+                    .as_ref()
+                    .map(|mesh| {
+                        let z_min = mesh.center.z - mesh.size[2] * 0.5;
+                        z_min + upper * LAYER_HEIGHT_MM + CLIP_EPSILON_MM
+                    })
+                    .unwrap_or(f32::INFINITY)
+            }
         } else {
             f32::INFINITY
         };
-        let gizmo = if self.active_tool < 3 {
-            self.mesh.as_ref().map(|mesh| {
-                model_matrix
-                    .transform_point3(mesh.center)
-                    .to_array()
-            })
+        let gizmo = if self.mode == Mode::Prepare && self.active_tool == 1 {
+            self.mesh
+                .as_ref()
+                .map(|mesh| model_matrix.transform_point3(mesh.center).to_array())
         } else {
             None
         };
@@ -317,13 +519,10 @@ impl Render for DragonFruit {
         let drag = self.drag.clone();
         let last = self.last.clone();
         let smoke = self.smoke;
-        let selected = self.selected.get();
         let selected_state = self.selected.clone();
         let smoke_done = self.smoke_done.clone();
-        let status = self.status.clone();
         let triangles = self.mesh.as_ref().map(|mesh| mesh.triangles).unwrap_or(0);
         let loading = self.loading;
-        let orthographic = self.camera.borrow().orthographic;
         let entity = cx.entity().downgrade();
 
         let canvas_camera = camera.clone();
@@ -485,6 +684,65 @@ impl Render for DragonFruit {
                 camera.borrow_mut().zoom(delta);
                 entity.update(cx, |_, cx| cx.notify()).ok();
             }
+        })
+        // `#scene-root`'s drag handlers: the overlay tracks the canvas bounds.
+        .on_drag_move::<ExternalPaths>({
+            let entity = entity.clone();
+            move |event, _window, cx| {
+                let position = event.event.position;
+                let bounds = event.bounds;
+                let inside = position.x >= bounds.origin.x
+                    && position.x <= bounds.origin.x + bounds.size.width
+                    && position.y >= bounds.origin.y
+                    && position.y <= bounds.origin.y + bounds.size.height;
+                let unsupported = !event
+                    .drag(cx)
+                    .0
+                    .iter()
+                    .any(|path| is_supported_prepare_drop(path));
+                entity
+                    .update(cx, |this, cx| {
+                        if this.mode != Mode::Prepare {
+                            return;
+                        }
+                        let changed =
+                            this.drag_active != inside || this.drag_unsupported != unsupported;
+                        this.drag_active = inside;
+                        this.drag_unsupported = unsupported;
+                        if changed {
+                            cx.notify();
+                        }
+                    })
+                    .ok();
+            }
+        })
+        .on_file_drop_exit({
+            let entity = entity.clone();
+            move |_, _, cx| {
+                entity
+                    .update(cx, |this, cx| {
+                        if this.drag_active || this.drag_unsupported {
+                            this.drag_active = false;
+                            this.drag_unsupported = false;
+                            cx.notify();
+                        }
+                    })
+                    .ok();
+            }
+        })
+        .on_drop::<ExternalPaths>({
+            let entity = entity.clone();
+            move |paths, _window, cx| {
+                let paths: Vec<PathBuf> = paths.0.iter().cloned().collect();
+                entity
+                    .update(cx, |this, cx| {
+                        this.drag_active = false;
+                        this.drag_unsupported = false;
+                        this.handle_dropped_paths(paths, cx);
+                        cx.notify();
+                    })
+                    .ok();
+            }
         });
 
         let mesh_name = self
@@ -494,12 +752,8 @@ impl Render for DragonFruit {
             .unwrap_or_else(|| "No model".to_owned());
         let mode = self.mode;
         let show_settings = self.show_settings;
+        let has_models = self.mesh.is_some();
         let layer = self.layer;
-        let (size, volume) = self
-            .mesh
-            .as_ref()
-            .map(|mesh| (mesh.size, mesh.volume))
-            .unwrap_or(([0.0; 3], 0.0));
 
         self.window_width = window.viewport_size().width.0;
         if !self.focused {
@@ -512,1993 +766,367 @@ impl Render for DragonFruit {
             .relative()
             .font_family("Geist")
             .text_size(px(14.))
+            .line_height(relative(1.45))
             .bg(rgb(BACKGROUND))
             .track_focus(&self.focus)
-            .on_mouse_move({
-                let dock_resize = self.dock_resize.clone();
-                let entity = entity.clone();
-                move |event, _, cx| {
-                    let Some((is_left, start_x, start_width)) = dock_resize.get() else {
-                        return;
-                    };
-                    let delta = event.position.x.0 - start_x;
-                    let width = (start_width + if is_left { delta } else { -delta })
-                        .clamp(200.0, 520.0);
-                    entity
-                        .update(cx, |this, cx| {
-                            if is_left {
-                                this.left_width = width;
-                            } else {
-                                this.right_width = width;
-                            }
-                            cx.notify();
-                        })
-                        .ok();
-                }
-            })
-            .on_mouse_up(MouseButton::Left, {
-                let dock_resize = self.dock_resize.clone();
-                move |_, _, _| dock_resize.set(None)
-            })
             .on_key_down(move |event, _window, cx| {
-                let key = event.keystroke.key.as_str();
-                let next_mode = match key {
-                    "1" => Some(Mode::Prepare),
-                    "2" => Some(Mode::Support),
-                    "3" => Some(Mode::Export),
-                    "4" => Some(Mode::Printing),
-                    _ => None,
-                };
-                let escape = key == "escape";
-                let reset = key == "r";
-                let transform = matches!(
-                    key,
-                    "left" | "right" | "up" | "down" | "pageup" | "pagedown"
-                );
-                if next_mode.is_none() && !escape && !reset && !transform {
-                    return;
-                }
+                let key = event.keystroke.key.to_ascii_lowercase();
+                let modifiers = event.keystroke.modifiers;
+                let primary = modifiers.control || modifiers.platform;
+                let alt = modifiers.alt;
+                let shift = modifiers.shift;
+                let repeat = event.is_held;
                 key_entity
                     .update(cx, |this, cx| {
-                        if escape {
-                            this.show_settings = false;
+                        let mut changed = false;
+
+                        // `useEscapeToClose`: Escape closes the dialogs and menus.
+                        if key == "escape" {
+                            if this.show_settings {
+                                this.show_settings = false;
+                                changed = true;
+                            }
+                            if this.show_app_menu {
+                                this.show_app_menu = false;
+                                changed = true;
+                            }
+                            if this.show_printer_menu {
+                                this.show_printer_menu = false;
+                                changed = true;
+                            }
+                            if this.show_view_menu {
+                                this.show_view_menu = false;
+                                changed = true;
+                            }
+                            if changed {
+                                cx.notify();
+                            }
+                            return;
                         }
-                        if reset {
-                            this.translate = [0.0; 3];
-                            this.rotate_z = 0.0;
-                            this.scale = 1.0;
+
+                        // The settings dialog owns the keyboard while open; GPUI
+                        // has no "focused input" query to test instead.
+                        if this.show_settings {
+                            return;
                         }
-                        if let Some(mode) = next_mode {
-                            this.mode = mode;
+
+                        // `CAMERA.TOGGLE_PROJECTION` (o).
+                        if key == "o" && !primary && !alt && !repeat {
+                            let mut camera = this.camera.borrow_mut();
+                            camera.orthographic = !camera.orthographic;
+                            changed = true;
                         }
-                        if transform {
-                            let step = 1.0;
-                            match this.active_tool {
-                                0 => match key {
-                                    "left" => this.translate[0] -= step,
-                                    "right" => this.translate[0] += step,
-                                    "up" => this.translate[1] += step,
-                                    "down" => this.translate[1] -= step,
-                                    "pageup" => this.translate[2] += step,
-                                    "pagedown" => this.translate[2] -= step,
-                                    _ => {}
-                                },
-                                1 => match key {
-                                    "left" => this.rotate_z -= 5f32.to_radians(),
-                                    "right" => this.rotate_z += 5f32.to_radians(),
-                                    _ => {}
-                                },
-                                _ => match key {
-                                    "up" => this.scale = (this.scale * 1.05).min(10.0),
-                                    "down" => this.scale = (this.scale / 1.05).max(0.1),
-                                    _ => {}
-                                },
+
+                        // `CAMERA.FOCUS_PICK` (f): frame the model. The source
+                        // prefers the hovered point; there is no hover raycast
+                        // here, so the whole model is framed.
+                        if key == "f" && !primary && !alt && !repeat {
+                            if let Some(mesh) = &this.mesh {
+                                let mut camera = this.camera.borrow_mut();
+                                camera.target = mesh.center;
+                                camera.distance = mesh.radius.max(110.0)
+                                    / (camera.fov_y * 0.5).tan()
+                                    * 1.15;
+                                changed = true;
                             }
                         }
-                        cx.notify();
+
+                        // `usePrepareTransformHotkeys`: canvas tools only in
+                        // Prepare with a model. `shift+m` is the local-space
+                        // twin; the flag has no field here.
+                        if this.mode == Mode::Prepare && this.mesh.is_some() && !primary && !alt {
+                            let tool = match key.as_str() {
+                                "q" => Some(0),
+                                "m" => Some(1),
+                                "s" => Some(7),
+                                "a" => Some(5),
+                                "d" => Some(4),
+                                _ => None,
+                            };
+                            if let Some(tool) = tool {
+                                if this.active_tool != tool {
+                                    this.active_tool = tool;
+                                    changed = true;
+                                }
+                            }
+                            let _ = shift;
+                        }
+
+                        // `GLOBAL.DELETE` (Backspace) plus the fixed Delete key:
+                        // exact modifier match, no repeat.
+                        if (key == "backspace" || key == "delete")
+                            && !primary
+                            && !alt
+                            && !shift
+                            && !repeat
+                            && this.mesh.is_some()
+                        {
+                            this.delete_model();
+                            changed = true;
+                        }
+
+                        // `NAVIGATION.LAYER_UP` / `LAYER_DOWN`: Up/Down, and
+                        // W/S in printing. Alt/Ctrl/Meta are ignored by the
+                        // source's handler; Shift is allowed.
+                        let is_printing = this.mode == Mode::Printing;
+                        let is_up = key == "up" || (is_printing && key == "w");
+                        let is_down = key == "down" || (is_printing && key == "s");
+                        if (is_up || is_down) && !primary && !alt && this.num_layers > 0 {
+                            let delta = if is_up { 1.0 } else { -1.0 };
+                            let next = (this.layer + delta)
+                                .clamp(0.0, this.num_layers as f32);
+                            if next != this.layer {
+                                this.layer = next;
+                                changed = true;
+                            }
+                        }
+
+                        if changed {
+                            cx.notify();
+                        }
                     })
                     .ok();
             })
             .child(canvas)
-            .child(left_rail(entity.clone(), self.active_tool))
-            .child(panel_stack(
-                mode,
-                entity.clone(),
-                &self.collapsed,
-                mesh_name.clone(),
-                triangles,
-                loading,
-                self.supports.borrow().len(),
-                size,
-                volume,
-                self.left_width,
-                self.right_width,
-                self.dock_resize.clone(),
-                &self.panel_dock,
-                &self.floating_pos,
-                self.panel_menu,
-            ))
-            .child(orientation_cube(camera.clone(), entity.clone()))
-            .child(layer_bar(layer, entity.clone(), self.window_width))
+            // `isPrepareDragActive` overlay, inside `#scene-root` and below the
+            // floating panels.
+            .when(self.drag_active && self.mode == Mode::Prepare, |this| {
+                this.child(drop_overlay(self.drag_unsupported))
+            })
+            // `ToolRail` renders only in Prepare/Support with models.
+            .when(has_models && matches!(mode, Mode::Prepare | Mode::Support), |this| {
+                this.child(rail::tool_rail(mode, self.active_tool, entity.clone()))
+            })
+            .child({
+                let mut defs = Vec::new();
+                // `PreparePanelStack` / Support's stack carry the Models panel;
+                // Export and Printing do not.
+                if has_models && matches!(mode, Mode::Prepare | Mode::Support) {
+                    defs.push(
+                        panels::PanelDef::new("models", "Models", panels::PanelKind::Models)
+                            .dock(panels::PanelDock::Left)
+                            .content(panel_content::models_body(
+                                mesh_name.clone(),
+                                triangles,
+                                self.selected.get(),
+                                entity.clone(),
+                            )),
+                    );
+                }
+                match mode {
+                    Mode::Prepare => {}
+                    Mode::Support => {
+                        // The rail's Automatic tool owns the Auto Supports panel;
+                        // the other tools' panels are not ported.
+                        if self.active_tool == 2 {
+                            defs.push(
+                                panels::PanelDef::new(
+                                    "support-auto",
+                                    "Auto Supports (Beta)",
+                                    panels::PanelKind::Supports,
+                                )
+                                .dock(panels::PanelDock::Right)
+                                .content(panel_content::supports_body(
+                                    self.supports.borrow().len(),
+                                    entity.clone(),
+                                )),
+                            );
+                        }
+                    }
+                    Mode::Export => defs.push(
+                        panels::PanelDef::new(
+                            "export-main",
+                            "Export",
+                            panels::PanelKind::Export,
+                        )
+                        .dock(panels::PanelDock::Left)
+                        .content(panel_content::export_body(entity.clone())),
+                    ),
+                    Mode::Printing => defs.push(
+                        panels::PanelDef::new(
+                            "printing",
+                            "Printing",
+                            panels::PanelKind::Printing,
+                        )
+                        .dock(panels::PanelDock::Right)
+                        .content(panel_content::printing_body(entity.clone())),
+                    ),
+                }
+                panels::panel_stack(&self.layout, defs, entity.clone())
+            })
+            // The Z-up gizmo sits 72px from the right edge, 22px from the
+            // bottom (its 120px widget is centred on the cube).
             .child(
                 div()
                     .absolute()
-                    .bottom(px(110.))
-                    .left(px(56.))
-                    .max_w(px(420.))
-                    .rounded(px(8.))
-                    .border_1()
-                    .border_color(rgb(BORDER_SUBTLE))
-                    .bg(rgb(SURFACE_0))
-                    .px(px(10.))
-                    .py(px(6.))
-                    .text_size(px(11.))
-                    .text_color(rgb(TEXT_MUTED))
-                    .child(status.clone()),
+                    .bottom(px(22.))
+                    .right(px(72.))
+                    .child(overlays::view_cube(camera.clone(), entity.clone())),
             )
-            .child(top_bar(
-                mode,
-                status.clone(),
-                triangles,
+            // `CrossSliderPanel` wrapper: hidden in printing (the source's
+            // printing scrubber lives in the unported preview pane).
+            .when(has_models && mode != Mode::Printing, |this| {
+                this.child(
+                    div()
+                        .absolute()
+                        .right(px(0.))
+                        .top(px(TOPBAR_HEIGHT + 6.0))
+                        .bottom(px(6.0))
+                        .w(px(48.))
+                        .child(overlays::layer_slider(
+                            layer,
+                            Some(self.lower_layer),
+                            self.cross_section,
+                            0.0,
+                            self.num_layers as f32,
+                            1.0,
+                            entity.clone(),
+                        )),
+                )
+            })
+            .child(app_bar::app_bar(
+                app_bar::AppBarState {
+                    mode,
+                    triangles,
+                    loading,
+                    has_printing_data: false,
+                    view_type: self.view_type,
+                    overhang: self.overhang_view,
+                    show_settings,
+                    show_printer_menu: self.show_printer_menu,
+                    show_app_menu: self.show_app_menu,
+                    show_view_menu: self.show_view_menu,
+                    logo: self.logo.clone(),
+                    window_width: self.window_width,
+                    printer: Default::default(),
+                    monitor: Default::default(),
+                },
                 entity.clone(),
-                loading,
-                camera.clone(),
-                orthographic,
-                selected,
-                show_settings,
-                self.show_printer_menu,
-                self.show_app_menu,
-                self.overhang_view,
-                self.logo.clone(),
             ))
-            .when(show_settings, |this| {
-                this.child(settings_modal(
-                    entity.clone(),
-                    self.settings_tab,
-                    self.show_grid,
-                    self.show_plate,
-                    self.show_box,
-                ))
-            })
-            .when(self.show_help, |this| {
-                this.child(help_modal(entity.clone()))
-            })
-            .when(self.show_support_settings, |this| {
-                this.child(support_settings_modal(
-                    entity.clone(),
-                    self.support_angle,
-                    self.support_density,
-                ))
+            .child(settings::settings_modal(
+                show_settings,
+                self.settings_tab,
+                entity.clone(),
+            ))
+            .when(self.toast.is_some(), |this| {
+                let toast = self.toast.clone().expect("checked above");
+                this.child(toast_view(toast))
             })
     }
 }
 
-fn mix(a: u32, b: u32, weight_a: f32) -> u32 {
-    let channel = |shift: u32| {
-        let av = ((a >> shift) & 0xff) as f32;
-        let bv = ((b >> shift) & 0xff) as f32;
-        (av * weight_a + bv * (1.0 - weight_a)).round() as u32
-    };
-    (channel(16) << 16) | (channel(8) << 8) | channel(0)
-}
-
-fn icon(name: &str, size: f32, color: u32) -> impl IntoElement {
-    let path = format!("{}/assets/icons/{name}.svg", env!("CARGO_MANIFEST_DIR"));
-    svg()
-        .external_path(path)
-        .w(px(size))
-        .h(px(size))
-        .text_color(rgb(color))
-}
-
-fn step_button(
-    mode: Mode,
-    active: Mode,
-    locked: bool,
-    entity: WeakEntity<DragonFruit>,
-) -> impl IntoElement {
-    let is_active = mode == active;
-    let icon_name = match mode {
-        Mode::Prepare => "folder-open",
-        Mode::Support => "anchor",
-        Mode::Export => "upload",
-        Mode::Printing => "printer",
-    };
-    let background = if is_active {
-        mix(ACCENT, SURFACE_0, 0.16)
+/// `page.tsx`'s drop overlay: a dimmed backdrop and a dashed card.
+fn drop_overlay(unsupported: bool) -> impl IntoElement {
+    let accent = if unsupported { DANGER } else { ACCENT };
+    // `color-mix(in srgb, black, transparent 86%)` / `(danger, transparent 90%)`.
+    let backdrop = if unsupported {
+        rgba(0xe454541a)
     } else {
-        SURFACE_1
+        rgba(0x00000024)
     };
-    let border = if is_active {
-        mix(ACCENT, 0xffffff, 0.92)
+    // `color-mix(in srgb, danger|accent, surface-0 88%/90%)`.
+    let card = if unsupported {
+        mix(DANGER, SURFACE_0, 0.12)
     } else {
-        BORDER_SUBTLE
+        mix(ACCENT, SURFACE_0, 0.10)
     };
-    div()
-        .id(format!("step-{}", mode.step()))
-        .h(px(32.))
-        .flex_1()
-        .min_w(px(90.))
-        .max_w(px(190.))
-        .flex()
-        .items_center()
-        .gap(px(6.))
-        .px(px(6.))
-        .rounded(px(5.5))
-        .border_1()
-        .border_color(rgb(border))
-        .bg(rgb(background))
-        .when(locked, |this| this.opacity(0.45))
-        .child(
-            div()
-                .w(px(20.))
-                .h(px(20.))
-                .rounded_full()
-                .flex()
-                .items_center()
-                .justify_center()
-                .when(!is_active, |this| this.bg(rgb(SURFACE_2)))
-                .child(icon(
-                    icon_name,
-                    12.,
-                    if is_active { ACCENT } else { TEXT_MUTED },
-                )),
-        )
-        .child(
-            div()
-                .flex_1()
-                .text_center()
-                .text_size(px(12.))
-                .font_weight(FontWeight::BOLD)
-                .text_color(rgb(TEXT_STRONG))
-                .child(mode.label()),
-        )
-        .on_click(move |_, _, cx| {
-            if locked {
-                return;
-            }
-            entity
-                .update(cx, |this, cx| {
-                    this.mode = mode;
-                    cx.notify();
-                })
-                .ok();
-        })
-}
-
-fn window_button(area: WindowControlArea, tint: u32, icon_name: &str) -> impl IntoElement {
-    div()
-        .w(px(32.))
-        .h(px(32.))
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded(px(4.))
-        .border_1()
-        .border_color(rgb(mix(tint, BORDER_SUBTLE, 0.45)))
-        .bg(rgb(mix(tint, SURFACE_1, 0.14)))
-        .child(icon(icon_name, 16., mix(tint, TEXT_STRONG, 0.16)))
-        .window_control_area(area)
-}
-
-fn top_bar(
-    mode: Mode,
-    _status: String,
-    triangles: usize,
-    entity: WeakEntity<DragonFruit>,
-    loading: bool,
-    camera: Rc<RefCell<Camera>>,
-    orthographic: bool,
-    selected: bool,
-    show_settings: bool,
-    show_printer_menu: bool,
-    show_app_menu: bool,
-    overhang_view: bool,
-    logo_path: Option<PathBuf>,
-) -> impl IntoElement {
-    let logo_entity = entity.clone();
-    let logo = div()
-        .id("logo-menu")
-        .w(px(40.))
-        .h(px(40.))
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded(px(6.))
-        .when(show_app_menu, |this| this.bg(rgb(mix(ACCENT, SURFACE_0, 0.2))))
-        .child(match logo_path {
-            Some(path) => img(path).w(px(28.)).h(px(28.)).into_any_element(),
-            None => div()
-                .w(px(28.))
-                .h(px(28.))
-                .rounded(px(7.))
-                .bg(rgb(ACCENT))
-                .flex()
-                .items_center()
-                .justify_center()
-                .text_size(px(14.))
-                .font_weight(FontWeight::BOLD)
-                .text_color(rgb(ACCENT_CONTRAST))
-                .child("D")
-                .into_any_element(),
-        })
-        .on_click(move |_, _, cx| {
-            logo_entity
-                .update(cx, |this, cx| {
-                    this.show_app_menu = !this.show_app_menu;
-                    cx.notify();
-                })
-                .ok();
-        });
-
-    let printer_entity = entity.clone();
-    let printer = div()
-        .id("printer")
-        .h(px(40.))
-        .max_w(px(300.))
-        .flex()
-        .items_center()
-        .gap(px(8.))
-        .px(px(8.))
-        .rounded(px(6.))
-        .when(show_printer_menu, |this| this.bg(rgb(mix(ACCENT, SURFACE_0, 0.2))))
-        .child(
-            div()
-                .w(px(32.))
-                .h(px(32.))
-                .rounded(px(4.))
-                .bg(rgb(mix(SURFACE_1, SURFACE_0, 0.94)))
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(icon("printer", 16., TEXT_MUTED)),
-        )
-        .child(
-            div()
-                .flex()
-                .flex_col()
-                .items_start()
-                .gap(px(2.))
-                .child(
-                    div()
-                        .text_size(px(11.))
-                        .text_color(rgb(TEXT_MUTED))
-                        .child("PRINTER"),
-                )
-                .child(
-                    div()
-                        .text_size(px(12.))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(rgb(TEXT_STRONG))
-                        .child("Standard"),
-                ),
-        )
-        .child(icon("chevron-down", 14., mix(TEXT_MUTED, 0xffffff, 0.92)))
-        .on_click(move |_, _, cx| {
-            printer_entity
-                .update(cx, |this, cx| {
-                    this.show_printer_menu = !this.show_printer_menu;
-                    cx.notify();
-                })
-                .ok();
-        });
-
-    let toggle_camera = camera.clone();
-    let toggle_entity = entity.clone();
-    let projection = div()
-        .id("projection")
-        .h(px(32.))
-        .px(px(8.))
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded(px(6.))
-        .border_1()
-        .border_color(rgb(BORDER_SUBTLE))
-        .bg(rgb(SURFACE_1))
-        .text_size(px(11.))
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(rgb(TEXT_MUTED))
-        .child(if orthographic { "Ortho" } else { "Persp" })
-        .child(icon("chevron-down", 12., TEXT_MUTED))
-        .on_click(move |_, _, cx| {
-            let next = !toggle_camera.borrow().orthographic;
-            toggle_camera.borrow_mut().orthographic = next;
-            toggle_entity.update(cx, |_, cx| cx.notify()).ok();
-        });
-    let _ = selected;
-    let settings_entity = entity.clone();
-    let settings = div()
-        .id("settings")
-        .w(px(32.))
-        .h(px(32.))
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded(px(6.))
-        .border_1()
-        .border_color(rgb(if show_settings { ACCENT } else { BORDER_SUBTLE }))
-        .bg(rgb(SURFACE_1))
-        .child(icon("settings", 16., TEXT_MUTED))
-        .on_click(move |_, _, cx| {
-            settings_entity
-                .update(cx, |this, cx| {
-                    this.show_settings = !this.show_settings;
-                    cx.notify();
-                })
-                .ok();
-        });
-    let overhang_entity = entity.clone();
-    let overhang = div()
-        .id("overhang")
-        .w(px(32.))
-        .h(px(32.))
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded(px(6.))
-        .border_1()
-        .border_color(rgb(if overhang_view { ACCENT } else { BORDER_SUBTLE }))
-        .bg(rgb(if overhang_view { mix(ACCENT, SURFACE_0, 0.16) } else { SURFACE_1 }))
-        .child(icon(
-            "alert-diamond",
-            16.,
-            if overhang_view { ACCENT } else { TEXT_MUTED },
-        ))
-        .on_click(move |_, _, cx| {
-            overhang_entity
-                .update(cx, |this, cx| {
-                    this.overhang_view = !this.overhang_view;
-                    cx.notify();
-                })
-                .ok();
-        });
-    let help_entity = entity.clone();
-    let help = div()
-        .id("help")
-        .w(px(32.))
-        .h(px(32.))
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded(px(6.))
-        .border_1()
-        .border_color(rgb(BORDER_SUBTLE))
-        .bg(rgb(SURFACE_1))
-        .text_size(px(13.))
-        .text_color(rgb(TEXT_MUTED))
-        .child("?")
-        .on_click(move |_, _, cx| {
-            help_entity
-                .update(cx, |this, cx| {
-                    this.show_help = !this.show_help;
-                    cx.notify();
-                })
-                .ok();
-        });
-    let left = div()
-        .flex()
-        .items_center()
-        .gap(px(10.))
-        .pr(px(16.))
-        .py(px(6.))
-        .child(logo)
-        .child(
-            div()
-                .w(px(1.))
-                .h(px(24.))
-                .bg(rgb(mix(BORDER_SUBTLE, 0x000000, 0.76))),
-        )
-        .child(printer);
-    let steps = div()
-        .flex_1()
-        .min_w(px(0.))
-        .flex()
-        .justify_center()
-        .px(px(8.))
-        .child(
-            div()
-                .flex()
-                .items_center()
-                .gap(px(8.))
-                .child(step_button(Mode::Prepare, mode, false, entity.clone()))
-                .child(step_button(Mode::Support, mode, triangles == 0, entity.clone()))
-                .child(step_button(Mode::Export, mode, triangles == 0, entity.clone()))
-                .child(step_button(Mode::Printing, mode, triangles == 0, entity.clone())),
-        );
-    let right = div()
-        .flex()
-        .items_center()
-        .justify_end()
-        .gap(px(8.))
-        .pr(px(3.))
-        .child(projection)
-        .child(overhang)
-        .child(settings)
-        .child(help)
-        .child(
-            div()
-                .ml(px(4.))
-                .flex()
-                .items_center()
-                .gap(px(4.))
-                .child(window_button(WindowControlArea::Min, 0xf4bf4f, "minimize"))
-                .child(window_button(WindowControlArea::Max, 0x40c463, "maximize"))
-                .child(window_button(WindowControlArea::Close, 0xff6b6b, "x")),
-        );
+    let title = if unsupported {
+        "Unsupported file format"
+    } else {
+        "Drop supported files to import"
+    };
+    let detail = if unsupported {
+        format!("Please use: STL, OBJ, 3MF, {SCENE_FILE_LABELS}")
+    } else {
+        format!("Supported: STL, OBJ, 3MF, {SCENE_FILE_LABELS}")
+    };
 
     div()
         .absolute()
         .top(px(0.))
         .left(px(0.))
-        .right(px(0.))
-        .h(px(52.))
+        .size_full()
         .flex()
         .items_center()
-        .gap(px(12.))
-        .px(px(4.))
-        .pt(px(3.))
-        .pb(px(9.))
-        .bg(linear_gradient(
-            180.0,
-            linear_color_stop(rgba(0x111216f2), 0.0),
-            linear_color_stop(rgba(0x111216c2), 1.0),
-        ))
+        .justify_center()
         .child(
             div()
                 .absolute()
                 .top(px(0.))
                 .left(px(0.))
-                .right(px(0.))
-                .bottom(px(0.))
-                .on_mouse_down(MouseButton::Left, move |_, window, _| {
-                    window.start_window_move();
-                }),
+                .size_full()
+                .bg(backdrop),
         )
-        .child(left)
-        .child(steps)
-        .child(right)
-        .child(if show_app_menu {
-            let import_entity = entity.clone();
-            div()
-                .absolute()
-                .top(px(44.))
-                .left(px(8.))
-                .w(px(220.))
-                .rounded(px(10.))
-                .border_1()
-                .border_color(rgb(BORDER_SUBTLE))
-                .bg(rgb(SURFACE_0))
-                .p(px(6.))
-                .flex()
-                .flex_col()
-                .gap(px(2.))
-                .child(menu_row("New scene", false, None))
-                .child(menu_row("Save scene", false, None))
-                .child(menu_row("Open scene…", false, None))
-                .child(
-                    div()
-                        .id("menu-import")
-                        .h(px(28.))
-                        .px(px(8.))
-                        .flex()
-                        .items_center()
-                        .rounded(px(6.))
-                        .text_size(px(11.))
-                        .text_color(rgb(TEXT_MUTED))
-                        .hover(|style| style.bg(rgb(SURFACE_1)))
-                        .child("Import mesh…")
-                        .on_click(move |_, _, cx| {
-                            import_entity
-                                .update(cx, |this, cx| {
-                                    this.show_app_menu = false;
-                                    this.open_stl(cx);
-                                })
-                                .ok();
-                        }),
-                )
-                .child(
-                    div()
-                        .id("menu-close")
-                        .h(px(28.))
-                        .px(px(8.))
-                        .flex()
-                        .items_center()
-                        .rounded(px(6.))
-                        .text_size(px(11.))
-                        .text_color(rgb(0xe45454))
-                        .hover(|style| style.bg(rgb(SURFACE_1)))
-                        .child("Close program")
-                        .on_click(move |_, _, cx| cx.quit()),
-                )
-        } else {
-            div()
-        })
-        .child(if show_printer_menu {
-            div()
-                .absolute()
-                .top(px(44.))
-                .left(px(60.))
-                .w(px(240.))
-                .rounded(px(10.))
-                .border_1()
-                .border_color(rgb(BORDER_SUBTLE))
-                .bg(rgb(SURFACE_0))
-                .p(px(10.))
-                .flex()
-                .flex_col()
-                .gap(px(4.))
-                .child(
-                    div()
-                        .text_size(px(12.))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(rgb(TEXT_STRONG))
-                        .child("No printer configured"),
-                )
-                .child(
-                    div()
-                        .text_size(px(10.))
-                        .text_color(rgb(TEXT_MUTED))
-                        .child("Add a printer in Settings \u{2192} Printer."),
-                )
-        } else {
-            div()
-        })
-}
-
-fn menu_row(label: &'static str, enabled: bool, _action: Option<()>) -> impl IntoElement {
-    div()
-        .h(px(28.))
-        .px(px(8.))
-        .flex()
-        .items_center()
-        .rounded(px(6.))
-        .text_size(px(11.))
-        .text_color(rgb(if enabled { TEXT_MUTED } else { 0x5a5f6a }))
-        .child(label)
-}
-
-fn left_rail(entity: WeakEntity<DragonFruit>, active_tool: usize) -> impl IntoElement {
-    let tools = [
-        ("move", "Move"),
-        ("rotate-3d", "Rotate"),
-        ("scaling", "Scale"),
-        ("anchor", "Supports"),
-        ("bot", "Auto supports"),
-        ("hollow", "Hollow"),
-    ];
-    let mut rail = div()
-        .absolute()
-        .left(px(6.))
-        .top(px(52.))
-        .bottom(px(0.))
-        .w(px(54.))
-        .flex()
-        .flex_col()
-        .gap(px(6.))
-        .py(px(6.));
-    for (index, (icon_name, _label)) in tools.iter().enumerate() {
-        let is_active = index == active_tool;
-        let background = if is_active {
-            mix(ACCENT, SURFACE_0, 0.22)
-        } else {
-            mix(ACCENT, SURFACE_1, 0.10)
-        };
-        let border = if is_active {
-            mix(ACCENT, 0xffffff, 0.86)
-        } else {
-            mix(ACCENT, BORDER_SUBTLE, 0.12)
-        };
-        let color = if is_active { ACCENT } else { TEXT_MUTED };
-        let tool_entity = entity.clone();
-        rail = rail.child(
-            div()
-                .id(format!("tool-{index}"))
-                .w_full()
-                .h(px(54.))
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded(px(5.5))
-                .border_1()
-                .border_color(rgb(border))
-                .bg(rgb(background))
-                .hover(|style| style.bg(rgb(mix(ACCENT, SURFACE_1, 0.16))))
-                .child(icon(icon_name, 28., color))
-                .on_click(move |_, _, cx| {
-                    tool_entity
-                        .update(cx, |this, cx| {
-                            this.active_tool = index;
-                            cx.notify();
-                        })
-                        .ok();
-                }),
-        );
-    }
-    rail
-}
-
-fn panel_stack(
-    mode: Mode,
-    entity: WeakEntity<DragonFruit>,
-    collapsed: &std::collections::HashMap<&'static str, bool>,
-    mesh_name: String,
-    triangles: usize,
-    loading: bool,
-    support_count: usize,
-    size: [f32; 3],
-    volume: f32,
-    left_width: f32,
-    right_width: f32,
-    dock_resize: Rc<Cell<Option<(bool, f32, f32)>>>,
-    panel_dock: &std::collections::HashMap<&'static str, PanelDock>,
-    floating_pos: &std::collections::HashMap<&'static str, (f32, f32)>,
-    panel_menu: Option<&'static str>,
-) -> impl IntoElement {
-    let defs = panel_defs(mode);
-    let effective = |def: &PanelDef| panel_dock.get(def.id).copied().unwrap_or(def.dock);
-    let left: Vec<PanelDef> = defs
-        .iter()
-        .filter(|def| effective(def) == PanelDock::Left)
-        .copied()
-        .collect();
-    let right: Vec<PanelDef> = defs
-        .iter()
-        .filter(|def| effective(def) == PanelDock::Right)
-        .copied()
-        .collect();
-    let floating: Vec<PanelDef> = defs
-        .iter()
-        .filter(|def| effective(def) == PanelDock::Float)
-        .copied()
-        .collect();
-    div()
-        .absolute()
-        .top(px(58.))
-        .bottom(px(6.))
-        .left(px(0.))
-        .right(px(0.))
-        .on_mouse_move({
-            let dock_resize = dock_resize.clone();
-            let entity = entity.clone();
-            move |event, _, cx| {
-                let Some((is_left, start_x, start_width)) = dock_resize.get() else {
-                    return;
-                };
-                let delta = event.position.x.0 - start_x;
-                let width =
-                    (start_width + if is_left { delta } else { -delta }).clamp(200.0, 520.0);
-                entity
-                    .update(cx, |this, cx| {
-                        if is_left {
-                            this.left_width = width;
-                        } else {
-                            this.right_width = width;
-                        }
-                        cx.notify();
-                    })
-                    .ok();
-            }
-        })
-        .on_mouse_up(MouseButton::Left, {
-            let up_resize = dock_resize.clone();
-            move |_, _, _| up_resize.set(None)
-        })
-        .child(dock_column(
-            left,
-            PanelDock::Left,
-            entity.clone(),
-            collapsed,
-            mesh_name.clone(),
-            triangles,
-            loading,
-            support_count,
-            size,
-            volume,
-            left_width,
-            dock_resize.clone(),
-            panel_menu,
-        ))
-        .child(dock_column(
-            right,
-            PanelDock::Right,
-            entity.clone(),
-            collapsed,
-            mesh_name.clone(),
-            triangles,
-            loading,
-            support_count,
-            size,
-            volume,
-            right_width,
-            dock_resize,
-            panel_menu,
-        ))
-        .children(floating.into_iter().enumerate().map(|(index, def)| {
-            let (x, y) = floating_pos
-                .get(def.id)
-                .copied()
-                .unwrap_or((200.0 + index as f32 * 24.0, 120.0 + index as f32 * 24.0));
-            div()
-                .absolute()
-                .left(px(x))
-                .top(px(y))
-                .w(px(320.))
-                .child(panel_card(
-                    def,
-                    entity.clone(),
-                    collapsed.get(def.id).copied().unwrap_or(false),
-                    mesh_name.clone(),
-                    triangles,
-                    loading,
-                    support_count,
-                    size,
-                    volume,
-                    PanelDock::Float,
-                    panel_menu,
-                ))
-        }))
-}
-
-#[allow(clippy::too_many_arguments)]
-fn dock_column(
-    defs: Vec<PanelDef>,
-    dock: PanelDock,
-    entity: WeakEntity<DragonFruit>,
-    collapsed: &std::collections::HashMap<&'static str, bool>,
-    mesh_name: String,
-    triangles: usize,
-    loading: bool,
-    support_count: usize,
-    size: [f32; 3],
-    volume: f32,
-    width: f32,
-    dock_resize: Rc<Cell<Option<(bool, f32, f32)>>>,
-    panel_menu: Option<&'static str>,
-) -> impl IntoElement {
-    let mut column = div()
-        .absolute()
-        .top(px(0.))
-        .bottom(px(0.))
-        .w(px(width))
-        .flex()
-        .flex_col()
-        .gap(px(6.));
-    column = match dock {
-        PanelDock::Left => column.left(px(72.)),
-        PanelDock::Right => column.right(px(6.)),
-        PanelDock::Float => column,
-    };
-    let handle = {
-        let resize = dock_resize.clone();
-        let start_width = width;
-        let is_left = dock == PanelDock::Left;
-        let mut handle = div()
-            .absolute()
-            .top(px(0.))
-            .bottom(px(0.))
-            .w(px(6.))
-            .on_mouse_down(MouseButton::Left, move |event, _, _| {
-                resize.set(Some((is_left, event.position.x.0, start_width)));
-            });
-        handle = match dock {
-            PanelDock::Left => handle.right(px(-6.)),
-            PanelDock::Right => handle.left(px(-6.)),
-            PanelDock::Float => handle,
-        };
-        handle
-    };
-    column = column.child(handle);
-    for def in defs {
-        column = column.child(panel_card(
-            def,
-            entity.clone(),
-            collapsed.get(def.id).copied().unwrap_or(false),
-            mesh_name.clone(),
-            triangles,
-            loading,
-            support_count,
-            size,
-            volume,
-            dock,
-            panel_menu,
-        ));
-    }
-    column
-}
-
-#[allow(clippy::too_many_arguments)]
-fn panel_card(
-    def: PanelDef,
-    entity: WeakEntity<DragonFruit>,
-    collapsed: bool,
-    mesh_name: String,
-    triangles: usize,
-    loading: bool,
-    support_count: usize,
-    size: [f32; 3],
-    volume: f32,
-    dock: PanelDock,
-    panel_menu: Option<&'static str>,
-) -> impl IntoElement {
-    let toggle_entity = entity.clone();
-    let menu_entity = entity.clone();
-    let id = def.id;
-    let body = match def.kind {
-        PanelKind::Models => models_body(mesh_name, triangles, entity.clone(), loading),
-        PanelKind::Supports => support_body(entity.clone(), support_count),
-        PanelKind::Export => export_body(entity.clone()),
-        PanelKind::Printing => printing_body(),
-        PanelKind::Info => info_body(mesh_name, triangles, size, volume),
-    };
-    let float_entity = entity.clone();
-    let left_entity = entity.clone();
-    let right_entity = entity.clone();
-    let menu = if panel_menu == Some(id) {
-        div()
-            .absolute()
-            .top(px(36.))
-            .right(px(6.))
-            .w(px(140.))
-            .rounded(px(8.))
-            .border_1()
-            .border_color(rgb(BORDER_SUBTLE))
-            .bg(rgb(SURFACE_1))
-            .p(px(4.))
-            .flex()
-            .flex_col()
-            .gap(px(2.))
-            .child(
-                div()
-                    .id("menu-float")
-                    .h(px(26.))
-                    .px(px(8.))
-                    .flex()
-                    .items_center()
-                    .rounded(px(4.))
-                    .text_size(px(11.))
-                    .text_color(rgb(TEXT_MUTED))
-                    .hover(|style| style.bg(rgb(SURFACE_2)))
-                    .child("Float")
-                    .on_click(move |_, _, cx| {
-                        float_entity
-                            .update(cx, |this, cx| {
-                                this.panel_dock.insert(id, PanelDock::Float);
-                                this.panel_menu = None;
-                                cx.notify();
-                            })
-                            .ok();
-                    }),
-            )
-            .child(
-                div()
-                    .id("menu-dock-left")
-                    .h(px(26.))
-                    .px(px(8.))
-                    .flex()
-                    .items_center()
-                    .rounded(px(4.))
-                    .text_size(px(11.))
-                    .text_color(rgb(TEXT_MUTED))
-                    .hover(|style| style.bg(rgb(SURFACE_2)))
-                    .child("Dock left")
-                    .on_click(move |_, _, cx| {
-                        left_entity
-                            .update(cx, |this, cx| {
-                                this.panel_dock.insert(id, PanelDock::Left);
-                                this.panel_menu = None;
-                                cx.notify();
-                            })
-                            .ok();
-                    }),
-            )
-            .child(
-                div()
-                    .id("menu-dock-right")
-                    .h(px(26.))
-                    .px(px(8.))
-                    .flex()
-                    .items_center()
-                    .rounded(px(4.))
-                    .text_size(px(11.))
-                    .text_color(rgb(TEXT_MUTED))
-                    .hover(|style| style.bg(rgb(SURFACE_2)))
-                    .child("Dock right")
-                    .on_click(move |_, _, cx| {
-                        right_entity
-                            .update(cx, |this, cx| {
-                                this.panel_dock.insert(id, PanelDock::Right);
-                                this.panel_menu = None;
-                                cx.notify();
-                            })
-                            .ok();
-                    }),
-            )
-    } else {
-        div()
-    };
-    div()
-        .relative()
-        .w_full()
-        .rounded(px(8.))
-        .border_1()
-        .border_color(rgb(BORDER_SUBTLE))
-        .bg(rgb(SURFACE_0))
-        .flex()
-        .flex_col()
-        .overflow_hidden()
         .child(
             div()
-                .id(format!("panel-{id}"))
-                .h(px(38.))
-                .px(px(10.))
+                .min_w(px(380.))
+                .max_w(px(640.))
+                .rounded(px(12.))
+                .border_1()
+                .border_dashed()
+                .border_color(rgb(accent))
+                .bg(rgb(card))
+                .px(px(32.))
+                .py(px(24.))
                 .flex()
+                .flex_col()
                 .items_center()
-                .justify_between()
                 .child(
                     div()
-                        .id(format!("panel-title-{id}"))
-                        .flex_1()
+                        .text_size(px(16.))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(rgb(TEXT_STRONG))
+                        .child(title),
+                )
+                .child(
+                    div()
+                        .mt(px(8.))
                         .text_size(px(14.))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(rgb(TEXT_STRONG))
-                        .child(def.title)
-                        .on_click(move |_, _, cx| {
-                            toggle_entity
-                                .update(cx, |this, cx| {
-                                    let entry = this.collapsed.entry(id).or_insert(false);
-                                    *entry = !*entry;
-                                    cx.notify();
-                                })
-                                .ok();
-                        }),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(4.))
-                        .child(icon(
-                            if collapsed { "chevron-right" } else { "chevron-down" },
-                            14.,
-                            TEXT_MUTED,
-                        ))
-                        .child(
-                            div()
-                                .id(format!("panel-menu-{id}"))
-                                .w(px(18.))
-                                .h(px(18.))
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .rounded(px(4.))
-                                .text_size(px(12.))
-                                .text_color(rgb(TEXT_MUTED))
-                                .child("\u{22EE}")
-                                .on_click(move |_, _, cx| {
-                                    menu_entity
-                                        .update(cx, |this, cx| {
-                                            this.panel_menu =
-                                                if this.panel_menu == Some(id) {
-                                                    None
-                                                } else {
-                                                    Some(id)
-                                                };
-                                            cx.notify();
-                                        })
-                                        .ok();
-                                }),
-                        ),
-                ),
-        )
-        .when(!collapsed, |this| this.child(body))
-        .child(menu)
-        .when(dock == PanelDock::Float, |this| {
-            this.border_color(rgb(ACCENT))
-        })
-}
-
-fn models_body(
-    mesh_name: String,
-    triangles: usize,
-    entity: WeakEntity<DragonFruit>,
-    loading: bool,
-) -> gpui::Div {
-    let add_entity = entity.clone();
-    let mut add_button = div()
-        .id("add-model")
-        .h(px(30.))
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded(px(6.))
-        .border_1()
-        .border_color(rgb(BORDER_SUBTLE))
-        .bg(rgb(SURFACE_1))
-        .text_size(px(12.))
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(rgb(TEXT_STRONG))
-        .child(if loading { "Loading…" } else { "Add Model" })
-        .hover(|style| style.bg(rgb(SURFACE_2)));
-    if !loading {
-        add_button = add_button.on_click(move |_, _, cx| {
-            add_entity.update(cx, |this, cx| this.open_stl(cx)).ok();
-        });
-    }
-    let row_entity = entity.clone();
-    let row = div()
-        .id("model-row")
-        .flex()
-        .items_center()
-        .gap(px(8.))
-        .px(px(8.))
-        .py(px(6.))
-        .rounded(px(6.))
-        .border_1()
-        .border_color(rgb(BORDER_SUBTLE))
-        .bg(rgb(SURFACE_1))
-        .child(
-            div()
-                .w(px(18.))
-                .h(px(18.))
-                .rounded(px(4.))
-                .bg(rgb(ACCENT))
-                .flex()
-                .items_center()
-                .justify_center()
-                .text_size(px(9.))
-                .text_color(rgb(ACCENT_CONTRAST))
-                .child("3D"),
-        )
-        .child(
-            div()
-                .flex()
-                .flex_col()
-                .flex_1()
-                .child(
-                    div()
-                        .text_size(px(13.))
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(rgb(TEXT_STRONG))
-                        .child(mesh_name),
-                )
-                .child(
-                    div()
-                        .text_size(px(11.))
                         .text_color(rgb(TEXT_MUTED))
-                        .child(format!("{triangles} triangles")),
+                        .child(detail),
                 ),
         )
-        .child(icon("eye", 15., TEXT_MUTED))
-        .on_click(move |_, _, cx| {
-            row_entity
-                .update(cx, |this, cx| {
-                    this.selected.set(!this.selected.get());
-                    cx.notify();
-                })
-                .ok();
-        });
-    div()
-        .px(px(10.))
-        .pb(px(10.))
-        .pt(px(2.))
-        .flex()
-        .flex_col()
-        .gap(px(8.))
-        .when(triangles == 0, |this| {
-            this.child(
-                div()
-                    .text_size(px(12.))
-                    .text_color(rgb(TEXT_MUTED))
-                    .child("No models loaded"),
-            )
-        })
-        .when(triangles > 0, |this| this.child(row))
-        .child(add_button)
 }
 
-fn support_body(entity: WeakEntity<DragonFruit>, support_count: usize) -> gpui::Div {
-    let generate_entity = entity.clone();
-    div()
-        .px(px(10.))
-        .pb(px(10.))
-        .pt(px(2.))
-        .flex()
-        .flex_col()
-        .gap(px(8.))
-        .child(
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(4.))
-                .child(island_row("Voxel", 0))
-                .child(island_row("Minima", 0))
-                .child(island_row("Total", support_count)),
-        )
-        .child(
-            div()
-                .text_size(px(11.))
-                .text_color(rgb(TEXT_MUTED))
-                .child("Load a model and scan for islands."),
-        )
-        .child(
-            div()
-                .id("generate-supports")
-                .h(px(30.))
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded(px(6.))
-                .bg(rgb(PRIMARY))
-                .text_size(px(12.))
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(rgb(ACCENT_CONTRAST))
-                .child("Generate Supports")
-                .hover(|style| style.bg(rgb(PRIMARY_HOVER)))
-                .on_click(move |_, _, cx| {
-                    generate_entity
-                        .update(cx, |this, cx| {
-                            if let Some(mesh) = this.mesh.as_ref() {
-                                let model = glam::Mat4::from_scale_rotation_translation(
-                                    glam::Vec3::splat(this.scale),
-                                    glam::Quat::from_rotation_z(this.rotate_z),
-                                    glam::Vec3::from_array(this.translate),
-                                );
-                                let points = stl::overhang_points(mesh, this.support_angle);
-                                let target =
-                                    (300.0 * this.support_density).max(1.0) as usize;
-                                let stride = (points.len() / target).max(1);
-                                *this.supports.borrow_mut() = points
-                                    .into_iter()
-                                    .step_by(stride)
-                                    .map(|p| {
-                                        model
-                                            .transform_point3(glam::Vec3::from_array(p))
-                                            .to_array()
-                                    })
-                                    .collect();
-                            }
-                            cx.notify();
-                        })
-                        .ok();
-                }),
-        )
-}
-
-fn export_body(entity: WeakEntity<DragonFruit>) -> gpui::Div {
-    let export_entity = entity.clone();
-    div()
-        .px(px(10.))
-        .pb(px(10.))
-        .pt(px(2.))
-        .flex()
-        .flex_col()
-        .gap(px(8.))
-        .child(modal_row("Format", "STL"))
-        .child(modal_row("Units", "Millimetres"))
-        .child(
-            div()
-                .id("export")
-                .h(px(30.))
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded(px(6.))
-                .bg(rgb(PRIMARY))
-                .text_size(px(12.))
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(rgb(ACCENT_CONTRAST))
-                .child("Export")
-                .hover(|style| style.bg(rgb(PRIMARY_HOVER)))
-                .on_click(move |_, _, cx| {
-                    export_entity
-                        .update(cx, |this, cx| {
-                            let Some(mesh) = this.mesh.as_ref() else {
-                                return;
-                            };
-                            let Some(path) = rfd::FileDialog::new()
-                                .add_filter("STL", &["stl"])
-                                .set_file_name("export.stl")
-                                .save_file()
-                            else {
-                                return;
-                            };
-                            let transform = glam::Mat4::from_scale_rotation_translation(
-                                glam::Vec3::splat(this.scale),
-                                glam::Quat::from_rotation_z(this.rotate_z),
-                                glam::Vec3::from_array(this.translate),
-                            );
-                            this.status = match stl::export_stl(mesh, transform, &path) {
-                                Ok(()) => format!("Exported {}", path.display()),
-                                Err(error) => format!("{error:#}"),
-                            };
-                            cx.notify();
-                        })
-                        .ok();
-                }),
-        )
-}
-
-fn printing_body() -> gpui::Div {
-    div()
-        .px(px(10.))
-        .pb(px(10.))
-        .pt(px(2.))
-        .flex()
-        .flex_col()
-        .gap(px(8.))
-        .child(modal_row("Layers", "0"))
-        .child(modal_row("Layer height", "0.05 mm"))
-        .child(
-            div()
-                .text_size(px(11.))
-                .text_color(rgb(TEXT_MUTED))
-                .child("Slice a model to inspect layers."),
-        )
-}
-
-fn info_body(
-    mesh_name: String,
-    triangles: usize,
-    size: [f32; 3],
-    volume: f32,
-) -> gpui::Div {
-    let dimensions = format!("{:.1} × {:.1} × {:.1} mm", size[0], size[1], size[2]);
-    let volume = format!("{:.1} cm³", volume / 1000.0);
-    div()
-        .px(px(10.))
-        .pb(px(10.))
-        .pt(px(2.))
-        .flex()
-        .flex_col()
-        .gap(px(6.))
-        .child(
-            div()
-                .text_size(px(13.))
-                .font_weight(FontWeight::MEDIUM)
-                .text_color(rgb(TEXT_STRONG))
-                .child(mesh_name),
-        )
-        .child(info_row("Dimensions", &dimensions))
-        .child(info_row("Volume", &volume))
-        .child(info_row("Triangles", &format!("{triangles}")))
-}
-
-fn island_row(label: &'static str, count: usize) -> impl IntoElement {
-    div()
-        .flex()
-        .items_center()
-        .justify_between()
-        .text_size(px(11.))
-        .text_color(rgb(TEXT_MUTED))
-        .child(label)
-        .child(format!("{count}"))
-}
-
-fn orientation_cube(
-    camera: Rc<RefCell<Camera>>,
-    entity: WeakEntity<DragonFruit>,
-) -> impl IntoElement {
-    let face = |label: &'static str,
-                yaw: f32,
-                pitch: f32,
-                entity: WeakEntity<DragonFruit>,
-                camera: Rc<RefCell<Camera>>| {
-        div()
-            .id(format!("face-{label}"))
-            .w(px(44.))
-            .h(px(30.))
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded(px(4.))
-            .bg(rgb(SURFACE_1))
-            .text_size(px(9.))
-            .text_color(rgb(TEXT_MUTED))
-            .child(label)
-            .hover(|style| style.bg(rgb(SURFACE_2)))
-            .on_click(move |_, _, cx| {
-                let mut camera = camera.borrow_mut();
-                camera.yaw = yaw;
-                camera.pitch = pitch;
-                drop(camera);
-                entity.update(cx, |_, cx| cx.notify()).ok();
-            })
+/// `NotificationStack`'s toast: pill, `px-4 py-2 text-sm font-semibold`, the
+/// tone icon at 16px and an 8px gap.
+fn toast_view(toast: Toast) -> impl IntoElement {
+    let icon_name = match toast.tone {
+        ui::ToastTone::Error | ui::ToastTone::Warning => "triangle-alert",
+        ui::ToastTone::Success => "circle-check",
+        _ => "info",
     };
-    div()
-        .absolute()
-        .bottom(px(82.))
-        .right(px(132.))
-        .w(px(104.))
-        .rounded(px(10.))
-        .border_1()
-        .border_color(rgb(BORDER_SUBTLE))
-        .bg(rgb(SURFACE_0))
-        .p(px(6.))
-        .flex()
-        .flex_col()
-        .gap(px(4.))
-        .child(
-            div()
-                .flex()
-                .justify_between()
-                .child(face("Top", -1.5708, 1.55, entity.clone(), camera.clone()))
-                .child(face("Back", 1.5708, 0.0, entity.clone(), camera.clone())),
-        )
-        .child(
-            div()
-                .flex()
-                .justify_between()
-                .child(face("Left", 3.1416, 0.0, entity.clone(), camera.clone()))
-                .child(face("Right", 0.0, 0.0, entity.clone(), camera.clone())),
-        )
-        .child(
-            div()
-                .flex()
-                .justify_between()
-                .child(face("Bottom", -1.5708, -1.55, entity.clone(), camera.clone()))
-                .child(face("Front", -1.5708, 0.0, entity.clone(), camera.clone())),
-        )
-}
-
-fn info_row(label: &'static str, value: &str) -> impl IntoElement {
-    div()
-        .flex()
-        .items_center()
-        .justify_between()
-        .text_size(px(11.))
-        .text_color(rgb(TEXT_MUTED))
-        .child(label)
-        .child(value.to_owned())
-}
-
-fn layer_bar(layer: f32, entity: WeakEntity<DragonFruit>, window_width: f32) -> impl IntoElement {
-    let minus_entity = entity.clone();
-    let plus_entity = entity.clone();
-    let track_entity = entity.clone();
-    let track_left = (window_width - 420.0) * 0.5 + 48.0;
-    let track = div()
-        .w(px(220.))
-        .h(px(6.))
-        .rounded_full()
-        .bg(rgb(SURFACE_2))
-        .child(
-            div()
-                .h(px(6.))
-                .w(px(220. * layer))
-                .rounded_full()
-                .bg(rgb(ACCENT)),
-        )
-        .on_mouse_down(MouseButton::Left, move |event, _, cx| {
-            let value = ((event.position.x.0 - track_left) / 220.0).clamp(0.0, 1.0);
-            track_entity
-                .update(cx, |this, cx| {
-                    this.layer = value;
-                    cx.notify();
-                })
-                .ok();
-        });
-    div()
-        .absolute()
-        .bottom(px(64.))
-        .left(px(0.))
-        .right(px(0.))
-        .flex()
-        .justify_center()
-        .child(
+    ui::toast_viewport(
+        ui::ToastViewportPosition::BottomCenter,
+        TOAST_OFFSET,
+        ui::toast(
+            toast.tone,
+            ui::ToastShape::Pill,
             div()
                 .flex()
                 .items_center()
-                .gap(px(10.))
-                .h(px(40.))
-                .px(px(14.))
-                .rounded(px(10.))
-                .border_1()
-                .border_color(rgb(BORDER_SUBTLE))
-                .bg(rgb(SURFACE_0))
-                .child(
-                    div()
-                        .id("layer-minus")
-                        .w(px(24.))
-                        .h(px(24.))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .rounded(px(4.))
-                        .bg(rgb(SURFACE_1))
-                        .text_size(px(12.))
-                        .text_color(rgb(TEXT_STRONG))
-                        .child("\u{2212}")
-                        .on_click(move |_, _, cx| {
-                            minus_entity
-                                .update(cx, |this, cx| {
-                                    this.layer = (this.layer - 0.05).max(0.0);
-                                    cx.notify();
-                                })
-                                .ok();
-                        }),
-                )
-                .child(track)
-                .child(
-                    div()
-                        .id("layer-plus")
-                        .w(px(24.))
-                        .h(px(24.))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .rounded(px(4.))
-                        .bg(rgb(SURFACE_1))
-                        .text_size(px(12.))
-                        .text_color(rgb(TEXT_STRONG))
-                        .child("+")
-                        .on_click(move |_, _, cx| {
-                            plus_entity
-                                .update(cx, |this, cx| {
-                                    this.layer = (this.layer + 0.05).min(1.0);
-                                    cx.notify();
-                                })
-                                .ok();
-                        }),
-                )
-                .child(
-                    div()
-                        .text_size(px(11.))
-                        .text_color(rgb(TEXT_MUTED))
-                        .child(format!("Layer {} / 100", (layer * 100.0).round() as u32)),
-                ),
-        )
+                .gap(px(8.))
+                .child(icons::icon(icon_name, 16., TEXT_STRONG))
+                .child(toast.text),
+        ),
+    )
 }
 
-fn settings_modal(
-    entity: WeakEntity<DragonFruit>,
-    tab: usize,
-    grid: bool,
-    plate: bool,
-    volume: bool,
-) -> impl IntoElement {
-    let close_entity = entity.clone();
-    div()
-        .absolute()
-        .top(px(0.))
-        .left(px(0.))
-        .size_full()
-        .bg(rgba(0x000000b3))
-        .flex()
-        .items_center()
-        .justify_center()
-        .child(
-            div()
-                .w(px(520.))
-                .rounded(px(12.))
-                .border_1()
-                .border_color(rgb(BORDER_SUBTLE))
-                .bg(rgb(SURFACE_0))
-                .p(px(16.))
-                .flex()
-                .flex_col()
-                .gap(px(12.))
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .justify_between()
-                        .child(
-                            div()
-                                .text_size(px(16.))
-                                .font_weight(FontWeight::BOLD)
-                                .text_color(rgb(TEXT_STRONG))
-                                .child("Settings"),
-                        )
-                        .child(
-                            div()
-                                .id("settings-close")
-                                .w(px(26.))
-                                .h(px(26.))
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .rounded(px(6.))
-                                .bg(rgb(SURFACE_1))
-                                .text_size(px(13.))
-                                .text_color(rgb(TEXT_MUTED))
-                                .child("\u{00D7}")
-                                .on_click(move |_, _, cx| {
-                                    close_entity
-                                        .update(cx, |this, cx| {
-                                            this.show_settings = false;
-                                            cx.notify();
-                                        })
-                                        .ok();
-                                }),
-                        ),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .gap(px(6.))
-                        .child(modal_tab("Appearance", tab == 0, entity.clone(), 0))
-                        .child(modal_tab("Mesh", tab == 1, entity.clone(), 1))
-                        .child(modal_tab("Performance", tab == 2, entity.clone(), 2)),
-                )
-                .child(match tab {
-                    1 => div()
-                        .flex()
-                        .flex_col()
-                        .gap(px(8.))
-                        .child(modal_row("Selected colour", "#ec2a77"))
-                        .child(modal_row("Unselected colour", "#a3a3a3"))
-                        .child(modal_row("Roughness", "0.45")),
-                    2 => div()
-                        .flex()
-                        .flex_col()
-                        .gap(px(8.))
-                        .child(modal_row("MSAA", "4×"))
-                        .child(modal_row("AO rays", "32"))
-                        .child(modal_row("Refine threshold", "2% of diagonal")),
-                    _ => div()
-                        .flex()
-                        .flex_col()
-                        .gap(px(8.))
-                        .child(modal_row("Theme", "Dark"))
-                        .child(modal_row("Accent", "#ec2a77"))
-                        .child(toggle_row("Grid", grid, entity.clone(), 0))
-                        .child(toggle_row("Build plate", plate, entity.clone(), 1))
-                        .child(toggle_row("Build volume", volume, entity.clone(), 2)),
-                }),
-        )
+fn file_extension(path: &Path) -> String {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase()
 }
 
-fn support_settings_modal(
-    entity: WeakEntity<DragonFruit>,
-    angle: f32,
-    density: f32,
-) -> impl IntoElement {
-    let close_entity = entity.clone();
-    let minus_entity = entity.clone();
-    let plus_entity = entity.clone();
-    let density_minus = entity.clone();
-    let density_plus = entity.clone();
-    div()
-        .absolute()
-        .top(px(0.))
-        .left(px(0.))
-        .size_full()
-        .bg(rgba(0x000000b3))
-        .flex()
-        .items_center()
-        .justify_center()
-        .child(
-            div()
-                .w(px(460.))
-                .rounded(px(12.))
-                .border_1()
-                .border_color(rgb(BORDER_SUBTLE))
-                .bg(rgb(SURFACE_0))
-                .p(px(16.))
-                .flex()
-                .flex_col()
-                .gap(px(10.))
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .justify_between()
-                        .child(
-                            div()
-                                .text_size(px(15.))
-                                .font_weight(FontWeight::BOLD)
-                                .text_color(rgb(TEXT_STRONG))
-                                .child("Auto Supports (Beta) Settings"),
-                        )
-                        .child(
-                            div()
-                                .id("support-settings-close")
-                                .w(px(26.))
-                                .h(px(26.))
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .rounded(px(6.))
-                                .bg(rgb(SURFACE_1))
-                                .text_size(px(13.))
-                                .text_color(rgb(TEXT_MUTED))
-                                .child("\u{00D7}")
-                                .on_click(move |_, _, cx| {
-                                    close_entity
-                                        .update(cx, |this, cx| {
-                                            this.show_support_settings = false;
-                                            cx.notify();
-                                        })
-                                        .ok();
-                                }),
-                        ),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .justify_between()
-                        .h(px(32.))
-                        .px(px(10.))
-                        .rounded(px(6.))
-                        .bg(rgb(SURFACE_1))
-                        .text_size(px(11.))
-                        .text_color(rgb(TEXT_MUTED))
-                        .child("Density")
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(px(8.))
-                                .child(
-                                    div()
-                                        .id("density-minus")
-                                        .w(px(22.))
-                                        .h(px(22.))
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .rounded(px(4.))
-                                        .bg(rgb(SURFACE_2))
-                                        .child("\u{2212}")
-                                        .on_click(move |_, _, cx| {
-                                            density_minus
-                                                .update(cx, |this, cx| {
-                                                    this.support_density =
-                                                        (this.support_density - 0.05).max(0.05);
-                                                    cx.notify();
-                                                })
-                                                .ok();
-                                        }),
-                                )
-                                .child(format!("{density:.2}"))
-                                .child(
-                                    div()
-                                        .id("density-plus")
-                                        .w(px(22.))
-                                        .h(px(22.))
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .rounded(px(4.))
-                                        .bg(rgb(SURFACE_2))
-                                        .child("+")
-                                        .on_click(move |_, _, cx| {
-                                            density_plus
-                                                .update(cx, |this, cx| {
-                                                    this.support_density =
-                                                        (this.support_density + 0.05).min(1.0);
-                                                    cx.notify();
-                                                })
-                                                .ok();
-                                        }),
-                                ),
-                        ),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .justify_between()
-                        .h(px(32.))
-                        .px(px(10.))
-                        .rounded(px(6.))
-                        .bg(rgb(SURFACE_1))
-                        .text_size(px(11.))
-                        .text_color(rgb(TEXT_MUTED))
-                        .child("Overhang angle")
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(px(8.))
-                                .child(
-                                    div()
-                                        .id("angle-minus")
-                                        .w(px(22.))
-                                        .h(px(22.))
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .rounded(px(4.))
-                                        .bg(rgb(SURFACE_2))
-                                        .child("\u{2212}")
-                                        .on_click(move |_, _, cx| {
-                                            minus_entity
-                                                .update(cx, |this, cx| {
-                                                    this.support_angle =
-                                                        (this.support_angle - 5.0).max(5.0);
-                                                    cx.notify();
-                                                })
-                                                .ok();
-                                        }),
-                                )
-                                .child(format!("{angle:.0}°"))
-                                .child(
-                                    div()
-                                        .id("angle-plus")
-                                        .w(px(22.))
-                                        .h(px(22.))
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .rounded(px(4.))
-                                        .bg(rgb(SURFACE_2))
-                                        .child("+")
-                                        .on_click(move |_, _, cx| {
-                                            plus_entity
-                                                .update(cx, |this, cx| {
-                                                    this.support_angle =
-                                                        (this.support_angle + 5.0).min(85.0);
-                                                    cx.notify();
-                                                })
-                                                .ok();
-                                        }),
-                                ),
-                        ),
-                )
-                .child(modal_row("Preset", "Default"))
-                .child(modal_row("Stability", "Balanced")),
-        )
+/// `isSupportedPrepareDropName`.
+fn is_supported_prepare_drop(path: &Path) -> bool {
+    PREPARE_DROP_EXTENSIONS.contains(&file_extension(path).as_str())
 }
 
-fn help_modal(entity: WeakEntity<DragonFruit>) -> impl IntoElement {
-    let close_entity = entity.clone();
-    div()
-        .absolute()
-        .top(px(0.))
-        .left(px(0.))
-        .size_full()
-        .bg(rgba(0x000000b3))
-        .flex()
-        .items_center()
-        .justify_center()
-        .child(
-            div()
-                .w(px(420.))
-                .rounded(px(12.))
-                .border_1()
-                .border_color(rgb(BORDER_SUBTLE))
-                .bg(rgb(SURFACE_0))
-                .p(px(16.))
-                .flex()
-                .flex_col()
-                .gap(px(10.))
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .justify_between()
-                        .child(
-                            div()
-                                .text_size(px(16.))
-                                .font_weight(FontWeight::BOLD)
-                                .text_color(rgb(TEXT_STRONG))
-                                .child("Keyboard & mouse"),
-                        )
-                        .child(
-                            div()
-                                .id("help-close")
-                                .w(px(26.))
-                                .h(px(26.))
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .rounded(px(6.))
-                                .bg(rgb(SURFACE_1))
-                                .text_size(px(13.))
-                                .text_color(rgb(TEXT_MUTED))
-                                .child("\u{00D7}")
-                                .on_click(move |_, _, cx| {
-                                    close_entity
-                                        .update(cx, |this, cx| {
-                                            this.show_help = false;
-                                            cx.notify();
-                                        })
-                                        .ok();
-                                }),
-                        ),
-                )
-                .child(modal_row("1 – 4", "Switch workflow step"))
-                .child(modal_row("Esc", "Close dialogs"))
-                .child(modal_row("Right drag", "Orbit"))
-                .child(modal_row("Middle drag", "Pan"))
-                .child(modal_row("Wheel", "Zoom")),
-        )
-}
-
-fn modal_tab(
-    label: &'static str,
-    active: bool,
-    entity: WeakEntity<DragonFruit>,
-    index: usize,
-) -> impl IntoElement {
-    div()
-        .id(format!("settings-tab-{index}"))
-        .h(px(28.))
-        .px(px(10.))
-        .flex()
-        .items_center()
-        .rounded(px(6.))
-        .bg(rgb(if active { SURFACE_2 } else { SURFACE_1 }))
-        .text_size(px(11.))
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(rgb(if active { TEXT_STRONG } else { TEXT_MUTED }))
-        .child(label)
-        .on_click(move |_, _, cx| {
-            entity
-                .update(cx, |this, cx| {
-                    this.settings_tab = index;
-                    cx.notify();
-                })
-                .ok();
-        })
-}
-
-fn toggle_row(
-    label: &'static str,
-    value: bool,
-    entity: WeakEntity<DragonFruit>,
-    kind: usize,
-) -> impl IntoElement {
-    div()
-        .id(format!("toggle-{kind}"))
-        .flex()
-        .items_center()
-        .justify_between()
-        .h(px(32.))
-        .px(px(10.))
-        .rounded(px(6.))
-        .bg(rgb(SURFACE_1))
-        .text_size(px(11.))
-        .text_color(rgb(TEXT_MUTED))
-        .child(label)
-        .child(
-            div()
-                .w(px(34.))
-                .h(px(18.))
-                .rounded_full()
-                .bg(rgb(if value { ACCENT } else { SURFACE_2 }))
-                .flex()
-                .items_center()
-                .justify_end()
-                .pr(px(2.))
-                .child(
-                    div()
-                        .w(px(14.))
-                        .h(px(14.))
-                        .rounded_full()
-                        .bg(rgb(ACCENT_CONTRAST)),
-                ),
-        )
-        .on_click(move |_, _, cx| {
-            entity
-                .update(cx, |this, cx| {
-                    match kind {
-                        0 => this.show_grid = !this.show_grid,
-                        1 => this.show_plate = !this.show_plate,
-                        _ => this.show_box = !this.show_box,
-                    }
-                    cx.notify();
-                })
-                .ok();
-        })
-}
-
-fn modal_row(label: &'static str, value: &'static str) -> impl IntoElement {
-    div()
-        .flex()
-        .items_center()
-        .justify_between()
-        .h(px(32.))
-        .px(px(10.))
-        .rounded(px(6.))
-        .bg(rgb(SURFACE_1))
-        .text_size(px(11.))
-        .text_color(rgb(TEXT_MUTED))
-        .child(label)
-        .child(value)
+/// `isSceneFileName`: `.voxl` plus the built-in plugin scene types (`.lys`).
+fn is_scene_file(path: &Path) -> bool {
+    matches!(file_extension(path).as_str(), "voxl" | "lys")
 }
 
 fn srgb_to_linear(channel: u8) -> f32 {
@@ -2524,10 +1152,8 @@ fn mesh_color(selected: bool) -> [f32; 3] {
 }
 
 fn rasterize_logo() -> Option<PathBuf> {
-    let svg = std::fs::read_to_string(
-        "../public/dragonfruit_assets/branding/simple_icon.svg",
-    )
-    .ok()?;
+    let svg =
+        std::fs::read_to_string("../public/dragonfruit_assets/branding/simple_icon.svg").ok()?;
     let tree = resvg::usvg::Tree::from_str(&svg, &resvg::usvg::Options::default()).ok()?;
     let size = tree.size();
     let scale = 112.0 / size.width().max(size.height());
@@ -2542,36 +1168,12 @@ fn rasterize_logo() -> Option<PathBuf> {
     Some(path)
 }
 
-#[cfg(windows)]
-fn register_fonts() {
-    use std::os::windows::ffi::OsStrExt;
-    unsafe extern "system" {
-        fn AddFontResourceExW(name: *const u16, fl: u32, res: *mut core::ffi::c_void) -> i32;
-    }
-    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/fonts");
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        if entry.path().extension().and_then(|ext| ext.to_str()) != Some("ttf") {
-            continue;
-        }
-        let wide: Vec<u16> = entry
-            .path()
-            .as_os_str()
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect();
-        // FR_PRIVATE: visible to this process only.
-        unsafe {
-            AddFontResourceExW(wide.as_ptr(), 0x10, std::ptr::null_mut());
-        }
-    }
-}
-
 fn main() {
-    register_fonts();
+    fonts::ensure_geist();
     gpui::application().run(|cx: &mut App| {
+        // Subpixel needs an opaque window background, which is the default
+        // (`window.rs` never sets `background_appearance`).
+        cx.set_text_rendering_mode(TextRenderingMode::Subpixel);
         let bounds = Bounds::centered(None, size(px(1280.), px(800.)), cx);
         let options = window::with_wgpu_renderer(WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),

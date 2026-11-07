@@ -24,6 +24,18 @@ back to the source.
   files to TTF and registered at startup; the root sets `font_family("Geist")`
   at 14px / 1.45, matching `body` in `globals.css`.
 
+The app's own atom contract is `docs/dev/ui-atoms.md`: it defines the set, the
+size/geometry rules and the tone table (`src/components/atoms/iconTone.ts`).
+The GPUI port follows that document rather than re-deriving the atoms.
+
+## No approximations
+
+A value that is not in the source is a bug. Each module carries a
+`// PORT DEVIATIONS` block at the top: it lists the source files it was
+diffed against and every place the platform cannot match (no backdrop blur,
+no CSS transitions, no portals, no CSS transforms), with the native
+substitute. A module without that block has not been audited.
+
 ## Components
 
 | GPUI | Source | Status |
@@ -43,7 +55,7 @@ back to the source.
 | `panels` | `layout/FloatingPanelStack.tsx` | in progress |
 | `overlays::layer_slider` | `controls/LayerSlider.tsx` | in progress |
 | `overlays::view_cube` | `SceneCanvas` view cube | in progress |
-| `panel content` | `organisms/panels/*`, `controls/ModelManagerPanel.tsx`, `controls/AutoSupportPanel.tsx` | pending |
+| `panel_content` | `controls/ModelManagerPanel.tsx`, `controls/AutoSupportPanel.tsx`, `ExportPanelStack.tsx`, `PrintingPanelStack.tsx` | ported (deviations noted in the module) |
 | `settings modal` | `settings/SettingsModal.tsx` | pending |
 | `context menus` | `ui/ContextMenu.tsx` | pending |
 

@@ -1,6 +1,79 @@
-//! The wgpu viewport: background gradient, build-plate grid, footprint outline,
-//! flat-shaded clay mesh with GGX specular, SSAO, MSAA, and the app's mood
-//! overlay.
+//! The wgpu viewport: background, build plate, grid, build-volume box, decals,
+//! axes, the clay mesh and the app's mood overlay.
+//!
+//! PORT DEVIATIONS (against `src/components/scene/SceneCanvas/SceneEnvironment.tsx`,
+//! `SceneCanvas.tsx`, `StlMesh.tsx` and `src/features/shaders/mesh/softClay.tsx`):
+//!
+//! Fixed by this pass (were wrong before):
+//! - Plate: colour `#323841`, opacity `0.94 * buildPlateOpacity` (alpha-blended
+//!   instead of faked by mixing toward the background), thickness
+//!   `min(3, max(1.5, width*0.05))`, corner radius `max(0.2, min(3, halfW-0.2,
+//!   halfD-0.2))`, `curveSegments 18`, centre `z = -thickness/2 - 0.08`, front
+//!   tab from `plateFrontScale`. Lighting is now the real three.js
+//!   `MeshStandardMaterial` sum (ambient 1.2, key 0.3 at +Z, fill `#90a7ff` at
+//!   0.045 on -Z, hemisphere 0.72 with `n.y` weight, view headlight 1.0,
+//!   roughness 1, metalness 0, F0 0.04) with ACES tone mapping, not a hand-tuned
+//!   "hemi*0.28 + key*1.12" mix.
+//! - Grid: generated as `THREE.GridHelper` does (`baseSize`, `divisions =
+//!   max(8, round(max(20, min(240, round(baseSize/5)))/3))`, lines at
+//!   `-size/2 + i*step`, `color1` only when `i === divisions/2`), drawn as real
+//!   lines with vertex colours `#4f5560`/`#2c3138` at `z = -0.01`, scaled
+//!   `(width/baseSize, 1, depth/baseSize)` about the build-volume centre. The
+//!   old full-screen-quad shader had a half-cell phase offset, invented cell
+//!   sizes and a fake plate underlay.
+//! - Build-volume box: edges `#8abfff` at opacity 0.18 (`#ff5b6f`/0.36 when a
+//!   model is out of bounds — that state is not wired here), back-face fill
+//!   `#78b7ff` at 0.04, both transparent, `depthWrite: false`, tone-mapped,
+//!   centred on the build volume and spanning `0..maxZ`.
+//! - FRONT decal: plane at `(centerX, centerY + frontMarkerY, 0.001)`, size
+//!   `markerWidth x markerDepth`, opacity `dimFactor` (1), UVs flipped 180° with
+//!   the source's `depthMm`-wide hysteresis band around the plate centre.
+//! - Logo decal: plane at `(logoX, logoY, 0.12)`, size `logoWidth x logoHeight`,
+//!   opacity `0.4 * dimFactor` applied as alpha (the texture is no longer
+//!   pre-multiplied by 0.4), double-sided, depth bias -2/-2.
+//! - Axes: shaft spans `0..axisLength` and the cone `axisLength..axisLength +
+//!   headLength` (the old arrow was short by one head), each part shading over
+//!   its own length from `#8d232f`/`#1e6b35`/`#21428d` to
+//!   `#ff7a7a`/`#74ff95`/`#74a3ff`, 12 segments, origin
+//!   `(originMinX, originMinY, 0.5)`.
+//! - Axis labels: sprite size `6 * plateScale` (was hard-coded 6.56), offset
+//!   `axisLength + 8 * plateScale`, lift `max(0.12, plateScale)`.
+//! - Plate opacity / below-plate culling: the source's own formulas
+//!   (`updateCameraBelowBuildPlate`) instead of a single ortho band used for
+//!   every projection, including the 4.8/7.0 mm height hysteresis and the
+//!   side-view fade.
+//! - Mesh material: roughness 0.9 (was 0.55), metalness 0.02, F0
+//!   `mix(0.04, albedo, 0.02)`, real three.js light sum, fake AO
+//!   (`dir (0.35,0.58,0.74)`, strength 0.2, `pow(1-NdotL,1.35)`) and baked AO at
+//!   `0.75 * 0.85 = 0.6375` (was 0.85).
+//! - Mood overlay: the two CSS layers are composited as the CSS does (linear
+//!   alpha ramp, premultiplied gradient stops, `screen` with element alpha)
+//!   instead of one smoothstep blob.
+//!
+//! Still not matched (platform / module boundaries):
+//! - `camera.rs` (not this file): near/far are `distance*0.001`/`distance*100`
+//!   instead of `CameraClipPlaneStabilizer`'s `clamp(dist/200, 0.02, 0.5)` /
+//!   `clamp(dist*50, 200, 5000)`; the ortho frustum uses `near..far` instead of
+//!   `±(radius + sceneRadius + 500)`; the default FOV is 45° instead of the
+//!   app's 50°; the default view is `fit()` instead of
+//!   `target + (-220, -220, 260)`.
+//! - Safety-margin hazard stripes (`SafetyStripeMaterial`) are not drawn. The
+//!   default printer profile carries no `safetyMarginMm`, so the source draws
+//!   nothing either; a profile with margins would show stripes here.
+//! - Plate name label, side buttons and ghost plates are 2D/widget work owned by
+//!   other modules; nothing is drawn for them here.
+//! - The grid's `material-opacity` fade for inactive plates, multi-plate
+//!   offsets and the `circle` plate silhouette have no counterpart: this
+//!   viewport draws one rectangular plate at the origin.
+//! - `polygonOffset` is shared by both decals here: the pipeline uses the
+//!   logo's `-2/-2` bias, so the FRONT marker is offset by -2/-2 where the
+//!   source uses -1/-1. Both are decals a fraction of a millimetre above the
+//!   plate; the difference is below what the depth buffer resolves.
+//! - Axis label and FRONT marker glyphs are rasterised with fontdue from Arial
+//!   Bold; the source uses the browser's canvas metrics (`Bold 42px Arial`,
+//!   `700 70px Arial`), so glyph placement differs by fractions of a pixel.
+//! - `SceneMoodOverlay`'s gradient colours are the dark-theme defaults
+//!   (`--scene-gradient-radial` etc.); custom themes are not read here.
 
 use anyhow::Result;
 use gpui_interop::WgpuSurface;
@@ -22,13 +95,37 @@ struct Uniforms {
     _pad1: f32,
     resolution: [f32; 2],
     _pad2: [f32; 2],
+    /// `ViewHeadlight`'s direction: the camera's world forward, negated. The
+    /// source light's target sits 100mm down that ray, so its direction is
+    /// constant for the frame rather than per-fragment.
+    headlight_dir: [f32; 3],
+    _pad3: f32,
 }
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct OverlayUniform {
-    value: f32,
-    _pad: [f32; 3],
+struct SpriteUniform {
+    right: [f32; 3],
+    size: f32,
+    up: [f32; 3],
+    _pad: f32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct DecalUniform {
+    /// `1` when the FRONT marker has turned half a revolution.
+    flip: f32,
+    /// `dimFactor` for the marker, `0.4 * dimFactor` for the logo.
+    opacity: f32,
+    _pad: [f32; 2],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct ColorUniform {
+    color: [f32; 3],
+    opacity: f32,
 }
 
 #[repr(C)]
@@ -74,18 +171,38 @@ pub struct Viewport {
     volume: wgpu::RenderPipeline,
     volume_buffer: wgpu::Buffer,
     volume_vertex_count: u32,
+    volume_fill: wgpu::RenderPipeline,
+    volume_fill_buffer: wgpu::Buffer,
+    volume_fill_vertex_count: u32,
+    volume_edge_bind: wgpu::BindGroup,
+    volume_fill_bind: wgpu::BindGroup,
+    volume_edge_uniform: wgpu::Buffer,
+    volume_fill_uniform: wgpu::Buffer,
     axis: wgpu::RenderPipeline,
+    axis_mesh: wgpu::RenderPipeline,
     axis_buffer: wgpu::Buffer,
     axis_vertex_count: u32,
+    sprite: wgpu::RenderPipeline,
+    sprite_uniform: wgpu::Buffer,
+    sprite_bind: wgpu::BindGroup,
+    sprite_buffer: wgpu::Buffer,
+    sprite_vertex_count: u32,
+    x_label_bind: wgpu::BindGroup,
+    y_label_bind: wgpu::BindGroup,
+    z_label_bind: wgpu::BindGroup,
     plate_uniform: wgpu::Buffer,
     plate_bind: wgpu::BindGroup,
     decal: wgpu::RenderPipeline,
     decal_buffer: wgpu::Buffer,
     decal_uniform: wgpu::Buffer,
     decal_bind: wgpu::BindGroup,
+    logo_decal_uniform: wgpu::Buffer,
+    logo_decal_bind: wgpu::BindGroup,
     front_bind: wgpu::BindGroup,
     logo_bind: wgpu::BindGroup,
     grid: wgpu::RenderPipeline,
+    grid_buffer: wgpu::Buffer,
+    grid_vertex_count: u32,
     footprint: wgpu::RenderPipeline,
     mesh_pipeline: wgpu::RenderPipeline,
     composite_pipeline: wgpu::RenderPipeline,
@@ -95,6 +212,11 @@ pub struct Viewport {
     linear_sampler: wgpu::Sampler,
     targets: Targets,
     size: (u32, u32),
+    metrics: PlateMetrics,
+    /// `isCameraBelowBuildPlate`, with the source's hysteresis.
+    below_plate: bool,
+    /// `FrontMarkerDecal`'s `sideRef`: `None` before the first frame.
+    front_from_back: Option<bool>,
     mesh: Option<GpuMesh>,
     mesh_ptr: usize,
     support_buffer: wgpu::Buffer,
@@ -131,10 +253,6 @@ impl Viewport {
         let decal_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("viewport decal"),
             source: wgpu::ShaderSource::Wgsl(DECAL_SHADER.into()),
-        });
-        let grid_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("viewport grid"),
-            source: wgpu::ShaderSource::Wgsl(GRID_SHADER.into()),
         });
         let footprint_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("viewport footprint"),
@@ -268,7 +386,7 @@ impl Viewport {
             });
         let decal_uniform = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("viewport decal uniform"),
-            size: std::mem::size_of::<OverlayUniform>() as u64,
+            size: std::mem::size_of::<DecalUniform>() as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -278,6 +396,21 @@ impl Viewport {
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
                 resource: decal_uniform.as_entire_binding(),
+            }],
+        });
+        // The logo is not a marker: it never turns, and it is drawn at 0.4.
+        let logo_decal_uniform = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("viewport logo decal uniform"),
+            size: std::mem::size_of::<DecalUniform>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let logo_decal_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("viewport logo decal"),
+            layout: &decal_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: logo_decal_uniform.as_entire_binding(),
             }],
         });
 
@@ -310,6 +443,24 @@ impl Viewport {
                 offset: 0,
                 shader_location: 0,
             }],
+        };
+        // Position + linear colour: the axes, the grid and the supports all draw
+        // with it.
+        let axis_layout = wgpu::VertexBufferLayout {
+            array_stride: 24,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &[
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x3,
+                    offset: 0,
+                    shader_location: 0,
+                },
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x3,
+                    offset: 12,
+                    shader_location: 1,
+                },
+            ],
         };
 
         let model_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -359,15 +510,16 @@ impl Viewport {
             true,
             SAMPLE_COUNT,
         );
+        // `GridHelper`: `LineSegments` with vertex colours, opaque, depth-written.
         let grid = pipeline(
             device,
             &uniform_pipeline_layout,
-            &grid_shader,
-            &[],
-            wgpu::PrimitiveTopology::TriangleList,
+            &axis_shader,
+            &[Some(axis_layout.clone())],
+            wgpu::PrimitiveTopology::LineList,
             None,
             true,
-            wgpu::CompareFunction::Less,
+            wgpu::CompareFunction::LessEqual,
             WgpuSurface::DEFAULT_FORMAT,
             true,
             true,
@@ -465,6 +617,40 @@ impl Viewport {
                 bind_group_layouts: &[Some(&uniform_layout), Some(&decal_layout)],
                 immediate_size: 0,
             });
+        let volume_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("viewport volume"),
+                bind_group_layouts: &[Some(&uniform_layout), Some(&decal_layout)],
+                immediate_size: 0,
+            });
+        let volume_edge_uniform = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("viewport volume edges"),
+            size: 16,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let volume_edge_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("viewport volume edges"),
+            layout: &decal_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: volume_edge_uniform.as_entire_binding(),
+            }],
+        });
+        let volume_fill_uniform = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("viewport volume fill"),
+            size: 16,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let volume_fill_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("viewport volume fill"),
+            layout: &decal_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: volume_fill_uniform.as_entire_binding(),
+            }],
+        });
         let plate_uniform = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("viewport plate uniform"),
             size: 16,
@@ -479,7 +665,7 @@ impl Viewport {
                 resource: plate_uniform.as_entire_binding(),
             }],
         });
-        let plate = pipeline(
+        let plate = pipeline_blended(
             device,
             &plate_pipeline_layout,
             &plate_shader,
@@ -500,18 +686,17 @@ impl Viewport {
                 ],
             })],
             wgpu::PrimitiveTopology::TriangleList,
-            None,
+            Some(wgpu::Face::Back),
             true,
             wgpu::CompareFunction::Less,
             WgpuSurface::DEFAULT_FORMAT,
-            true,
-            true,
+            wgpu::DepthBiasState::default(),
             SAMPLE_COUNT,
         );
 
-        let volume = pipeline(
+        let volume = pipeline_blended(
             device,
-            &uniform_pipeline_layout,
+            &volume_pipeline_layout,
             &volume_shader,
             &[Some(wgpu::VertexBufferLayout {
                 array_stride: 12,
@@ -527,30 +712,36 @@ impl Viewport {
             false,
             wgpu::CompareFunction::LessEqual,
             WgpuSurface::DEFAULT_FORMAT,
-            true,
-            true,
+            wgpu::DepthBiasState::default(),
+            SAMPLE_COUNT,
+        );
+        // `side={THREE.BackSide}` on the box's faint fill: only the far faces.
+        let volume_fill = pipeline_blended(
+            device,
+            &volume_pipeline_layout,
+            &volume_shader,
+            &[Some(wgpu::VertexBufferLayout {
+                array_stride: 12,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &[wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x3,
+                    offset: 0,
+                    shader_location: 0,
+                }],
+            })],
+            wgpu::PrimitiveTopology::TriangleList,
+            Some(wgpu::Face::Front),
+            false,
+            wgpu::CompareFunction::LessEqual,
+            WgpuSurface::DEFAULT_FORMAT,
+            wgpu::DepthBiasState::default(),
             SAMPLE_COUNT,
         );
         let axis = pipeline(
             device,
             &uniform_pipeline_layout,
             &axis_shader,
-            &[Some(wgpu::VertexBufferLayout {
-                array_stride: 24,
-                step_mode: wgpu::VertexStepMode::Vertex,
-                attributes: &[
-                    wgpu::VertexAttribute {
-                        format: wgpu::VertexFormat::Float32x3,
-                        offset: 0,
-                        shader_location: 0,
-                    },
-                    wgpu::VertexAttribute {
-                        format: wgpu::VertexFormat::Float32x3,
-                        offset: 12,
-                        shader_location: 1,
-                    },
-                ],
-            })],
+            &[Some(axis_layout.clone())],
             wgpu::PrimitiveTopology::LineList,
             None,
             false,
@@ -560,17 +751,77 @@ impl Viewport {
             true,
             SAMPLE_COUNT,
         );
-        let axis_edges = axis_edges();
+        // `meshBasicMaterial` defaults to `FrontSide`.
+        let axis_mesh = pipeline(
+            device,
+            &uniform_pipeline_layout,
+            &axis_shader,
+            &[Some(axis_layout.clone())],
+            wgpu::PrimitiveTopology::TriangleList,
+            Some(wgpu::Face::Back),
+            false,
+            wgpu::CompareFunction::LessEqual,
+            WgpuSurface::DEFAULT_FORMAT,
+            true,
+            true,
+            SAMPLE_COUNT,
+        );
+        // The VOXL profile's build volume (`profiles/printers/generic`), centred
+        // origin (`originMode: 'center'`). The app takes these from the active
+        // printer profile; this viewport has no profile store yet.
+        const BUILD_VOLUME_MM: (f32, f32, f32) = (218.88, 122.88, 220.0);
+        let metrics = PlateMetrics::new(
+            BUILD_VOLUME_MM.0,
+            BUILD_VOLUME_MM.1,
+            BUILD_VOLUME_MM.2,
+            -BUILD_VOLUME_MM.0 * 0.5,
+            -BUILD_VOLUME_MM.1 * 0.5,
+        );
+        let axis_edges = axis_arrows(&metrics);
         let axis_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("viewport axes"),
             contents: bytemuck::cast_slice(&axis_edges),
             usage: wgpu::BufferUsages::VERTEX,
         });
-        let decal = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("viewport decal"),
-            layout: Some(&decal_pipeline_layout),
+        let grid_edges = grid_vertices(&metrics);
+        let grid_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("viewport grid"),
+            contents: bytemuck::cast_slice(&grid_edges),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        let sprite_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("viewport sprite"),
+            source: wgpu::ShaderSource::Wgsl(SPRITE_SHADER.into()),
+        });
+        let sprite_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("viewport sprite"),
+                bind_group_layouts: &[
+                    Some(&uniform_layout),
+                    Some(&decal_layout),
+                    Some(&texture_layout),
+                ],
+                immediate_size: 0,
+            });
+        let sprite_uniform = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("viewport sprite uniform"),
+            size: std::mem::size_of::<SpriteUniform>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let sprite_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("viewport sprite"),
+            layout: &decal_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: sprite_uniform.as_entire_binding(),
+            }],
+        });
+        let sprite = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("viewport sprite"),
+            layout: Some(&sprite_pipeline_layout),
             vertex: wgpu::VertexState {
-                module: &decal_shader,
+                module: &sprite_shader,
                 entry_point: Some("vs_main"),
                 buffers: &[Some(wgpu::VertexBufferLayout {
                     array_stride: 20,
@@ -591,13 +842,13 @@ impl Viewport {
                 compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
-                module: &decal_shader,
+                module: &sprite_shader,
                 entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: WgpuSurface::DEFAULT_FORMAT,
                     blend: Some(wgpu::BlendState {
                         color: wgpu::BlendComponent {
-                            src_factor: wgpu::BlendFactor::One,
+                            src_factor: wgpu::BlendFactor::SrcAlpha,
                             dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
                             operation: wgpu::BlendOperation::Add,
                         },
@@ -630,20 +881,134 @@ impl Viewport {
             multiview_mask: None,
             cache: None,
         });
-        let decal_vertices = decal_vertices();
+        let sprite_vertices = sprite_vertices(&metrics);
+        let sprite_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("viewport sprites"),
+            contents: bytemuck::cast_slice(&sprite_vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        let label_bind = |letter: &str, color: u32| {
+            let (w, h, data) = axis_label_texture(letter, color);
+            let texture = create_texture(device, queue, letter, w, h, &data);
+            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some(letter),
+                layout: &texture_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&linear_sampler),
+                    },
+                ],
+            })
+        };
+        let x_label_bind = label_bind("X", 0xff0000);
+        let y_label_bind = label_bind("Y", 0x00ff00);
+        let z_label_bind = label_bind("Z", 0x0000ff);
+        let decal = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("viewport decal"),
+            layout: Some(&decal_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &decal_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: 20,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32x3,
+                            offset: 0,
+                            shader_location: 0,
+                        },
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32x2,
+                            offset: 12,
+                            shader_location: 1,
+                        },
+                    ],
+                })],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &decal_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: WgpuSurface::DEFAULT_FORMAT,
+                    blend: Some(wgpu::BlendState {
+                        color: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::SrcAlpha,
+                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                        alpha: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::One,
+                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                    }),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                stencil: wgpu::StencilState::default(),
+                // `polygonOffsetFactor/Units: -2` on both decals.
+                bias: wgpu::DepthBiasState {
+                    constant: -2,
+                    slope_scale: -2.0,
+                    clamp: 0.0,
+                },
+            }),
+            multisample: wgpu::MultisampleState {
+                count: SAMPLE_COUNT,
+                ..Default::default()
+            },
+            multiview_mask: None,
+            cache: None,
+        });
+        let decal_vertices = decal_vertices(&metrics);
         let decal_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("viewport decals"),
             contents: bytemuck::cast_slice(&decal_vertices),
             usage: wgpu::BufferUsages::VERTEX,
         });
-        let mut volume_edges = build_volume_edges(218.88, 122.88, 220.0);
-        volume_edges.extend_from_slice(&plate_outline(218.88, 122.88, -0.07));
+        let volume_edges = build_volume_edges(
+            metrics.center_x,
+            metrics.center_y,
+            metrics.width,
+            metrics.depth,
+            metrics.volume_height,
+        );
         let volume_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("viewport volume"),
             contents: bytemuck::cast_slice(&volume_edges),
             usage: wgpu::BufferUsages::VERTEX,
         });
-        let (plate_vertices, plate_indices) = plate_mesh(224.88, 128.88, 3.0, -0.08, 3.0, 8);
+        let volume_fill_vertices = build_volume_fill(
+            metrics.center_x,
+            metrics.center_y,
+            metrics.width,
+            metrics.depth,
+            metrics.volume_height,
+        );
+        let volume_fill_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("viewport volume fill"),
+            contents: bytemuck::cast_slice(&volume_fill_vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        let (plate_vertices, plate_indices) = plate_mesh(&metrics);
         let plate_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("viewport plate vertices"),
             contents: bytemuck::cast_slice(&plate_vertices),
@@ -674,18 +1039,38 @@ impl Viewport {
             volume,
             volume_buffer,
             volume_vertex_count: volume_edges.len() as u32,
+            volume_fill,
+            volume_fill_buffer,
+            volume_fill_vertex_count: volume_fill_vertices.len() as u32,
+            volume_edge_bind,
+            volume_fill_bind,
+            volume_edge_uniform,
+            volume_fill_uniform,
             axis,
+            axis_mesh,
             axis_buffer,
             axis_vertex_count: axis_edges.len() as u32,
+            sprite,
+            sprite_uniform,
+            sprite_bind,
+            sprite_buffer,
+            sprite_vertex_count: sprite_vertices.len() as u32,
+            x_label_bind,
+            y_label_bind,
+            z_label_bind,
             plate_uniform,
             plate_bind,
             decal,
             decal_buffer,
             decal_uniform,
             decal_bind,
+            logo_decal_uniform,
+            logo_decal_bind,
             front_bind,
             logo_bind,
             grid,
+            grid_buffer,
+            grid_vertex_count: grid_edges.len() as u32,
             footprint,
             mesh_pipeline,
             composite_pipeline,
@@ -695,6 +1080,9 @@ impl Viewport {
             linear_sampler,
             targets,
             size: (1, 1),
+            metrics,
+            below_plate: false,
+            front_from_back: None,
             mesh: None,
             mesh_ptr: 0,
             support_buffer: device.create_buffer(&wgpu::BufferDescriptor {
@@ -784,16 +1172,100 @@ impl Viewport {
             self.mesh_ptr = 0;
         }
 
-        let view_signed_z = -camera.pitch.sin();
-        let fade_t = ((view_signed_z + 0.06) / 0.078).clamp(0.0, 1.0);
-        let fade = fade_t * fade_t * (3.0 - 2.0 * fade_t);
-        let plate_opacity = 1.0 - fade;
+        let eye = camera.eye();
+        let forward = (camera.target - eye).normalize();
+        let view_signed_z = forward.z;
+        let view_abs_z = view_signed_z.abs();
+        let camera_z = eye.z;
+
+        // `updateCameraBelowBuildPlate` (SceneCanvas.tsx), verbatim.
+        let plate_opacity;
+        if camera.orthographic {
+            const ORTHO_FADE_VISIBLE_VIEW_Z: f32 = -0.06;
+            const ORTHO_FADE_HIDDEN_VIEW_Z: f32 = 0.018;
+            const ORTHO_ENTER_BELOW_VIEW_Z: f32 = 0.008;
+            const ORTHO_EXIT_BELOW_VIEW_Z: f32 = -0.018;
+
+            let ortho_fade_t = ((view_signed_z - ORTHO_FADE_VISIBLE_VIEW_Z)
+                / (ORTHO_FADE_HIDDEN_VIEW_Z - ORTHO_FADE_VISIBLE_VIEW_Z).max(0.0001))
+                .clamp(0.0, 1.0);
+            let ortho_fade = ortho_fade_t * ortho_fade_t * (3.0 - 2.0 * ortho_fade_t);
+            plate_opacity = 1.0 - ortho_fade;
+
+            self.below_plate = if self.below_plate {
+                view_signed_z > ORTHO_EXIT_BELOW_VIEW_Z
+            } else {
+                view_signed_z >= ORTHO_ENTER_BELOW_VIEW_Z
+            };
+        } else {
+            const ENTER_BELOW_Z: f32 = 4.8;
+            const EXIT_BELOW_Z: f32 = 7.0;
+            const FADE_VISIBLE_Z: f32 = 12.0;
+            const FADE_HIDDEN_Z: f32 = 3.8;
+            const SIDE_VIEW_FADE_START_ABS_Z: f32 = 0.26;
+            const SIDE_VIEW_FADE_END_ABS_Z: f32 = 0.08;
+            const SIDE_VIEW_HEIGHT_MAX_Z: f32 = 20.0;
+            const SIDE_ENTER_ABS_Z: f32 = 0.10;
+            const SIDE_EXIT_ABS_Z: f32 = 0.20;
+            const SIDE_ACTIVE_HEIGHT_MAX_Z: f32 = 22.0;
+
+            let height_fade_t = ((camera_z - FADE_HIDDEN_Z)
+                / (FADE_VISIBLE_Z - FADE_HIDDEN_Z).max(0.0001))
+                .clamp(0.0, 1.0);
+            let smooth_height_fade = height_fade_t * height_fade_t * (3.0 - 2.0 * height_fade_t);
+
+            let side_view_raw = ((SIDE_VIEW_FADE_START_ABS_Z - view_abs_z)
+                / (SIDE_VIEW_FADE_START_ABS_Z - SIDE_VIEW_FADE_END_ABS_Z).max(0.0001))
+                .clamp(0.0, 1.0);
+            let side_view_fade = side_view_raw * side_view_raw * (3.0 - 2.0 * side_view_raw);
+            let side_height_gate =
+                ((SIDE_VIEW_HEIGHT_MAX_Z - camera_z) / SIDE_VIEW_HEIGHT_MAX_Z).clamp(0.0, 1.0);
+
+            plate_opacity = smooth_height_fade.min(1.0 - side_view_fade * side_height_gate);
+
+            let height_triggered = if self.below_plate {
+                camera_z < EXIT_BELOW_Z
+            } else {
+                camera_z < ENTER_BELOW_Z
+            };
+            let side_triggered = if camera_z < SIDE_ACTIVE_HEIGHT_MAX_Z {
+                if self.below_plate {
+                    view_abs_z < SIDE_EXIT_ABS_Z
+                } else {
+                    view_abs_z < SIDE_ENTER_ABS_Z
+                }
+            } else {
+                false
+            };
+            self.below_plate = height_triggered || side_triggered;
+        }
+        let plate_opacity = plate_opacity.clamp(0.0, 1.0);
+        // `meshStandardMaterial color={buildPlateColor}` with
+        // `opacity={0.94 * plateOpacity}`.
         queue.write_buffer(
             &self.plate_uniform,
             0,
-            bytemuck::bytes_of(&OverlayUniform {
-                value: plate_opacity,
-                _pad: [0.0; 3],
+            bytemuck::bytes_of(&ColorUniform {
+                color: srgb_linear(BUILD_PLATE_COLOR),
+                opacity: 0.94 * plate_opacity,
+            }),
+        );
+
+        let right = if forward.z.abs() > 0.99 {
+            glam::Vec3::X
+        } else {
+            forward.cross(glam::Vec3::Z).normalize()
+        };
+        let up = right.cross(forward).normalize();
+        queue.write_buffer(
+            &self.sprite_uniform,
+            0,
+            bytemuck::bytes_of(&SpriteUniform {
+                right: right.to_array(),
+                // `AxisLabels`: `scale={[labelSize, labelSize, 1]}`.
+                size: self.metrics.label_size,
+                up: up.to_array(),
+                _pad: 0.0,
             }),
         );
 
@@ -875,15 +1347,56 @@ impl Viewport {
                 _pad1: 0.0,
                 resolution: [width as f32, height as f32],
                 _pad2: [0.0; 2],
+                // `ViewHeadlight`: `light.position = camera.position`,
+                // `target = position + viewDir * 100`, so the light shines along
+                // `-viewDir`.
+                headlight_dir: [-forward.x, -forward.y, -forward.z],
+                _pad3: 0.0,
             }),
         );
 
+        // `FrontMarkerDecal`: the marker turns half a revolution once the camera
+        // crosses the plate's centre, with a `depthMm`-wide hysteresis band.
+        let band = self.metrics.marker_depth.max(1.0);
+        let center_y = self.metrics.center_y;
+        let from_back = match self.front_from_back {
+            None => eye.y > center_y,
+            Some(true) => eye.y > center_y - band,
+            Some(false) => eye.y > center_y + band,
+        };
+        self.front_from_back = Some(from_back);
         queue.write_buffer(
             &self.decal_uniform,
             0,
-            bytemuck::bytes_of(&OverlayUniform {
-                value: if eye.y > 0.0 { 1.0 } else { 0.0 },
-                _pad: [0.0; 3],
+            bytemuck::bytes_of(&DecalUniform {
+                flip: if from_back { 1.0 } else { 0.0 },
+                opacity: 1.0,
+                _pad: [0.0; 2],
+            }),
+        );
+        queue.write_buffer(
+            &self.logo_decal_uniform,
+            0,
+            bytemuck::bytes_of(&DecalUniform {
+                flip: 0.0,
+                opacity: 0.4,
+                _pad: [0.0; 2],
+            }),
+        );
+        queue.write_buffer(
+            &self.volume_edge_uniform,
+            0,
+            bytemuck::bytes_of(&ColorUniform {
+                color: srgb_linear(0x8abfff),
+                opacity: 0.18,
+            }),
+        );
+        queue.write_buffer(
+            &self.volume_fill_uniform,
+            0,
+            bytemuck::bytes_of(&ColorUniform {
+                color: srgb_linear(0x78b7ff),
+                opacity: 0.04,
             }),
         );
 
@@ -901,9 +1414,9 @@ impl Viewport {
                     resolve_target: Some(&self.targets.scene_view),
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.0033,
-                            g: 0.0048,
-                            b: 0.0069,
+                            r: 0.0056,
+                            g: 0.0061,
+                            b: 0.0080,
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,
@@ -924,33 +1437,58 @@ impl Viewport {
             pass.set_bind_group(0, &self.scene_bind, &[]);
             pass.set_pipeline(&self.background);
             pass.draw(0..3, 0..1);
-            let below_plate = view_signed_z >= 0.008;
-            if !below_plate && layers.plate {
+            let below_plate = self.below_plate;
+            let plate_visible = layers.plate && plate_opacity > 0.001;
+            if !below_plate && plate_visible {
                 pass.set_pipeline(&self.plate);
                 pass.set_bind_group(1, &self.plate_bind, &[]);
                 pass.set_vertex_buffer(0, self.plate_vertex_buffer.slice(..));
                 pass.set_index_buffer(self.plate_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..self.plate_index_count, 0, 0..1);
             }
-            if !below_plate && layers.grid {
+            if !below_plate && layers.grid && plate_opacity > 0.001 {
                 pass.set_pipeline(&self.grid);
-                pass.draw(0..6, 0..1);
+                pass.set_vertex_buffer(0, self.grid_buffer.slice(..));
+                pass.draw(0..self.grid_vertex_count, 0..1);
             }
             if layers.volume {
+                pass.set_pipeline(&self.volume_fill);
+                pass.set_bind_group(1, &self.volume_fill_bind, &[]);
+                pass.set_vertex_buffer(0, self.volume_fill_buffer.slice(..));
+                pass.draw(0..self.volume_fill_vertex_count, 0..1);
                 pass.set_pipeline(&self.volume);
+                pass.set_bind_group(1, &self.volume_edge_bind, &[]);
                 pass.set_vertex_buffer(0, self.volume_buffer.slice(..));
                 pass.draw(0..self.volume_vertex_count, 0..1);
             }
-            pass.set_pipeline(&self.axis);
-            pass.set_vertex_buffer(0, self.axis_buffer.slice(..));
-            pass.draw(0..self.axis_vertex_count, 0..1);
-            pass.set_pipeline(&self.decal);
-            pass.set_bind_group(1, &self.decal_bind, &[]);
-            pass.set_vertex_buffer(0, self.decal_buffer.slice(..));
-            pass.set_bind_group(2, &self.front_bind, &[]);
-            pass.draw(0..6, 0..1);
-            pass.set_bind_group(2, &self.logo_bind, &[]);
-            pass.draw(6..12, 0..1);
+            if layers.grid {
+                pass.set_pipeline(&self.axis_mesh);
+                pass.set_vertex_buffer(0, self.axis_buffer.slice(..));
+                pass.draw(0..self.axis_vertex_count, 0..1);
+            }
+            if layers.plate && plate_opacity > 0.001 {
+                pass.set_pipeline(&self.decal);
+                pass.set_vertex_buffer(0, self.decal_buffer.slice(..));
+                pass.set_bind_group(1, &self.decal_bind, &[]);
+                pass.set_bind_group(2, &self.front_bind, &[]);
+                pass.draw(0..6, 0..1);
+                if layers.grid {
+                    pass.set_bind_group(1, &self.logo_decal_bind, &[]);
+                    pass.set_bind_group(2, &self.logo_bind, &[]);
+                    pass.draw(6..12, 0..1);
+                }
+            }
+            if layers.grid {
+                pass.set_pipeline(&self.sprite);
+                pass.set_bind_group(1, &self.sprite_bind, &[]);
+                pass.set_vertex_buffer(0, self.sprite_buffer.slice(..));
+                pass.set_bind_group(2, &self.x_label_bind, &[]);
+                pass.draw(0..6, 0..1);
+                pass.set_bind_group(2, &self.y_label_bind, &[]);
+                pass.draw(6..12, 0..1);
+                pass.set_bind_group(2, &self.z_label_bind, &[]);
+                pass.draw(12..18, 0..1);
+            }
             if self.support_vertex_count > 0 {
                 pass.set_pipeline(&self.axis);
                 pass.set_vertex_buffer(0, self.support_buffer.slice(..));
@@ -1136,75 +1674,388 @@ impl Targets {
     }
 }
 
-fn axis_edges() -> Vec<[f32; 6]> {
-    let origin = [-109.44, -61.44, 0.1];
-    let length = 20.0;
-    let head = 3.0;
-    let axes: [([f32; 3], [f32; 3], [f32; 3], [f32; 3]); 3] = [
-        ([1.0, 0.0, 0.0], [1.0, 0.05, 0.05], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]),
-        ([0.0, 1.0, 0.0], [0.05, 1.0, 0.05], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
-        ([0.0, 0.0, 1.0], [0.05, 0.2, 1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
-    ];
-    let mut out = Vec::new();
-    let mut push = |a: [f32; 3], b: [f32; 3], color: [f32; 3]| {
-        out.push([a[0], a[1], a[2], color[0], color[1], color[2]]);
-        out.push([b[0], b[1], b[2], color[0], color[1], color[2]]);
+// The scene's own colours (dark theme, `Helpers`).
+const BUILD_PLATE_COLOR: u32 = 0x323841;
+const GRID_MAJOR_COLOR: u32 = 0x4f5560;
+const GRID_MINOR_COLOR: u32 = 0x2c3138;
+
+/// `FRONT_MARKER_MAX_TEXT_WIDTH`: the word is fitted to 200 of the texture's
+/// 256 pixels.
+const FRONT_MARKER_MAX_TEXT_WIDTH: f32 = 200.0;
+
+/// Build-plate decorations, derived exactly as `SceneEnvironment.tsx` does.
+/// `width`/`depth` are the build-volume dimensions, not the plate's.
+struct PlateMetrics {
+    width: f32,
+    depth: f32,
+    center_x: f32,
+    center_y: f32,
+    volume_height: f32,
+    grid_base_size: f32,
+    grid_divisions: u32,
+    grid_scale_x: f32,
+    grid_scale_z: f32,
+    plate_width: f32,
+    plate_depth: f32,
+    plate_thickness: f32,
+    plate_corner_radius: f32,
+    plate_center_z: f32,
+    tab_depth: f32,
+    tab_back: f32,
+    tab_front: f32,
+    marker_width: f32,
+    marker_depth: f32,
+    marker_y: f32,
+    scale: f32,
+    axis_length: f32,
+    shaft_radius: f32,
+    head_radius: f32,
+    head_length: f32,
+    label_lift: f32,
+    label_offset: f32,
+    label_size: f32,
+    logo_width: f32,
+    logo_height: f32,
+    logo_x: f32,
+    logo_y: f32,
+}
+
+impl PlateMetrics {
+    /// `width`/`depth`/`height` are the build volume; `origin_min_x`/`origin_min_y`
+    /// are the front-left origin (0,0) or the centred one (-w/2,-d/2).
+    fn new(width: f32, depth: f32, height: f32, origin_min_x: f32, origin_min_y: f32) -> Self {
+        let build_volume_center_x = origin_min_x + width * 0.5;
+        let build_volume_center_y = origin_min_y + depth * 0.5;
+        let base_size = width.max(depth);
+        let base_divisions = (base_size / 5.0).round().clamp(20.0, 240.0);
+        let divisions = (base_divisions / 3.0).round().max(8.0) as u32;
+        let scale_x = width / base_size;
+        let scale_z = depth / base_size;
+
+        let oversize = 3.0;
+        let plate_width = width + oversize * 2.0;
+        let plate_depth = depth + oversize * 2.0;
+        let thickness = (width * 0.05).clamp(1.5, 3.0);
+        let corner_radius = 3.0;
+        let plate_center_z = -thickness * 0.5 - 0.08;
+
+        let plate_scale = (width / 200.0).clamp(0.16, 1.5);
+        let front_scale = (width / 200.0).clamp(0.55, 1.5) * 1.2;
+        let tab_depth = 4.2 * front_scale;
+        let tab_back = (plate_width - width * 0.072).min(24.0 * front_scale);
+        let tab_front = (tab_back - width * 0.018).min(16.0 * front_scale);
+        let marker_inset = width * 0.0012;
+        let aspect = 256.0 / 72.0;
+        let marker_depth =
+            (tab_depth - marker_inset * 2.0).min((tab_back - marker_inset * 2.0) / aspect);
+        let marker_width = marker_depth * aspect;
+        let marker_y = -plate_depth * 0.5 - tab_depth * 0.35;
+
+        let axis_length = 22.0 * plate_scale;
+        let shaft_radius = (0.42 * plate_scale).max(0.05);
+        let head_radius = (1.3 * plate_scale).max(0.18);
+        let head_length = (1.9 * plate_scale).max(0.28);
+        let label_lift = (1.0 * plate_scale).max(0.12);
+        let label_size = 6.0 * plate_scale;
+        // `AxisLabels size={length + 6 * labelScale}`, then
+        // `labelOffset = size + 2 * scale`.
+        let label_offset = axis_length + 6.0 * plate_scale + 2.0 * plate_scale;
+
+        let logo_aspect = 1772.0 / 304.0;
+        let logo_base_width = (width * 0.2).clamp(3.0, 42.0);
+        let logo_width = logo_base_width;
+        let logo_height = logo_base_width / logo_aspect;
+        let logo_inset = (width * 0.08).min(1.6);
+        let logo_x = origin_min_x + width - logo_inset - logo_width * 0.5;
+        let logo_y = origin_min_y + logo_inset + logo_height * 0.5;
+
+        Self {
+            width,
+            depth,
+            center_x: build_volume_center_x,
+            center_y: build_volume_center_y,
+            volume_height: height,
+            grid_base_size: base_size,
+            grid_divisions: divisions,
+            grid_scale_x: scale_x,
+            grid_scale_z: scale_z,
+            plate_width,
+            plate_depth,
+            plate_thickness: thickness,
+            plate_corner_radius: corner_radius,
+            plate_center_z,
+            tab_depth,
+            tab_back,
+            tab_front,
+            marker_width,
+            marker_depth,
+            marker_y,
+            scale: plate_scale,
+            axis_length,
+            shaft_radius,
+            head_radius,
+            head_length,
+            label_lift,
+            label_offset,
+            label_size,
+            logo_width,
+            logo_height,
+            logo_x,
+            logo_y,
+        }
+    }
+
+    /// The plate's top surface, `z0` in `plate_mesh`.
+    fn plate_top_z(&self) -> f32 {
+        self.plate_center_z + self.plate_thickness * 0.5
+    }
+
+    /// `resolvedOriginMinX`.
+    fn origin_min_x(&self) -> f32 {
+        self.center_x - self.width * 0.5
+    }
+
+    /// `resolvedOriginMinY`.
+    fn origin_min_y(&self) -> f32 {
+        self.center_y - self.depth * 0.5
+    }
+}
+
+fn srgb_linear(hex: u32) -> [f32; 3] {
+    let channel = |shift: u32| {
+        let value = ((hex >> shift) & 0xff) as f32 / 255.0;
+        if value <= 0.04045 {
+            value / 12.92
+        } else {
+            ((value + 0.055) / 1.055).powf(2.4)
+        }
     };
-    for (dir, color, u, v) in axes {
-        let tip = [
-            origin[0] + dir[0] * length,
-            origin[1] + dir[1] * length,
-            origin[2] + dir[2] * length,
+    [channel(16), channel(8), channel(0)]
+}
+
+fn normalize(v: [f32; 3]) -> [f32; 3] {
+    let length = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+    if length <= 1e-9 {
+        [0.0, 0.0, 1.0]
+    } else {
+        [v[0] / length, v[1] / length, v[2] / length]
+    }
+}
+
+fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
+/// The three axis arrows: cylinders with cone heads, coloured with the source's
+/// base-to-tip gradients. The shaft spans `0..length` and the cone
+/// `length..length + headLength`, each shading over its own length (the source
+/// maps the same 16x256 gradient onto both geometries, so the colour restarts at
+/// the cone's base).
+fn axis_arrows(metrics: &PlateMetrics) -> Vec<[f32; 6]> {
+    let origin = [metrics.origin_min_x(), metrics.origin_min_y(), 0.5];
+    let length = metrics.axis_length;
+    let shaft_radius = metrics.shaft_radius;
+    let head_radius = metrics.head_radius;
+    let head_length = metrics.head_length;
+    let segments = 12;
+    let axes: [([f32; 3], u32, u32); 3] = [
+        ([1.0, 0.0, 0.0], 0x8d232f, 0xff7a7a),
+        ([0.0, 1.0, 0.0], 0x1e6b35, 0x74ff95),
+        ([0.0, 0.0, 1.0], 0x21428d, 0x74a3ff),
+    ];
+    let mut out: Vec<[f32; 6]> = Vec::new();
+    let mut push = |point: [f32; 3], color: [f32; 3]| {
+        out.push([point[0], point[1], point[2], color[0], color[1], color[2]]);
+    };
+    for (dir, base_hex, tip_hex) in axes {
+        let base = srgb_linear(base_hex);
+        let tip = srgb_linear(tip_hex);
+        let helper = if dir[2].abs() > 0.9 {
+            [1.0, 0.0, 0.0]
+        } else {
+            [0.0, 0.0, 1.0]
+        };
+        let u = normalize(cross(dir, helper));
+        let v = cross(dir, u);
+        let ring = |t: f32, radius: f32, angle: f32| -> [f32; 3] {
+            let (sin, cos) = angle.sin_cos();
+            [
+                origin[0] + dir[0] * t + (u[0] * cos + v[0] * sin) * radius,
+                origin[1] + dir[1] * t + (u[1] * cos + v[1] * sin) * radius,
+                origin[2] + dir[2] * t + (u[2] * cos + v[2] * sin) * radius,
+            ]
+        };
+        // `v` runs 0 at the geometry's base to 1 at its tip; the canvas gradient
+        // is dark at v=0 and light at v=1.
+        let shade = |k: f32| -> [f32; 3] {
+            let k = k.clamp(0.0, 1.0);
+            [
+                base[0] + (tip[0] - base[0]) * k,
+                base[1] + (tip[1] - base[1]) * k,
+                base[2] + (tip[2] - base[2]) * k,
+            ]
+        };
+        let apex = [
+            origin[0] + dir[0] * (length + head_length),
+            origin[1] + dir[1] * (length + head_length),
+            origin[2] + dir[2] * (length + head_length),
         ];
-        push(origin, tip, color);
-        let back = [
-            tip[0] - dir[0] * head,
-            tip[1] - dir[1] * head,
-            tip[2] - dir[2] * head,
-        ];
-        for side in [u, v] {
-            push(
-                tip,
-                [
-                    back[0] + side[0] * head * 0.5,
-                    back[1] + side[1] * head * 0.5,
-                    back[2] + side[2] * head * 0.5,
-                ],
-                color,
-            );
+        for i in 0..segments {
+            let a0 = i as f32 / segments as f32 * std::f32::consts::TAU;
+            let a1 = (i + 1) as f32 / segments as f32 * std::f32::consts::TAU;
+            // Shaft: base ring at 0 (dark), top ring at `length` (light).
+            let p00 = ring(0.0, shaft_radius, a0);
+            let p01 = ring(0.0, shaft_radius, a1);
+            let p10 = ring(length, shaft_radius, a0);
+            let p11 = ring(length, shaft_radius, a1);
+            let c0 = shade(0.0);
+            let c1 = shade(1.0);
+            push(p00, c0);
+            push(p11, c1);
+            push(p10, c1);
+            push(p00, c0);
+            push(p01, c0);
+            push(p11, c1);
+            // Cone: its own base (dark) to its apex (light).
+            let b0 = ring(length, head_radius, a0);
+            let b1 = ring(length, head_radius, a1);
+            push(b0, c0);
+            push(b1, c0);
+            push(apex, c1);
         }
     }
     out
 }
 
-fn plate_outline(width: f32, depth: f32, z: f32) -> Vec<[f32; 3]> {
-    let hx = width * 0.5;
-    let hy = depth * 0.5;
-    let corners = [
-        [-hx, -hy, z],
-        [hx, -hy, z],
-        [hx, hy, z],
-        [-hx, hy, z],
-    ];
-    let edges = [(0, 1), (1, 2), (2, 3), (3, 0)];
-    edges
-        .iter()
-        .flat_map(|&(a, b)| [corners[a], corners[b]])
-        .collect()
+/// Billboard quads for the X/Y/Z letters, one per axis tip.
+fn sprite_vertices(metrics: &PlateMetrics) -> Vec<[f32; 5]> {
+    let origin = [metrics.origin_min_x(), metrics.origin_min_y(), 0.5];
+    let label_offset = metrics.label_offset;
+    let lift = metrics.label_lift;
+    let mut out = Vec::new();
+    let mut quad = |center: [f32; 3]| {
+        let corners = [
+            (0.0, 1.0),
+            (1.0, 1.0),
+            (1.0, 0.0),
+            (0.0, 1.0),
+            (1.0, 0.0),
+            (0.0, 0.0),
+        ];
+        for (u, v) in corners {
+            out.push([center[0], center[1], center[2], u, v]);
+        }
+    };
+    quad([origin[0] + label_offset, origin[1], origin[2] + lift]);
+    quad([origin[0], origin[1] + label_offset, origin[2] + lift]);
+    quad([origin[0], origin[1], origin[2] + label_offset + lift]);
+    out
 }
 
-fn build_volume_edges(width: f32, depth: f32, height: f32) -> Vec<[f32; 3]> {
+/// `THREE.GridHelper(baseSize, divisions, color1, color2)`, placed, rotated 90°
+/// about X and scaled exactly as the source does it: lines every `step` from
+/// `-size/2`, `color1` only on the line at index `divisions / 2`.
+fn grid_vertices(metrics: &PlateMetrics) -> Vec<[f32; 6]> {
+    let size = metrics.grid_base_size;
+    let divisions = metrics.grid_divisions;
+    let step = size / divisions as f32;
+    let half = size * 0.5;
+    let center = divisions as f32 * 0.5;
+    let major = srgb_linear(GRID_MAJOR_COLOR);
+    let minor = srgb_linear(GRID_MINOR_COLOR);
+    let z = -0.01;
+    let mut out: Vec<[f32; 6]> = Vec::with_capacity((divisions as usize + 1) * 4);
+    // Object transform: T(center) * R_x(90°) * S(scaleX, 1, scaleZ).
+    let place = |x: f32, k: f32| -> [f32; 3] {
+        [
+            metrics.center_x + x * metrics.grid_scale_x,
+            metrics.center_y - k * metrics.grid_scale_z,
+            z,
+        ]
+    };
+    for i in 0..=divisions {
+        let k = -half + i as f32 * step;
+        let color = if i as f32 == center { major } else { minor };
+        let a = place(-half, k);
+        let b = place(half, k);
+        out.push([a[0], a[1], a[2], color[0], color[1], color[2]]);
+        out.push([b[0], b[1], b[2], color[0], color[1], color[2]]);
+        let c = place(k, -half);
+        let d = place(k, half);
+        out.push([c[0], c[1], c[2], color[0], color[1], color[2]]);
+        out.push([d[0], d[1], d[2], color[0], color[1], color[2]]);
+    }
+    out
+}
+
+/// `AxisLabels.tsx`: 64x64 canvas, `Bold 42px Arial`, centred, pure colour.
+fn axis_label_texture(letter: &str, hex: u32) -> (u32, u32, Vec<u8>) {
+    let width = 64u32;
+    let height = 64u32;
+    let mut data = vec![0u8; (width * height * 4) as usize];
+    let Ok(bytes) = std::fs::read("C:/Windows/Fonts/arialbd.ttf") else {
+        return (width, height, data);
+    };
+    let Ok(font) = fontdue::Font::from_bytes(bytes, fontdue::FontSettings::default()) else {
+        return (width, height, data);
+    };
+    let size = 42.0f32;
+    let Some(ch) = letter.chars().next() else {
+        return (width, height, data);
+    };
+    let (metrics, bitmap) = font.rasterize(ch, size);
+    let color = [
+        ((hex >> 16) & 0xff) as f32,
+        ((hex >> 8) & 0xff) as f32,
+        (hex & 0xff) as f32,
+    ];
+    let gx = 32.0 - metrics.advance_width * 0.5 + metrics.xmin as f32;
+    let gy = 32.0 + size * 0.35 - metrics.ymin as f32 - metrics.height as f32;
+    for row in 0..metrics.height {
+        for col in 0..metrics.width {
+            let coverage = bitmap[row * metrics.width + col] as f32 / 255.0;
+            if coverage <= 0.0 {
+                continue;
+            }
+            let px = gx as i32 + col as i32;
+            let py = gy as i32 + row as i32;
+            if px < 0 || py < 0 || px >= width as i32 || py >= height as i32 {
+                continue;
+            }
+            let index = ((py as u32 * width + px as u32) * 4) as usize;
+            data[index] = (color[0] * coverage) as u8;
+            data[index + 1] = (color[1] * coverage) as u8;
+            data[index + 2] = (color[2] * coverage) as u8;
+            data[index + 3] = (255.0 * coverage) as u8;
+        }
+    }
+    (width, height, data)
+}
+
+/// `EdgesGeometry` of the build-volume box: centred on the build volume, from
+/// `z = 0` to `z = height`.
+fn build_volume_edges(
+    center_x: f32,
+    center_y: f32,
+    width: f32,
+    depth: f32,
+    height: f32,
+) -> Vec<[f32; 3]> {
     let hx = width * 0.5;
     let hy = depth * 0.5;
     let corners = [
-        [-hx, -hy, 0.0],
-        [hx, -hy, 0.0],
-        [hx, hy, 0.0],
-        [-hx, hy, 0.0],
-        [-hx, -hy, height],
-        [hx, -hy, height],
-        [hx, hy, height],
-        [-hx, hy, height],
+        [center_x - hx, center_y - hy, 0.0],
+        [center_x + hx, center_y - hy, 0.0],
+        [center_x + hx, center_y + hy, 0.0],
+        [center_x - hx, center_y + hy, 0.0],
+        [center_x - hx, center_y - hy, height],
+        [center_x + hx, center_y - hy, height],
+        [center_x + hx, center_y + hy, height],
+        [center_x - hx, center_y + hy, height],
     ];
     let edges = [
         (0, 1), (1, 2), (2, 3), (3, 0),
@@ -1217,26 +2068,73 @@ fn build_volume_edges(width: f32, depth: f32, height: f32) -> Vec<[f32; 3]> {
         .collect()
 }
 
-fn plate_mesh(
+/// The box's six faces, wound outward; the pipeline culls the front faces so
+/// only the far side paints (`side={THREE.BackSide}`).
+fn build_volume_fill(
+    center_x: f32,
+    center_y: f32,
     width: f32,
     depth: f32,
-    thickness: f32,
-    top: f32,
-    radius: f32,
-    segments: u32,
-) -> (Vec<Vertex>, Vec<u32>) {
+    height: f32,
+) -> Vec<[f32; 3]> {
+    let hx = width * 0.5;
+    let hy = depth * 0.5;
+    let c = [
+        [center_x - hx, center_y - hy, 0.0],
+        [center_x + hx, center_y - hy, 0.0],
+        [center_x + hx, center_y + hy, 0.0],
+        [center_x - hx, center_y + hy, 0.0],
+        [center_x - hx, center_y - hy, height],
+        [center_x + hx, center_y - hy, height],
+        [center_x + hx, center_y + hy, height],
+        [center_x - hx, center_y + hy, height],
+    ];
+    let faces = [
+        // bottom (-Z), top (+Z), front (-Y), right (+X), back (+Y), left (-X)
+        (0, 2, 1), (0, 3, 2),
+        (4, 5, 6), (4, 6, 7),
+        (0, 1, 5), (0, 5, 4),
+        (1, 2, 6), (1, 6, 5),
+        (2, 3, 7), (2, 7, 6),
+        (3, 0, 4), (3, 4, 7),
+    ];
+    let mut out = Vec::with_capacity(faces.len() * 3);
+    for (a, b, d) in faces {
+        out.push(c[a]);
+        out.push(c[b]);
+        out.push(c[d]);
+    }
+    out
+}
+
+/// The plate's `ExtrudeGeometry`: the source's shape (rounded rectangle with a
+/// trapezoid tab on the front edge), extruded `thickness` and centred on
+/// `plateCenterZ`.
+fn plate_mesh(metrics: &PlateMetrics) -> (Vec<Vertex>, Vec<u32>) {
+    let width = metrics.plate_width;
+    let depth = metrics.plate_depth;
+    let thickness = metrics.plate_thickness;
+    let top = metrics.plate_top_z();
     let half_w = width * 0.5;
     let half_d = depth * 0.5;
-    let r = radius.min(half_w - 0.01).min(half_d - 0.01);
+    let radius = metrics.plate_corner_radius;
+    let r = radius
+        .min(half_w - 0.2)
+        .min(half_d - 0.2)
+        .max(0.2);
+    let segments: u32 = 18;
     let z0 = top;
     let z1 = top - thickness;
 
     let mut perimeter: Vec<[f32; 2]> = vec![[-half_w + r, -half_d]];
-    // Front tab: 24mm at the plate edge, 16mm at the tip, 4.2mm deep.
-    perimeter.push([-12.0, -half_d]);
-    perimeter.push([-8.0, -half_d - 4.2]);
-    perimeter.push([8.0, -half_d - 4.2]);
-    perimeter.push([12.0, -half_d]);
+    // Front tab, sized by `PlateMetrics` from the build volume width.
+    let back = metrics.tab_back * 0.5;
+    let front = metrics.tab_front * 0.5;
+    let tab_y = -half_d - metrics.tab_depth;
+    perimeter.push([-back, -half_d]);
+    perimeter.push([-front, tab_y]);
+    perimeter.push([front, tab_y]);
+    perimeter.push([back, -half_d]);
     let arc = |cx: f32, cy: f32, a0: f32, a1: f32, points: &mut Vec<[f32; 2]>| {
         for i in 1..=segments {
             let a = a0 + (a1 - a0) * i as f32 / segments as f32;
@@ -1256,12 +2154,16 @@ fn plate_mesh(
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
     let count = perimeter.len();
+    // The source positions the mesh at `[buildVolumeCenterX, buildVolumeCenterY,
+    // buildPlateCenterZ]`; the shape itself is local.
+    let ox = metrics.center_x;
+    let oy = metrics.center_y;
 
     let top_center = vertices.len() as u32;
-    vertices.push(Vertex { pos: [0.0, 0.0, z0], normal: [0.0, 0.0, 1.0], ao: 1.0 });
+    vertices.push(Vertex { pos: [ox, oy, z0], normal: [0.0, 0.0, 1.0], ao: 1.0 });
     let top_start = vertices.len() as u32;
     for p in &perimeter {
-        vertices.push(Vertex { pos: [p[0], p[1], z0], normal: [0.0, 0.0, 1.0], ao: 1.0 });
+        vertices.push(Vertex { pos: [p[0] + ox, p[1] + oy, z0], normal: [0.0, 0.0, 1.0], ao: 1.0 });
     }
     for i in 0..count {
         let a = top_start + i as u32;
@@ -1270,10 +2172,10 @@ fn plate_mesh(
     }
 
     let bottom_center = vertices.len() as u32;
-    vertices.push(Vertex { pos: [0.0, 0.0, z1], normal: [0.0, 0.0, -1.0], ao: 1.0 });
+    vertices.push(Vertex { pos: [ox, oy, z1], normal: [0.0, 0.0, -1.0], ao: 1.0 });
     let bottom_start = vertices.len() as u32;
     for p in &perimeter {
-        vertices.push(Vertex { pos: [p[0], p[1], z1], normal: [0.0, 0.0, -1.0], ao: 1.0 });
+        vertices.push(Vertex { pos: [p[0] + ox, p[1] + oy, z1], normal: [0.0, 0.0, -1.0], ao: 1.0 });
     }
     for i in 0..count {
         let a = bottom_start + i as u32;
@@ -1289,11 +2191,11 @@ fn plate_mesh(
         let length = (dx * dx + dy * dy).sqrt().max(1e-6);
         let normal = [dy / length, -dx / length, 0.0];
         let base = vertices.len() as u32;
-        vertices.push(Vertex { pos: [p0[0], p0[1], z0], normal, ao: 1.0 });
-        vertices.push(Vertex { pos: [p1[0], p1[1], z0], normal, ao: 1.0 });
-        vertices.push(Vertex { pos: [p1[0], p1[1], z1], normal, ao: 1.0 });
-        vertices.push(Vertex { pos: [p0[0], p0[1], z1], normal, ao: 1.0 });
-        indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+        vertices.push(Vertex { pos: [p0[0] + ox, p0[1] + oy, z0], normal, ao: 1.0 });
+        vertices.push(Vertex { pos: [p1[0] + ox, p1[1] + oy, z0], normal, ao: 1.0 });
+        vertices.push(Vertex { pos: [p1[0] + ox, p1[1] + oy, z1], normal, ao: 1.0 });
+        vertices.push(Vertex { pos: [p0[0] + ox, p0[1] + oy, z1], normal, ao: 1.0 });
+        indices.extend_from_slice(&[base, base + 2, base + 1, base, base + 3, base + 2]);
     }
 
     (vertices, indices)
@@ -1344,33 +2246,42 @@ fn create_texture(
 }
 
 fn front_texture() -> (u32, u32, Vec<u8>) {
+    // `SceneEnvironment.tsx`: 256x72 canvas, `700 70px Arial` fitted to 200px,
+    // centred at y + 5, colour = gridMajor (#4f5560) lerped 36% toward white.
     let width = 256u32;
     let height = 72u32;
     let mut data = vec![0u8; (width * height * 4) as usize];
-    let Ok(bytes) = std::fs::read("C:/Windows/Fonts/segoeuib.ttf") else {
+    let Ok(bytes) = std::fs::read("C:/Windows/Fonts/arialbd.ttf") else {
         return (width, height, data);
     };
     let Ok(font) = fontdue::Font::from_bytes(bytes, fontdue::FontSettings::default()) else {
         return (width, height, data);
     };
-    let size = 46.0f32;
-    let spacing = 3.0f32;
-    let mut glyphs = Vec::new();
-    let mut total = 0.0f32;
-    for ch in "FRONT".chars() {
-        let (metrics, bitmap) = font.rasterize(ch, size);
-        glyphs.push((metrics, bitmap, total));
-        total += metrics.advance_width + spacing;
+    let text = "FRONT";
+    let measure = |size: f32| -> f32 {
+        text.chars()
+            .map(|ch| font.metrics(ch, size).advance_width)
+            .sum()
+    };
+    let mut size = 70.0f32;
+    let natural = measure(size);
+    // `fitFontToWidth`: shrink by the overflow ratio, floored at 8px.
+    if natural > FRONT_MARKER_MAX_TEXT_WIDTH && natural > 0.0 {
+        size = (size * FRONT_MARKER_MAX_TEXT_WIDTH / natural).floor().max(8.0);
     }
+    let total = measure(size);
     let start_x = (width as f32 - total) / 2.0;
-    let baseline = height as f32 / 2.0 + size * 0.35;
-    for (metrics, bitmap, advance) in glyphs {
-        let gx = start_x + advance + metrics.xmin as f32;
+    let baseline = height as f32 / 2.0 + 5.0 + size * 0.35;
+    let color = front_marker_color();
+    let mut pen = start_x;
+    for ch in text.chars() {
+        let (metrics, bitmap) = font.rasterize(ch, size);
+        let gx = pen + metrics.xmin as f32;
         let gy = baseline - metrics.ymin as f32 - metrics.height as f32;
         for row in 0..metrics.height {
             for col in 0..metrics.width {
-                let coverage = bitmap[row * metrics.width + col];
-                if coverage == 0 {
+                let coverage = bitmap[row * metrics.width + col] as f32 / 255.0;
+                if coverage <= 0.0 {
                     continue;
                 }
                 let px = gx as i32 + col as i32;
@@ -1379,14 +2290,25 @@ fn front_texture() -> (u32, u32, Vec<u8>) {
                     continue;
                 }
                 let index = ((py as u32 * width + px as u32) * 4) as usize;
-                data[index] = coverage;
-                data[index + 1] = coverage;
-                data[index + 2] = coverage;
-                data[index + 3] = coverage;
+                data[index] = (color[0] as f32 * coverage) as u8;
+                data[index + 1] = (color[1] as f32 * coverage) as u8;
+                data[index + 2] = (color[2] as f32 * coverage) as u8;
+                data[index + 3] = (255.0 * coverage) as u8;
             }
         }
+        pen += metrics.advance_width;
     }
     (width, height, data)
+}
+
+/// `new THREE.Color(gridMajorColor).lerp(white, 0.36)`.
+fn front_marker_color() -> [u8; 3] {
+    let channel = |shift: u32| -> u8 {
+        let from = ((GRID_MAJOR_COLOR >> shift) & 0xff) as f32;
+        let to = 255.0f32;
+        (from + (to - from) * 0.36).round() as u8
+    };
+    [channel(16), channel(8), channel(0)]
 }
 
 fn logo_texture() -> (u32, u32, Vec<u8>) {
@@ -1406,10 +2328,22 @@ fn logo_texture() -> (u32, u32, Vec<u8>) {
         resvg::tiny_skia::Transform::identity(),
         &mut pixmap.as_mut(),
     );
-    (width, height, pixmap.data().to_vec())
+    // `resvg` hands back premultiplied RGBA; three's `meshBasicMaterial` blends
+    // with straight alpha (`SrcAlpha`), so undo the premultiply and leave the
+    // 0.4 opacity to the shader.
+    let mut data = pixmap.data().to_vec();
+    for pixel in data.chunks_exact_mut(4) {
+        let alpha = pixel[3] as f32 / 255.0;
+        if alpha > 0.0 {
+            for channel in &mut pixel[..3] {
+                *channel = ((*channel as f32 / alpha).min(255.0)) as u8;
+            }
+        }
+    }
+    (width, height, data)
 }
 
-fn decal_vertices() -> Vec<[f32; 5]> {
+fn decal_vertices(metrics: &PlateMetrics) -> Vec<[f32; 5]> {
     let mut out = Vec::new();
     let mut quad = |cx: f32, cy: f32, width: f32, height: f32, z: f32| {
         let x0 = cx - width * 0.5;
@@ -1428,8 +2362,20 @@ fn decal_vertices() -> Vec<[f32; 5]> {
             out.push([x, y, z, u, v]);
         }
     };
-    quad(0.0, -65.91, 13.2, 3.7, 0.05);
-    quad(92.84, -56.24, 42.0, 7.2, 0.12);
+    quad(
+        metrics.center_x,
+        metrics.center_y + metrics.marker_y,
+        metrics.marker_width,
+        metrics.marker_depth,
+        0.001,
+    );
+    quad(
+        metrics.logo_x,
+        metrics.logo_y,
+        metrics.logo_width,
+        metrics.logo_height,
+        0.12,
+    );
     out
 }
 
@@ -1497,6 +2443,72 @@ fn pipeline(
     })
 }
 
+/// The same pipeline, with straight-alpha blending and a depth bias: three's
+/// `transparent` materials and its `polygonOffset` decals.
+fn pipeline_blended(
+    device: &wgpu::Device,
+    layout: &wgpu::PipelineLayout,
+    shader: &wgpu::ShaderModule,
+    buffers: &[Option<wgpu::VertexBufferLayout<'_>>],
+    topology: wgpu::PrimitiveTopology,
+    cull: Option<wgpu::Face>,
+    depth_write: bool,
+    depth_compare: wgpu::CompareFunction,
+    format: wgpu::TextureFormat,
+    bias: wgpu::DepthBiasState,
+    sample_count: u32,
+) -> wgpu::RenderPipeline {
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: None,
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module: shader,
+            entry_point: Some("vs_main"),
+            buffers,
+            compilation_options: Default::default(),
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: shader,
+            entry_point: Some("fs_main"),
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend: Some(wgpu::BlendState {
+                    color: wgpu::BlendComponent {
+                        src_factor: wgpu::BlendFactor::SrcAlpha,
+                        dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                        operation: wgpu::BlendOperation::Add,
+                    },
+                    alpha: wgpu::BlendComponent {
+                        src_factor: wgpu::BlendFactor::One,
+                        dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                        operation: wgpu::BlendOperation::Add,
+                    },
+                }),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+            compilation_options: Default::default(),
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology,
+            cull_mode: cull,
+            ..Default::default()
+        },
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: wgpu::TextureFormat::Depth32Float,
+            depth_write_enabled: Some(depth_write),
+            depth_compare: Some(depth_compare),
+            stencil: wgpu::StencilState::default(),
+            bias,
+        }),
+        multisample: wgpu::MultisampleState {
+            count: sample_count,
+            ..Default::default()
+        },
+        multiview_mask: None,
+        cache: None,
+    })
+}
+
 fn color_target(device: &wgpu::Device, width: u32, height: u32, copy: bool) -> wgpu::Texture {
     let mut usage = wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING;
     if copy {
@@ -1553,6 +2565,48 @@ fn msaa_depth_target(device: &wgpu::Device, width: u32, height: u32) -> wgpu::Te
 }
 
 
+const SPRITE_SHADER: &str = r#"
+struct Uniforms {
+    view_proj: mat4x4<f32>,
+    inv_proj: mat4x4<f32>,
+    camera_pos: vec3<f32>,
+    base_color: vec3<f32>,
+    resolution: vec2<f32>,
+    headlight_dir: vec3<f32>,
+};
+struct Sprite {
+    right: vec3<f32>,
+    size: f32,
+    up: vec3<f32>,
+    _pad: f32,
+};
+@group(0) @binding(0) var<uniform> uniforms: Uniforms;
+@group(1) @binding(0) var<uniform> sprite: Sprite;
+@group(2) @binding(0) var tex: texture_2d<f32>;
+@group(2) @binding(1) var samp: sampler;
+
+struct SpriteOut {
+    @builtin(position) position: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+};
+
+@vertex
+fn vs_main(@location(0) center: vec3<f32>, @location(1) uv: vec2<f32>) -> SpriteOut {
+    var out: SpriteOut;
+    let world = center
+        + sprite.right * (uv.x - 0.5) * sprite.size
+        + sprite.up * (0.5 - uv.y) * sprite.size;
+    out.position = uniforms.view_proj * vec4<f32>(world, 1.0);
+    out.uv = uv;
+    return out;
+}
+
+@fragment
+fn fs_main(in: SpriteOut) -> @location(0) vec4<f32> {
+    return textureSample(tex, samp, in.uv);
+}
+"#;
+
 const DECAL_SHADER: &str = r#"
 struct Uniforms {
     view_proj: mat4x4<f32>,
@@ -1560,12 +2614,13 @@ struct Uniforms {
     camera_pos: vec3<f32>,
     base_color: vec3<f32>,
     resolution: vec2<f32>,
+    headlight_dir: vec3<f32>,
 };
 struct Decal {
     flip: f32,
+    opacity: f32,
     _pad0: f32,
     _pad1: f32,
-    _pad2: f32,
 };
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
 @group(1) @binding(0) var<uniform> decal: Decal;
@@ -1591,7 +2646,8 @@ fn vs_main(@location(0) position: vec3<f32>, @location(1) uv: vec2<f32>) -> Deca
 
 @fragment
 fn fs_main(in: DecalOut) -> @location(0) vec4<f32> {
-    return textureSample(tex, samp, in.uv);
+    let texel = textureSample(tex, samp, in.uv);
+    return vec4<f32>(texel.rgb, texel.a * decal.opacity);
 }
 "#;
 
@@ -1603,6 +2659,7 @@ struct Uniforms {
     camera_pos: vec3<f32>,
     base_color: vec3<f32>,
     resolution: vec2<f32>,
+    headlight_dir: vec3<f32>,
 };
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
 
@@ -1635,12 +2692,12 @@ fn vs_main(
 }
 
 // three.js BRDF_GGX: D_GGX * V_GGX_SmithCorrelated * F_Schlick.
-fn specular(n: vec3<f32>, v: vec3<f32>, l: vec3<f32>, roughness: f32, f0: vec3<f32>) -> vec3<f32> {
-    let h = normalize(v + l);
-    let n_dot_l = max(dot(n, l), 0.0);
-    let n_dot_v = max(dot(n, v), 0.0);
-    let n_dot_h = max(dot(n, h), 0.0);
-    let v_dot_h = max(dot(v, h), 0.0);
+fn brdf_ggx(light_dir: vec3<f32>, view_dir: vec3<f32>, n: vec3<f32>, roughness: f32, f0: vec3<f32>) -> vec3<f32> {
+    let h = normalize(light_dir + view_dir);
+    let n_dot_l = saturate(dot(n, light_dir));
+    let n_dot_v = saturate(dot(n, view_dir));
+    let n_dot_h = saturate(dot(n, h));
+    let v_dot_h = saturate(dot(view_dir, h));
 
     let alpha = roughness * roughness;
     let a2 = alpha * alpha;
@@ -1655,6 +2712,27 @@ fn specular(n: vec3<f32>, v: vec3<f32>, l: vec3<f32>, roughness: f32, f0: vec3<f
     return distribution * visibility * f;
 }
 
+// `ACESFilmicToneMapping`, exposure 1.
+fn aces_filmic(color: vec3<f32>) -> vec3<f32> {
+    let input_mat = mat3x3<f32>(
+        0.59719, 0.07600, 0.02840,
+        0.35458, 0.90834, 0.13383,
+        0.04823, 0.01566, 0.83777,
+    );
+    let output_mat = mat3x3<f32>(
+         1.60475, -0.10208, -0.00327,
+        -0.53108,  1.10813, -0.07276,
+        -0.07367, -0.00605,  1.07602,
+    );
+    var c = color * (1.0 / 0.6);
+    c = input_mat * c;
+    let a = c * (c + 0.0245786) - 0.000090537;
+    let b = c * (0.983729 * c + 0.4329510) + 0.238081;
+    c = a / b;
+    c = output_mat * c;
+    return saturate(c);
+}
+
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     if (in.world.z > model.clip.x) {
@@ -1663,28 +2741,45 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let n = normalize(in.normal);
     let view_dir = normalize(uniforms.camera_pos - in.world);
 
-    let key_dir = normalize(vec3<f32>(0.0, 0.0, 1.0));
-    let fill_dir = normalize(vec3<f32>(0.0, 0.0, -1.0));
-    let sky = vec3<f32>(0.965, 0.910, 1.0);
-    let ground = vec3<f32>(0.243, 0.255, 0.361);
-    let hemi = mix(ground, sky, n.z * 0.5 + 0.5);
+    // `Lights` + `ViewHeadlight`, as three sums them.
+    let key_dir = vec3<f32>(0.0, 0.0, 1.0);
+    let fill_dir = vec3<f32>(0.0, 0.0, -1.0);
+    let head_dir = uniforms.headlight_dir;
+    let key_color = vec3<f32>(1.0) * 0.3;
+    let fill_color = vec3<f32>(0.565, 0.655, 1.0) * 0.045;
+    let head_color = vec3<f32>(1.0);
+    let sky = vec3<f32>(0.965, 0.910, 1.0) * 0.72;
+    let ground = vec3<f32>(0.243, 0.255, 0.361) * 0.72;
+    // `HemisphereLight`'s default position is +Y, so its gradient runs along
+    // `n.y` even in this Z-up scene.
+    let hemi = mix(ground, sky, n.y * 0.5 + 0.5);
+    let ambient = vec3<f32>(1.0) * 1.2;
 
-    let ambient = hemi * 0.25;
-    let key = vec3<f32>(1.0) * max(dot(n, key_dir), 0.0) * 1.2;
-    let fill = vec3<f32>(0.565, 0.655, 1.0) * max(dot(n, fill_dir), 0.0) * 0.168;
-    let head = vec3<f32>(1.0) * max(dot(n, view_dir), 0.0) * 1.0;
-    let lighting = (ambient + key + fill + head) / 3.14159265;
-
+    let metalness = 0.02;
+    let roughness = 0.9;
     let base = uniforms.base_color;
-    let f0 = mix(vec3<f32>(0.04), base, 0.02);
-    let spec = (specular(n, view_dir, key_dir, 0.55, f0) * 1.2 * max(dot(n, key_dir), 0.0)
-        + specular(n, view_dir, view_dir, 0.55, f0) * 1.0 * max(dot(n, view_dir), 0.0)) * 1.5;
-    let n_dot_l = max(dot(n, key_dir), 0.0);
+    let diffuse_color = base * (1.0 - metalness);
+    let f0 = mix(vec3<f32>(0.04), base, metalness);
+
+    let irradiance = ambient
+        + key_color * max(dot(n, key_dir), 0.0)
+        + fill_color * max(dot(n, fill_dir), 0.0)
+        + hemi
+        + head_color * max(dot(n, head_dir), 0.0);
+    var color = diffuse_color * irradiance / 3.14159265;
+    color += brdf_ggx(key_dir, view_dir, n, roughness, f0) * key_color * max(dot(n, key_dir), 0.0);
+    color += brdf_ggx(fill_dir, view_dir, n, roughness, f0) * fill_color * max(dot(n, fill_dir), 0.0);
+    color += brdf_ggx(head_dir, view_dir, n, roughness, f0) * head_color * max(dot(n, head_dir), 0.0);
+
+    // `softClay.tsx`'s fake cavity term, on `FAKE_LIGHT_DIRECTION`.
+    let fake_dir = normalize(vec3<f32>(0.35, 0.58, 0.74));
+    let n_dot_l = max(dot(n, fake_dir), 0.0);
     let cavity = pow(1.0 - n_dot_l, 1.35);
     let fake_ao = 1.0 - cavity * 0.2;
-    let baked = mix(1.0, clamp(in.ao, 0.0, 1.0), 0.85);
-    let color = base * lighting * fake_ao * baked + spec;
-    return vec4<f32>(color, 1.0);
+    // `bakedOcclusionStrength(0.85)` = 0.75 * 0.85.
+    let baked = mix(1.0, clamp(in.ao, 0.0, 1.0), 0.6375);
+    color = color * fake_ao * baked;
+    return vec4<f32>(aces_filmic(color), 1.0);
 }
 "#;
 
@@ -1695,6 +2790,7 @@ struct Uniforms {
     camera_pos: vec3<f32>,
     base_color: vec3<f32>,
     resolution: vec2<f32>,
+    headlight_dir: vec3<f32>,
 };
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
 
@@ -1724,8 +2820,34 @@ struct Uniforms {
     camera_pos: vec3<f32>,
     base_color: vec3<f32>,
     resolution: vec2<f32>,
+    headlight_dir: vec3<f32>,
+};
+struct Fill {
+    color: vec3<f32>,
+    opacity: f32,
 };
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
+@group(1) @binding(0) var<uniform> fill: Fill;
+
+fn aces_filmic(color: vec3<f32>) -> vec3<f32> {
+    let input_mat = mat3x3<f32>(
+        0.59719, 0.07600, 0.02840,
+        0.35458, 0.90834, 0.13383,
+        0.04823, 0.01566, 0.83777,
+    );
+    let output_mat = mat3x3<f32>(
+         1.60475, -0.10208, -0.00327,
+        -0.53108,  1.10813, -0.07276,
+        -0.07367, -0.00605,  1.07602,
+    );
+    var c = color * (1.0 / 0.6);
+    c = input_mat * c;
+    let a = c * (c + 0.0245786) - 0.000090537;
+    let b = c * (0.983729 * c + 0.4329510) + 0.238081;
+    c = a / b;
+    c = output_mat * c;
+    return saturate(c);
+}
 
 @vertex
 fn vs_main(@location(0) position: vec3<f32>) -> @builtin(position) vec4<f32> {
@@ -1734,7 +2856,7 @@ fn vs_main(@location(0) position: vec3<f32>) -> @builtin(position) vec4<f32> {
 
 @fragment
 fn fs_main() -> @location(0) vec4<f32> {
-    return vec4<f32>(0.045, 0.055, 0.068, 1.0);
+    return vec4<f32>(aces_filmic(fill.color), fill.opacity);
 }
 "#;
 
@@ -1745,15 +2867,56 @@ struct Uniforms {
     camera_pos: vec3<f32>,
     base_color: vec3<f32>,
     resolution: vec2<f32>,
+    headlight_dir: vec3<f32>,
 };
 struct Plate {
+    color: vec3<f32>,
     opacity: f32,
-    _pad0: f32,
-    _pad1: f32,
-    _pad2: f32,
 };
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
 @group(1) @binding(0) var<uniform> plate: Plate;
+
+// three.js BRDF_GGX: D_GGX * V_GGX_SmithCorrelated * F_Schlick.
+fn brdf_ggx(light_dir: vec3<f32>, view_dir: vec3<f32>, n: vec3<f32>, roughness: f32, f0: vec3<f32>) -> vec3<f32> {
+    let h = normalize(light_dir + view_dir);
+    let n_dot_l = saturate(dot(n, light_dir));
+    let n_dot_v = saturate(dot(n, view_dir));
+    let n_dot_h = saturate(dot(n, h));
+    let v_dot_h = saturate(dot(view_dir, h));
+
+    let alpha = roughness * roughness;
+    let a2 = alpha * alpha;
+    let d = (n_dot_h * a2 - n_dot_h) * n_dot_h + 1.0;
+    let distribution = a2 / (3.14159265 * d * d);
+
+    let gv = n_dot_l * sqrt(n_dot_v * n_dot_v * (1.0 - a2) + a2);
+    let gl = n_dot_v * sqrt(n_dot_l * n_dot_l * (1.0 - a2) + a2);
+    let visibility = 0.5 / max(gv + gl, 0.0001);
+
+    let f = f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - v_dot_h, 5.0);
+    return distribution * visibility * f;
+}
+
+// `ACESFilmicToneMapping`, exposure 1.
+fn aces_filmic(color: vec3<f32>) -> vec3<f32> {
+    let input_mat = mat3x3<f32>(
+        0.59719, 0.07600, 0.02840,
+        0.35458, 0.90834, 0.13383,
+        0.04823, 0.01566, 0.83777,
+    );
+    let output_mat = mat3x3<f32>(
+         1.60475, -0.10208, -0.00327,
+        -0.53108,  1.10813, -0.07276,
+        -0.07367, -0.00605,  1.07602,
+    );
+    var c = color * (1.0 / 0.6);
+    c = input_mat * c;
+    let a = c * (c + 0.0245786) - 0.000090537;
+    let b = c * (0.983729 * c + 0.4329510) + 0.238081;
+    c = a / b;
+    c = output_mat * c;
+    return saturate(c);
+}
 
 struct PlateOut {
     @builtin(position) position: vec4<f32>,
@@ -1774,59 +2937,34 @@ fn vs_main(@location(0) position: vec3<f32>, @location(1) normal: vec3<f32>) -> 
 fn fs_main(in: PlateOut) -> @location(0) vec4<f32> {
     let n = normalize(in.normal);
     let view_dir = normalize(uniforms.camera_pos - in.world);
-    let key = max(dot(n, vec3<f32>(0.0, 0.0, 1.0)), 0.0);
-    let fill = max(dot(n, vec3<f32>(0.0, 0.0, -1.0)), 0.0);
-    let head = max(dot(n, view_dir), 0.0);
-    let hemi = mix(vec3<f32>(0.243, 0.255, 0.361), vec3<f32>(0.965, 0.910, 1.0), n.z * 0.5 + 0.5);
-    let lighting = (hemi * 0.28 + key * 1.12 + fill * 0.168 + head * 1.0) / 3.14159265;
-    let base = vec3<f32>(0.032, 0.040, 0.054);
-    let fade = 1.0 - plate.opacity;
-    let color = mix(base * lighting, vec3<f32>(0.0056, 0.0061, 0.0080), fade);
-    return vec4<f32>(color, 1.0);
-}
-"#;
 
-const GRID_SHADER: &str = r#"
-struct Uniforms {
-    view_proj: mat4x4<f32>,
-    inv_proj: mat4x4<f32>,
-    camera_pos: vec3<f32>,
-    base_color: vec3<f32>,
-    resolution: vec2<f32>,
-};
-@group(0) @binding(0) var<uniform> uniforms: Uniforms;
+    // `meshStandardMaterial` with the defaults: roughness 1, metalness 0, so F0
+    // is the dielectric 0.04 and the diffuse term carries the whole albedo.
+    let base = plate.color;
+    let f0 = vec3<f32>(0.04);
+    let roughness = 1.0;
 
-struct GridOut {
-    @builtin(position) position: vec4<f32>,
-    @location(0) world: vec2<f32>,
-};
+    let key_dir = vec3<f32>(0.0, 0.0, 1.0);
+    let fill_dir = vec3<f32>(0.0, 0.0, -1.0);
+    let head_dir = uniforms.headlight_dir;
+    let key_color = vec3<f32>(1.0) * 0.3;
+    let fill_color = vec3<f32>(0.565, 0.655, 1.0) * 0.045;
+    let head_color = vec3<f32>(1.0);
+    let sky = vec3<f32>(0.965, 0.910, 1.0) * 0.72;
+    let ground = vec3<f32>(0.243, 0.255, 0.361) * 0.72;
+    let hemi = mix(ground, sky, n.y * 0.5 + 0.5);
+    let ambient = vec3<f32>(1.0) * 1.2;
 
-@vertex
-fn vs_main(@builtin(vertex_index) index: u32) -> GridOut {
-    var corners = array<vec2<f32>, 6>(
-        vec2<f32>(-109.44, -61.44), vec2<f32>(109.44, -61.44), vec2<f32>(109.44, 61.44),
-        vec2<f32>(-109.44, -61.44), vec2<f32>(109.44, 61.44), vec2<f32>(-109.44, 61.44),
-    );
-    var out: GridOut;
-    out.position = uniforms.view_proj * vec4<f32>(corners[index], 0.0, 1.0);
-    out.world = corners[index];
-    return out;
-}
-
-@fragment
-fn fs_main(in: GridOut) -> @location(0) vec4<f32> {
-    let cell = vec2<f32>(218.88 / 15.0, 122.88 / 15.0);
-    let coord = in.world / cell;
-    let width = fwidth(coord);
-    let grid = abs(fract(coord) - 0.5) / width;
-    let line = 1.0 - min(min(grid.x, grid.y), 1.0);
-    let view_dir = normalize(uniforms.camera_pos - vec3<f32>(in.world, 0.0));
-    let head = max(view_dir.z, 0.0);
-    let lighting = (vec3<f32>(0.965, 0.910, 1.0) * 0.28 + 1.12 + head * 1.0) / 3.14159265;
-    let plate = vec3<f32>(0.032, 0.040, 0.054) * lighting;
-    let grid_color = vec3<f32>(0.035, 0.042, 0.052);
-    let color = mix(plate, grid_color, line);
-    return vec4<f32>(color, 1.0);
+    let irradiance = ambient
+        + key_color * max(dot(n, key_dir), 0.0)
+        + fill_color * max(dot(n, fill_dir), 0.0)
+        + hemi
+        + head_color * max(dot(n, head_dir), 0.0);
+    var color = base * irradiance / 3.14159265;
+    color += brdf_ggx(key_dir, view_dir, n, roughness, f0) * key_color * max(dot(n, key_dir), 0.0);
+    color += brdf_ggx(fill_dir, view_dir, n, roughness, f0) * fill_color * max(dot(n, fill_dir), 0.0);
+    color += brdf_ggx(head_dir, view_dir, n, roughness, f0) * head_color * max(dot(n, head_dir), 0.0);
+    return vec4<f32>(aces_filmic(color), plate.opacity);
 }
 "#;
 
@@ -1837,6 +2975,7 @@ struct Uniforms {
     camera_pos: vec3<f32>,
     base_color: vec3<f32>,
     resolution: vec2<f32>,
+    headlight_dir: vec3<f32>,
 };
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
 
@@ -1858,6 +2997,7 @@ struct Uniforms {
     camera_pos: vec3<f32>,
     base_color: vec3<f32>,
     resolution: vec2<f32>,
+    headlight_dir: vec3<f32>,
 };
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
 
@@ -1870,10 +3010,10 @@ fn vs_main(@builtin(vertex_index) index: u32) -> @builtin(position) vec4<f32> {
 }
 
 @fragment
-fn fs_main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
-    let t = clamp(position.y / uniforms.resolution.y, 0.0, 1.0);
-    let background = vec3<f32>(0.0056, 0.0061, 0.0080);
-    return vec4<f32>(background, 1.0);
+fn fs_main() -> @location(0) vec4<f32> {
+    // The canvas is transparent over `backgroundColor: var(--surface-0)`;
+    // #111216 in linear light.
+    return vec4<f32>(0.0056, 0.0061, 0.0080, 1.0);
 }
 "#;
 
@@ -1884,6 +3024,7 @@ struct Uniforms {
     camera_pos: vec3<f32>,
     base_color: vec3<f32>,
     resolution: vec2<f32>,
+    headlight_dir: vec3<f32>,
 };
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
 @group(0) @binding(1) var scene_tex: texture_2d<f32>;
@@ -1914,27 +3055,39 @@ fn srgb_to_linear(c: vec3<f32>) -> vec3<f32> {
 @fragment
 fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     let uv = frag.xy / uniforms.resolution;
-    var color = textureSampleLevel(scene_tex, samp, uv, 0.0).rgb;
+    let scene = textureSampleLevel(scene_tex, samp, uv, 0.0).rgb;
 
-    // SceneMoodOverlay: CSS screen blend happens in sRGB, not linear.
+    // `SceneMoodOverlay`: two `mix-blend-mode: screen` layers over the canvas,
+    // composited in sRGB the way CSS does it.
+    let pink = vec3<f32>(1.0, 0.216, 0.667);   // #ff37aa
+    let violet = vec3<f32>(0.435, 0.2, 1.0);   // #6f33ff
+    var color = linear_to_srgb(scene);
+
+    // radial-gradient(120% 95% at 50% 46%, transparent 56%, #ff37aa/18% 100%),
+    // opacity 0.75.
     let radial = length((uv - vec2<f32>(0.5, 0.46)) / vec2<f32>(1.2, 0.95));
-    let radial_alpha = smoothstep(0.56, 1.0, radial) * 0.18 * 0.75;
-    let pink = vec3<f32>(1.0, 0.216, 0.667);
-    let violet = vec3<f32>(0.435, 0.2, 1.0);
-    var linear_color = pink;
-    var linear_alpha = 0.10 * 0.8;
-    if (uv.y > 0.4) {
-        let k = (uv.y - 0.4) / 0.6;
-        linear_color = mix(violet, vec3<f32>(0.0), k);
-        linear_alpha = mix(0.06 * 0.8, 0.0, k);
-    } else {
+    let radial_alpha = clamp((radial - 0.56) / (1.0 - 0.56), 0.0, 1.0) * 0.18 * 0.75;
+    color = mix(color, vec3<f32>(1.0) - (vec3<f32>(1.0) - color) * (vec3<f32>(1.0) - pink), radial_alpha);
+
+    // linear-gradient(180deg, #ff37aa/10% 0%, #6f33ff/6% 40%, transparent 100%),
+    // opacity 0.8. CSS interpolates gradients premultiplied, so the colour is
+    // recovered by dividing the premultiplied mix back out.
+    var layer_color = violet;
+    var layer_alpha = 0.0;
+    if (uv.y < 0.4) {
         let k = uv.y / 0.4;
-        linear_color = mix(pink, violet, k);
-        linear_alpha = mix(0.10 * 0.8, 0.06 * 0.8, k);
+        let alpha = 0.10 + (0.06 - 0.10) * k;
+        let premultiplied = pink * 0.10 * (1.0 - k) + violet * 0.06 * k;
+        layer_color = premultiplied / alpha;
+        layer_alpha = alpha;
+    } else {
+        let k = (uv.y - 0.4) / 0.6;
+        layer_color = violet;
+        layer_alpha = 0.06 * (1.0 - k);
     }
-    let overlay = pink * radial_alpha + linear_color * linear_alpha;
-    let scene_srgb = linear_to_srgb(color);
-    let blended = vec3<f32>(1.0) - (vec3<f32>(1.0) - scene_srgb) * (vec3<f32>(1.0) - overlay);
-    return vec4<f32>(srgb_to_linear(blended), 1.0);
+    layer_alpha *= 0.8;
+    color = mix(color, vec3<f32>(1.0) - (vec3<f32>(1.0) - color) * (vec3<f32>(1.0) - layer_color), layer_alpha);
+
+    return vec4<f32>(srgb_to_linear(color), 1.0);
 }
 "#;
