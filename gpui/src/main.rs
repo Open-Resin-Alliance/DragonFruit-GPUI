@@ -139,7 +139,7 @@ impl Render for DragonFruit {
             };
             let mut slot = viewport.borrow_mut();
             if slot.is_none() {
-                match Viewport::new(&device) {
+                match Viewport::new(&device, &queue) {
                     Ok(built) => *slot = Some(built),
                     Err(error) => {
                         eprintln!("viewport: {error:#}");

@@ -19,6 +19,8 @@ anyhow = "1"
 raw-window-handle = "0.6"
 rfd = "0.15"
 dragonfruit-mesh-core = { path = "../rust/dragonfruit-mesh-core" }
+resvg = "0.45"
+fontdue = "0.9"
 
 [profile.dev]
 opt-level = 1

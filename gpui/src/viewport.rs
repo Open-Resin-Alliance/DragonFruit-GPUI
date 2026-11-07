@@ -24,6 +24,13 @@ struct Uniforms {
     _pad2: [f32; 2],
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct OverlayUniform {
+    value: f32,
+    _pad: [f32; 3],
+}
+
 struct GpuMesh {
     vertex_buffer: wgpu::Buffer,
     vertex_count: u32,
@@ -53,6 +60,17 @@ pub struct Viewport {
     volume: wgpu::RenderPipeline,
     volume_buffer: wgpu::Buffer,
     volume_vertex_count: u32,
+    axis: wgpu::RenderPipeline,
+    axis_buffer: wgpu::Buffer,
+    axis_vertex_count: u32,
+    plate_uniform: wgpu::Buffer,
+    plate_bind: wgpu::BindGroup,
+    decal: wgpu::RenderPipeline,
+    decal_buffer: wgpu::Buffer,
+    decal_uniform: wgpu::Buffer,
+    decal_bind: wgpu::BindGroup,
+    front_bind: wgpu::BindGroup,
+    logo_bind: wgpu::BindGroup,
     grid: wgpu::RenderPipeline,
     footprint: wgpu::RenderPipeline,
     mesh_pipeline: wgpu::RenderPipeline,
@@ -68,7 +86,7 @@ pub struct Viewport {
 }
 
 impl Viewport {
-    pub fn new(device: &wgpu::Device) -> Result<Self> {
+    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Result<Self> {
         let surface = WgpuSurface::new(device, 1, 1)?;
         device.on_uncaptured_error(std::sync::Arc::new(|error| eprintln!("wgpu: {error}")));
 
@@ -83,6 +101,14 @@ impl Viewport {
         let volume_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("viewport volume"),
             source: wgpu::ShaderSource::Wgsl(VOLUME_SHADER.into()),
+        });
+        let axis_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("viewport axis"),
+            source: wgpu::ShaderSource::Wgsl(AXIS_SHADER.into()),
+        });
+        let decal_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("viewport decal"),
+            source: wgpu::ShaderSource::Wgsl(DECAL_SHADER.into()),
         });
         let grid_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("viewport grid"),
@@ -171,6 +197,65 @@ impl Viewport {
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
                 resource: uniform.as_entire_binding(),
+            }],
+        });
+
+        let decal_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("viewport decal"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+        let texture_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("viewport decal texture"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+        let decal_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("viewport decal"),
+                bind_group_layouts: &[
+                    Some(&uniform_layout),
+                    Some(&decal_layout),
+                    Some(&texture_layout),
+                ],
+                immediate_size: 0,
+            });
+        let decal_uniform = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("viewport decal uniform"),
+            size: std::mem::size_of::<OverlayUniform>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let decal_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("viewport decal"),
+            layout: &decal_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: decal_uniform.as_entire_binding(),
             }],
         });
 
@@ -284,9 +369,64 @@ impl Viewport {
             ..Default::default()
         });
 
+        let (front_w, front_h, front_data) = front_texture();
+        let front_tex = create_texture(device, queue, "front decal", front_w, front_h, &front_data);
+        let front_view = front_tex.create_view(&wgpu::TextureViewDescriptor::default());
+        let front_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("viewport front decal"),
+            layout: &texture_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&front_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&linear_sampler),
+                },
+            ],
+        });
+        let (logo_w, logo_h, logo_data) = logo_texture();
+        let logo_tex = create_texture(device, queue, "logo decal", logo_w, logo_h, &logo_data);
+        let logo_view = logo_tex.create_view(&wgpu::TextureViewDescriptor::default());
+        let logo_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("viewport logo decal"),
+            layout: &texture_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&logo_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&linear_sampler),
+                },
+            ],
+        });
+
+        let plate_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("viewport plate"),
+                bind_group_layouts: &[Some(&uniform_layout), Some(&decal_layout)],
+                immediate_size: 0,
+            });
+        let plate_uniform = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("viewport plate uniform"),
+            size: 16,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let plate_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("viewport plate"),
+            layout: &decal_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: plate_uniform.as_entire_binding(),
+            }],
+        });
         let plate = pipeline(
             device,
-            &uniform_pipeline_layout,
+            &plate_pipeline_layout,
             &plate_shader,
             &[Some(wgpu::VertexBufferLayout {
                 array_stride: std::mem::size_of::<Vertex>() as u64,
@@ -305,7 +445,7 @@ impl Viewport {
                 ],
             })],
             wgpu::PrimitiveTopology::TriangleList,
-            Some(wgpu::Face::Back),
+            None,
             true,
             wgpu::CompareFunction::Less,
             WgpuSurface::DEFAULT_FORMAT,
@@ -336,6 +476,111 @@ impl Viewport {
             true,
             SAMPLE_COUNT,
         );
+        let axis = pipeline(
+            device,
+            &uniform_pipeline_layout,
+            &axis_shader,
+            &[Some(wgpu::VertexBufferLayout {
+                array_stride: 24,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &[
+                    wgpu::VertexAttribute {
+                        format: wgpu::VertexFormat::Float32x3,
+                        offset: 0,
+                        shader_location: 0,
+                    },
+                    wgpu::VertexAttribute {
+                        format: wgpu::VertexFormat::Float32x3,
+                        offset: 12,
+                        shader_location: 1,
+                    },
+                ],
+            })],
+            wgpu::PrimitiveTopology::LineList,
+            None,
+            false,
+            wgpu::CompareFunction::LessEqual,
+            WgpuSurface::DEFAULT_FORMAT,
+            true,
+            true,
+            SAMPLE_COUNT,
+        );
+        let axis_edges = axis_edges();
+        let axis_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("viewport axes"),
+            contents: bytemuck::cast_slice(&axis_edges),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        let decal = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("viewport decal"),
+            layout: Some(&decal_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &decal_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: 20,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32x3,
+                            offset: 0,
+                            shader_location: 0,
+                        },
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32x2,
+                            offset: 12,
+                            shader_location: 1,
+                        },
+                    ],
+                })],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &decal_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: WgpuSurface::DEFAULT_FORMAT,
+                    blend: Some(wgpu::BlendState {
+                        color: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::One,
+                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                        alpha: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::One,
+                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                    }),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState {
+                count: SAMPLE_COUNT,
+                ..Default::default()
+            },
+            multiview_mask: None,
+            cache: None,
+        });
+        let decal_vertices = decal_vertices();
+        let decal_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("viewport decals"),
+            contents: bytemuck::cast_slice(&decal_vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
         let mut volume_edges = build_volume_edges(218.88, 122.88, 220.0);
         volume_edges.extend_from_slice(&plate_outline(218.88, 122.88, -0.07));
         let volume_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -374,6 +619,17 @@ impl Viewport {
             volume,
             volume_buffer,
             volume_vertex_count: volume_edges.len() as u32,
+            axis,
+            axis_buffer,
+            axis_vertex_count: axis_edges.len() as u32,
+            plate_uniform,
+            plate_bind,
+            decal,
+            decal_buffer,
+            decal_uniform,
+            decal_bind,
+            front_bind,
+            logo_bind,
             grid,
             footprint,
             mesh_pipeline,
@@ -450,6 +706,19 @@ impl Viewport {
             self.mesh_ptr = 0;
         }
 
+        let view_signed_z = -camera.pitch.sin();
+        let fade_t = ((view_signed_z + 0.06) / 0.078).clamp(0.0, 1.0);
+        let fade = fade_t * fade_t * (3.0 - 2.0 * fade_t);
+        let plate_opacity = 1.0 - fade;
+        queue.write_buffer(
+            &self.plate_uniform,
+            0,
+            bytemuck::bytes_of(&OverlayUniform {
+                value: plate_opacity,
+                _pad: [0.0; 3],
+            }),
+        );
+
         let aspect = width as f32 / height as f32;
         let projection = camera.projection(aspect);
         let view_proj = camera.view_proj(aspect);
@@ -466,6 +735,15 @@ impl Viewport {
                 _pad1: 0.0,
                 resolution: [width as f32, height as f32],
                 _pad2: [0.0; 2],
+            }),
+        );
+
+        queue.write_buffer(
+            &self.decal_uniform,
+            0,
+            bytemuck::bytes_of(&OverlayUniform {
+                value: if eye.y > 0.0 { 1.0 } else { 0.0 },
+                _pad: [0.0; 3],
             }),
         );
 
@@ -506,9 +784,10 @@ impl Viewport {
             pass.set_bind_group(0, &self.scene_bind, &[]);
             pass.set_pipeline(&self.background);
             pass.draw(0..3, 0..1);
-            let below_plate = eye.z < 0.0;
+            let below_plate = view_signed_z >= 0.008;
             if !below_plate {
                 pass.set_pipeline(&self.plate);
+                pass.set_bind_group(1, &self.plate_bind, &[]);
                 pass.set_vertex_buffer(0, self.plate_vertex_buffer.slice(..));
                 pass.set_index_buffer(self.plate_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..self.plate_index_count, 0, 0..1);
@@ -518,6 +797,16 @@ impl Viewport {
             pass.set_pipeline(&self.volume);
             pass.set_vertex_buffer(0, self.volume_buffer.slice(..));
             pass.draw(0..self.volume_vertex_count, 0..1);
+            pass.set_pipeline(&self.axis);
+            pass.set_vertex_buffer(0, self.axis_buffer.slice(..));
+            pass.draw(0..self.axis_vertex_count, 0..1);
+            pass.set_pipeline(&self.decal);
+            pass.set_bind_group(1, &self.decal_bind, &[]);
+            pass.set_vertex_buffer(0, self.decal_buffer.slice(..));
+            pass.set_bind_group(2, &self.front_bind, &[]);
+            pass.draw(0..6, 0..1);
+            pass.set_bind_group(2, &self.logo_bind, &[]);
+            pass.draw(6..12, 0..1);
             if let Some(mesh) = &self.mesh {
                 if !below_plate && mesh.footprint_vertex_count > 0 {
                     pass.set_pipeline(&self.footprint);
@@ -692,6 +981,47 @@ impl Targets {
     }
 }
 
+fn axis_edges() -> Vec<[f32; 6]> {
+    let origin = [-109.44, -61.44, 0.1];
+    let length = 20.0;
+    let head = 3.0;
+    let axes: [([f32; 3], [f32; 3], [f32; 3], [f32; 3]); 3] = [
+        ([1.0, 0.0, 0.0], [1.0, 0.05, 0.05], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]),
+        ([0.0, 1.0, 0.0], [0.05, 1.0, 0.05], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
+        ([0.0, 0.0, 1.0], [0.05, 0.2, 1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
+    ];
+    let mut out = Vec::new();
+    let mut push = |a: [f32; 3], b: [f32; 3], color: [f32; 3]| {
+        out.push([a[0], a[1], a[2], color[0], color[1], color[2]]);
+        out.push([b[0], b[1], b[2], color[0], color[1], color[2]]);
+    };
+    for (dir, color, u, v) in axes {
+        let tip = [
+            origin[0] + dir[0] * length,
+            origin[1] + dir[1] * length,
+            origin[2] + dir[2] * length,
+        ];
+        push(origin, tip, color);
+        let back = [
+            tip[0] - dir[0] * head,
+            tip[1] - dir[1] * head,
+            tip[2] - dir[2] * head,
+        ];
+        for side in [u, v] {
+            push(
+                tip,
+                [
+                    back[0] + side[0] * head * 0.5,
+                    back[1] + side[1] * head * 0.5,
+                    back[2] + side[2] * head * 0.5,
+                ],
+                color,
+            );
+        }
+    }
+    out
+}
+
 fn plate_outline(width: f32, depth: f32, z: f32) -> Vec<[f32; 3]> {
     let hx = width * 0.5;
     let hy = depth * 0.5;
@@ -747,6 +1077,11 @@ fn plate_mesh(
     let z1 = top - thickness;
 
     let mut perimeter: Vec<[f32; 2]> = vec![[-half_w + r, -half_d]];
+    // Front tab: 24mm at the plate edge, 16mm at the tip, 4.2mm deep.
+    perimeter.push([-12.0, -half_d]);
+    perimeter.push([-8.0, -half_d - 4.2]);
+    perimeter.push([8.0, -half_d - 4.2]);
+    perimeter.push([12.0, -half_d]);
     let arc = |cx: f32, cy: f32, a0: f32, a1: f32, points: &mut Vec<[f32; 2]>| {
         for i in 1..=segments {
             let a = a0 + (a1 - a0) * i as f32 / segments as f32;
@@ -807,6 +1142,140 @@ fn plate_mesh(
     }
 
     (vertices, indices)
+}
+
+fn create_texture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    label: &str,
+    width: u32,
+    height: u32,
+    data: &[u8],
+) -> wgpu::Texture {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some(label),
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: &texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        data,
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(width * 4),
+            rows_per_image: Some(height),
+        },
+        wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+    );
+    texture
+}
+
+fn front_texture() -> (u32, u32, Vec<u8>) {
+    let width = 256u32;
+    let height = 72u32;
+    let mut data = vec![0u8; (width * height * 4) as usize];
+    let Ok(bytes) = std::fs::read("C:/Windows/Fonts/segoeuib.ttf") else {
+        return (width, height, data);
+    };
+    let Ok(font) = fontdue::Font::from_bytes(bytes, fontdue::FontSettings::default()) else {
+        return (width, height, data);
+    };
+    let size = 46.0f32;
+    let spacing = 3.0f32;
+    let mut glyphs = Vec::new();
+    let mut total = 0.0f32;
+    for ch in "FRONT".chars() {
+        let (metrics, bitmap) = font.rasterize(ch, size);
+        glyphs.push((metrics, bitmap, total));
+        total += metrics.advance_width + spacing;
+    }
+    let start_x = (width as f32 - total) / 2.0;
+    let baseline = height as f32 / 2.0 + size * 0.35;
+    for (metrics, bitmap, advance) in glyphs {
+        let gx = start_x + advance + metrics.xmin as f32;
+        let gy = baseline - metrics.ymin as f32 - metrics.height as f32;
+        for row in 0..metrics.height {
+            for col in 0..metrics.width {
+                let coverage = bitmap[row * metrics.width + col];
+                if coverage == 0 {
+                    continue;
+                }
+                let px = gx as i32 + col as i32;
+                let py = gy as i32 + row as i32;
+                if px < 0 || py < 0 || px >= width as i32 || py >= height as i32 {
+                    continue;
+                }
+                let index = ((py as u32 * width + px as u32) * 4) as usize;
+                data[index] = coverage;
+                data[index + 1] = coverage;
+                data[index + 2] = coverage;
+                data[index + 3] = coverage;
+            }
+        }
+    }
+    (width, height, data)
+}
+
+fn logo_texture() -> (u32, u32, Vec<u8>) {
+    let width = 1772u32;
+    let height = 304u32;
+    let Ok(svg) = std::fs::read_to_string("../public/dragonfruit_assets/branding/text_logo.svg") else {
+        return (width, height, vec![0u8; (width * height * 4) as usize]);
+    };
+    let Ok(tree) = resvg::usvg::Tree::from_str(&svg, &resvg::usvg::Options::default()) else {
+        return (width, height, vec![0u8; (width * height * 4) as usize]);
+    };
+    let Some(mut pixmap) = resvg::tiny_skia::Pixmap::new(width, height) else {
+        return (width, height, vec![0u8; (width * height * 4) as usize]);
+    };
+    resvg::render(
+        &tree,
+        resvg::tiny_skia::Transform::identity(),
+        &mut pixmap.as_mut(),
+    );
+    (width, height, pixmap.data().to_vec())
+}
+
+fn decal_vertices() -> Vec<[f32; 5]> {
+    let mut out = Vec::new();
+    let mut quad = |cx: f32, cy: f32, width: f32, height: f32, z: f32| {
+        let x0 = cx - width * 0.5;
+        let x1 = cx + width * 0.5;
+        let y0 = cy - height * 0.5;
+        let y1 = cy + height * 0.5;
+        let corners = [
+            (x0, y0, 0.0, 1.0),
+            (x1, y0, 1.0, 1.0),
+            (x1, y1, 1.0, 0.0),
+            (x0, y0, 0.0, 1.0),
+            (x1, y1, 1.0, 0.0),
+            (x0, y1, 0.0, 0.0),
+        ];
+        for (x, y, u, v) in corners {
+            out.push([x, y, z, u, v]);
+        }
+    };
+    quad(0.0, -65.91, 13.2, 3.7, 0.05);
+    quad(92.84, -56.24, 42.0, 7.2, 0.12);
+    out
 }
 
 fn pipeline(
@@ -928,7 +1397,51 @@ fn msaa_depth_target(device: &wgpu::Device, width: u32, height: u32) -> wgpu::Te
     })
 }
 
+
+const DECAL_SHADER: &str = r#"
+struct Uniforms {
+    view_proj: mat4x4<f32>,
+    inv_proj: mat4x4<f32>,
+    camera_pos: vec3<f32>,
+    base_color: vec3<f32>,
+    resolution: vec2<f32>,
+};
+struct Decal {
+    flip: f32,
+    _pad0: f32,
+    _pad1: f32,
+    _pad2: f32,
+};
+@group(0) @binding(0) var<uniform> uniforms: Uniforms;
+@group(1) @binding(0) var<uniform> decal: Decal;
+@group(2) @binding(0) var tex: texture_2d<f32>;
+@group(2) @binding(1) var samp: sampler;
+
+struct DecalOut {
+    @builtin(position) position: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+};
+
+@vertex
+fn vs_main(@location(0) position: vec3<f32>, @location(1) uv: vec2<f32>) -> DecalOut {
+    var out: DecalOut;
+    out.position = uniforms.view_proj * vec4<f32>(position, 1.0);
+    var u = uv;
+    if (decal.flip > 0.5) {
+        u = vec2<f32>(1.0 - u.x, 1.0 - u.y);
+    }
+    out.uv = u;
+    return out;
+}
+
+@fragment
+fn fs_main(in: DecalOut) -> @location(0) vec4<f32> {
+    return textureSample(tex, samp, in.uv);
+}
+"#;
+
 const MESH_SHADER: &str = r#"
+
 struct Uniforms {
     view_proj: mat4x4<f32>,
     inv_proj: mat4x4<f32>,
@@ -1010,6 +1523,35 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
 }
 "#;
 
+const AXIS_SHADER: &str = r#"
+struct Uniforms {
+    view_proj: mat4x4<f32>,
+    inv_proj: mat4x4<f32>,
+    camera_pos: vec3<f32>,
+    base_color: vec3<f32>,
+    resolution: vec2<f32>,
+};
+@group(0) @binding(0) var<uniform> uniforms: Uniforms;
+
+struct AxisOut {
+    @builtin(position) position: vec4<f32>,
+    @location(0) color: vec3<f32>,
+};
+
+@vertex
+fn vs_main(@location(0) position: vec3<f32>, @location(1) color: vec3<f32>) -> AxisOut {
+    var out: AxisOut;
+    out.position = uniforms.view_proj * vec4<f32>(position, 1.0);
+    out.color = color;
+    return out;
+}
+
+@fragment
+fn fs_main(in: AxisOut) -> @location(0) vec4<f32> {
+    return vec4<f32>(in.color, 1.0);
+}
+"#;
+
 const VOLUME_SHADER: &str = r#"
 struct Uniforms {
     view_proj: mat4x4<f32>,
@@ -1027,7 +1569,7 @@ fn vs_main(@location(0) position: vec3<f32>) -> @builtin(position) vec4<f32> {
 
 @fragment
 fn fs_main() -> @location(0) vec4<f32> {
-    return vec4<f32>(0.035, 0.042, 0.052, 1.0);
+    return vec4<f32>(0.045, 0.055, 0.068, 1.0);
 }
 "#;
 
@@ -1039,7 +1581,14 @@ struct Uniforms {
     base_color: vec3<f32>,
     resolution: vec2<f32>,
 };
+struct Plate {
+    opacity: f32,
+    _pad0: f32,
+    _pad1: f32,
+    _pad2: f32,
+};
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
+@group(1) @binding(0) var<uniform> plate: Plate;
 
 struct PlateOut {
     @builtin(position) position: vec4<f32>,
@@ -1065,8 +1614,10 @@ fn fs_main(in: PlateOut) -> @location(0) vec4<f32> {
     let head = max(dot(n, view_dir), 0.0);
     let hemi = mix(vec3<f32>(0.243, 0.255, 0.361), vec3<f32>(0.965, 0.910, 1.0), n.z * 0.5 + 0.5);
     let lighting = (hemi * 0.28 + key * 1.12 + fill * 0.168 + head * 1.0) / 3.14159265;
-    let plate = vec3<f32>(0.032, 0.040, 0.054);
-    return vec4<f32>(plate * lighting, 1.0);
+    let base = vec3<f32>(0.032, 0.040, 0.054);
+    let fade = 1.0 - plate.opacity;
+    let color = mix(base * lighting, vec3<f32>(0.0056, 0.0061, 0.0080), fade);
+    return vec4<f32>(color, 1.0);
 }
 "#;
 
@@ -1108,7 +1659,7 @@ fn fs_main(in: GridOut) -> @location(0) vec4<f32> {
     let head = max(view_dir.z, 0.0);
     let lighting = (vec3<f32>(0.965, 0.910, 1.0) * 0.28 + 1.12 + head * 1.0) / 3.14159265;
     let plate = vec3<f32>(0.032, 0.040, 0.054) * lighting;
-    let grid_color = vec3<f32>(0.020, 0.024, 0.030);
+    let grid_color = vec3<f32>(0.035, 0.042, 0.052);
     let color = mix(plate, grid_color, line);
     return vec4<f32>(color, 1.0);
 }
@@ -1156,7 +1707,7 @@ fn vs_main(@builtin(vertex_index) index: u32) -> @builtin(position) vec4<f32> {
 @fragment
 fn fs_main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
     let t = clamp(position.y / uniforms.resolution.y, 0.0, 1.0);
-    let background = vec3<f32>(0.0033, 0.0048, 0.0069);
+    let background = vec3<f32>(0.0056, 0.0061, 0.0080);
     return vec4<f32>(background, 1.0);
 }
 "#;
@@ -1206,15 +1757,15 @@ fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     let pink = vec3<f32>(1.0, 0.216, 0.667);
     let violet = vec3<f32>(0.435, 0.2, 1.0);
     var linear_color = pink;
-    var linear_alpha = 0.10 * 0.75;
+    var linear_alpha = 0.10 * 0.8;
     if (uv.y > 0.4) {
         let k = (uv.y - 0.4) / 0.6;
         linear_color = mix(violet, vec3<f32>(0.0), k);
-        linear_alpha = mix(0.06 * 0.75, 0.0, k);
+        linear_alpha = mix(0.06 * 0.8, 0.0, k);
     } else {
         let k = uv.y / 0.4;
         linear_color = mix(pink, violet, k);
-        linear_alpha = mix(0.10 * 0.75, 0.06 * 0.75, k);
+        linear_alpha = mix(0.10 * 0.8, 0.06 * 0.8, k);
     }
     let overlay = pink * radial_alpha + linear_color * linear_alpha;
     let scene_srgb = linear_to_srgb(color);
