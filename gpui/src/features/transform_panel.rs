@@ -38,7 +38,9 @@ use std::rc::Rc;
 use gpui::{Div, FontWeight, IntoElement, SharedString, div, prelude::*, px, rgb};
 
 use gpui_ui::panel_fields::*;
-use gpui_ui::ui::{section_row, sub_card_with};
+use gpui_ui::ui::{
+    ButtonSize, ButtonSpec, ButtonVariant, button_with, section_row, sub_card_with,
+};
 use gpui_core::theme::*;
 
 /// `SelectionRotationMode` in `src/features/scene/selectionTransform.ts`.
@@ -271,28 +273,12 @@ fn lift_section(state: &TransformState, actions: &TransformActions) -> Div {
                          colors: (u32, u32, u32),
                          handler: Rc<dyn Fn()>| {
         let (background, border, text) = colors;
-        let el = div()
-            .id(id)
-            .h(px(32.0))
-            .px(px(11.0))
-            .pt(px(5.0))
-            .pb(px(7.0))
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded(px(RADIUS_SM))
-            .border_1()
-            .border_color(rgb(border))
-            .bg(rgb(background))
-            .text_size(px(FONT_MD))
-            .font_weight(FontWeight::SEMIBOLD)
-            .line_height(px(FONT_MD))
-            .text_color(rgb(text))
-            .child(label);
+        let spec = ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Sm)
+            .fill(background, border, text)
+            .hover(mix(background, WHITE, 0.92));
+        let el = button_with(id, label, &spec);
         if has_bbox {
-            el.cursor_pointer()
-                .hover(|s| s.bg(rgb(mix(background, WHITE, 0.92))))
-                .on_click(move |_, _, _| handler())
+            el.on_click(move |_, _, _| handler())
         } else {
             el.opacity(0.5).cursor_not_allowed()
         }

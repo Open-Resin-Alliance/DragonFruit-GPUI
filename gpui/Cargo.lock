@@ -2541,6 +2541,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "gpui-supports"
+version = "0.0.0"
+dependencies = [
+ "glam",
+]
+
+[[package]]
 name = "gpui-ui"
 version = "0.0.0"
 dependencies = [

@@ -1,0 +1,12 @@
+[package]
+name = "gpui-supports"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# The supports system's 3D primitives: the geometry `src/supports/SupportPrimitives`
+# hands three.js, generated here as plain triangles so the wgpu viewport can draw
+# a support set without a scene graph. Pure maths — no gpui, no wgpu.
+
+[dependencies]
+glam = "0.30"

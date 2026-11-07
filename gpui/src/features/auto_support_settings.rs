@@ -59,7 +59,7 @@ use gpui::{
 };
 
 use gpui_core::icons::icon;
-use gpui_ui::panel_fields::{disabled_action_style, format_number, with_alpha};
+use gpui_ui::panel_fields::{format_number, with_alpha};
 use gpui_core::theme::*;
 use gpui_ui::ui::{
     ButtonSize, ButtonSpec, ButtonVariant, IconButtonSize, IconButtonVariant, SelectOption,
@@ -122,12 +122,6 @@ fn shadow(x: f32, y: f32, blur: f32, spread: f32, color: u32) -> gpui::BoxShadow
     gpui::BoxShadow::new(px(x), px(y), rgba(color).into())
         .blur_radius(px(blur))
         .spread_radius(px(spread))
-}
-
-/// The `.ui-button:disabled` foreground (`button:disabled` in `globals.css`),
-/// for the icons `ButtonSpec` cannot inherit the disabled colour into.
-fn disabled_foreground() -> u32 {
-    disabled_action_style().2
 }
 
 // ── The settings block ──────────────────────────────────────────────────────
@@ -1451,16 +1445,10 @@ fn strip_button(
     let mut spec = ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Sm)
         .padding_x(10.0)
         .padding_y(0.0, 0.0)
-        .gap(4.0)
-        .icon(
-            icon_name,
-            14.0,
-            if enabled {
-                TEXT_STRONG
-            } else {
-                disabled_foreground()
-            },
-        );
+        .gap(4.0);
+    // `h-3.5 w-3.5` with `currentColor`: the icon follows the label colour,
+    // including the disabled one.
+    spec.icon = Some((icon_name.into(), 14.0));
     if !enabled {
         spec = spec.disabled();
     }
@@ -1636,13 +1624,9 @@ fn preset_strip(
 fn footer_delete_button(enabled: bool, entity: &WeakEntity<DragonFruit>) -> Stateful<Div> {
     // `Button variant="tinted-danger" size="md"`, whose `.ui-button:disabled`
     // recipe `ButtonSpec::disabled` already paints.
-    let mut spec = ButtonSpec::new(ButtonVariant::TintedDanger, ButtonSize::Md)
-        .gap(6.0)
-        .icon(
-            "trash-2",
-            14.0,
-            if enabled { DANGER } else { disabled_foreground() },
-        );
+    let mut spec = ButtonSpec::new(ButtonVariant::TintedDanger, ButtonSize::Md).gap(6.0);
+    // `Trash2` is `currentColor`, i.e. the variant's fill and the disabled one.
+    spec.icon = Some(("trash-2".into(), 14.0));
     if !enabled {
         spec = spec.disabled();
     }
@@ -1661,17 +1645,9 @@ fn footer_reset_button(enabled: bool, entity: &WeakEntity<DragonFruit>) -> State
     // `FOOTER_BUTTON`: `Button variant="secondary" size="auto"` with `!h-9
     // px-3 text-[12px] disabled:opacity-45`; the unlayered `.ui-button` keeps
     // its 11px padding and 14px type, so only the 36px height applies.
-    let mut spec = ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Md)
-        .gap(6.0)
-        .icon(
-            "rotate-ccw",
-            14.0,
-            if enabled {
-                TEXT_STRONG
-            } else {
-                disabled_foreground()
-            },
-        );
+    let mut spec = ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Md).gap(6.0);
+    // `RotateCcw` is `currentColor`, i.e. the variant's fill and the disabled one.
+    spec.icon = Some(("rotate-ccw".into(), 14.0));
     if !enabled {
         spec = spec.disabled();
     }
@@ -1699,12 +1675,15 @@ fn footer_save_button(
     entity: &WeakEntity<DragonFruit>,
 ) -> Stateful<Div> {
     // `Button size="md"` (secondary) with the source's inline `SAVE_STYLE` /
-    // `SAVED_STYLE`; `.ui-button:disabled` stays the base while disabled.
+    // `SAVED_STYLE`, which outrank `.ui-button:disabled`.
     let mut spec = ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Md).gap(6.0);
     if saved {
-        spec = spec.icon("check", 14.0, SUCCESS);
-    }
-    if !enabled {
+        spec = spec
+            .fill(saved_background(), saved_border(), SUCCESS)
+            .icon("check", 14.0, SUCCESS);
+    } else if enabled {
+        spec = spec.fill(save_background(), save_border(), ACCENT_SECONDARY);
+    } else {
         spec = spec.disabled();
     }
     let el = button_with(
@@ -1712,17 +1691,6 @@ fn footer_save_button(
         if saved { "Saved!" } else { "Save" },
         &spec,
     );
-    let el = if saved {
-        el.border_color(rgb(saved_border()))
-            .bg(rgb(saved_background()))
-            .text_color(rgb(SUCCESS))
-    } else if enabled {
-        el.border_color(rgb(save_border()))
-            .bg(rgb(save_background()))
-            .text_color(rgb(ACCENT_SECONDARY))
-    } else {
-        el
-    };
     if enabled && !saved {
         let click_entity = entity.clone();
         el.on_click(move |_, _, cx| {
