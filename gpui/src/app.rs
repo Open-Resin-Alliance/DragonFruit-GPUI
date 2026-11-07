@@ -1083,8 +1083,8 @@ impl Render for DragonFruit {
                     .absolute()
                     // `HOME_OFFSET 0.93` along the gizmo's bottom-right diagonal:
                     // the chip's box sits just inside the widget's corner.
-                    .bottom(px(16.0))
-                    .right(px(66.0))
+                    .bottom(px(13.0))
+                    .right(px(63.0))
                     .child(overlays::home_button(camera.clone(), entity.clone())),
             )
             // `CrossSliderPanel` wrapper: hidden in printing (the source's
