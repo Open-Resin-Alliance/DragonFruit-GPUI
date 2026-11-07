@@ -335,7 +335,7 @@ fn wrap(
 }
 
 /// Copy the entity-backed values the panels display into the store.
-fn sync_from_entity(entity: &WeakEntity<DragonFruit>, cx: &mut App) {
+pub(crate) fn sync_from_entity(entity: &WeakEntity<DragonFruit>, cx: &mut App) {
     entity
         .read_with(cx, |this, _| {
             with_store(|store| {

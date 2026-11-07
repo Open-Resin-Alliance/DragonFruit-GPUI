@@ -417,6 +417,7 @@ impl Render for DragonFruit {
         );
         // `publishClip`'s upper plane: none at layer 0 or at the top layer,
         // parked (infinite) when the cross-section switch is closed.
+        let translate_z = self.translate[2];
         let clip_z = if self.cross_section && self.mesh.is_some() {
             let upper = self.layer;
             let max_layer = self.num_layers as f32;
@@ -426,7 +427,9 @@ impl Render for DragonFruit {
                 self.mesh
                     .as_ref()
                     .map(|mesh| {
-                        let z_min = mesh.center.z - mesh.size[2] * 0.5;
+                        // The clip plane is in world space, so the model's own
+                // translate has to be included.
+                let z_min = mesh.center.z + self.translate[2] - mesh.size[2] * 0.5;
                         z_min + upper * LAYER_HEIGHT_MM + CLIP_EPSILON_MM
                     })
                     .unwrap_or(f32::INFINITY)
@@ -618,6 +621,10 @@ impl Render for DragonFruit {
                                 }
                             })
                             .ok();
+                        // The transform panel reads its own store; without this the
+                        // XYZ fields keep the pre-drag values.
+                        features::tool_panels::sync_from_entity(&entity, cx);
+                        entity.update(cx, |_, cx| cx.notify()).ok();
                         return;
                     }
                     let mut camera = camera.borrow_mut();
@@ -854,7 +861,8 @@ impl Render for DragonFruit {
                         if key == "f" && !primary && !alt && !repeat {
                             if let Some(mesh) = &this.mesh {
                                 let mut camera = this.camera.borrow_mut();
-                                camera.focus(mesh.center, mesh.radius.max(1.0));
+                                let world = mesh.center + glam::Vec3::from_array(this.translate);
+                                camera.focus(world, mesh.radius.max(1.0));
                                 changed = true;
                             }
                         }
