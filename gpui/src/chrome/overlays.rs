@@ -1286,6 +1286,55 @@ fn cube_hit(view: &CubeView, faces: &[FaceProjection], pointer: [f32; 2]) -> Opt
 
 /// `ZUpGizmoHelper`'s home chip: a rounded button on the cube's bottom-right
 /// diagonal that returns the camera to the home pose.
+
+/// `ZUpGizmoHelper`'s quarter-turn arrows: four triangles around the cube, each
+/// turning the camera 90° about the axis it points along.
+const QUARTER: f32 = 14.0;
+
+fn quarter_arrow(
+    id: &'static str,
+    icon_name: &'static str,
+    dx: f32,
+    dy: f32,
+    camera: Rc<std::cell::RefCell<Camera>>,
+    entity: WeakEntity<DragonFruit>,
+) -> impl IntoElement {
+    div()
+        .id(id)
+        .absolute()
+        .left(px(CUBE_WIDGET * 0.5 - QUARTER * 0.5 + dx))
+        .top(px(CUBE_WIDGET * 0.5 - QUARTER * 0.5 + dy))
+        .w(px(QUARTER))
+        .h(px(QUARTER))
+        .flex()
+        .items_center()
+        .justify_center()
+        .cursor_pointer()
+        .hover(|style| style.opacity(0.75))
+        .on_click(move |_, _, cx| {
+            let (yaw, pitch) = {
+                let camera = camera.borrow();
+                (camera.yaw, camera.pitch)
+            };
+            // Left/right spin about Z; up/down tilt about the horizontal axis.
+            let (yaw, pitch) = match id {
+                "cube-turn-left" => (yaw - std::f32::consts::FRAC_PI_2, pitch),
+                "cube-turn-right" => (yaw + std::f32::consts::FRAC_PI_2, pitch),
+                "cube-turn-up" => (
+                    yaw,
+                    (pitch + std::f32::consts::FRAC_PI_2).min(std::f32::consts::FRAC_PI_2 - 0.001),
+                ),
+                _ => (
+                    yaw,
+                    (pitch - std::f32::consts::FRAC_PI_2).max(-std::f32::consts::FRAC_PI_2 + 0.001),
+                ),
+            };
+            camera.borrow_mut().orient_to(yaw, pitch);
+            entity.update(cx, |_, cx| cx.notify()).ok();
+        })
+        .child(icons::icon(icon_name, QUARTER, ACCENT_SECONDARY))
+}
+
 pub fn home_button(
     camera: Rc<std::cell::RefCell<Camera>>,
     entity: WeakEntity<DragonFruit>,
@@ -1295,7 +1344,7 @@ pub fn home_button(
         .w(px(HOME_SIZE))
         .h(px(HOME_SIZE))
         // `roundRect(..., 16)` on a 64px canvas drawn at 28px: 7px on screen.
-        .rounded(px(7.0))
+        .rounded(px(8.5))
         .border_1()
         .border_color(rgb(HOME_BORDER))
         .bg(rgb(HOME_CHIP))
@@ -1313,11 +1362,11 @@ pub fn home_button(
         // `HomeButton` fills lucide's closed silhouette and paints the open
         // detail (the door) in the chip's own colour, so the glyph reads solid
         // rather than as an outline.
-        .child(icons::icon("house-filled", 22.0, HOME_GLYPH))
+        .child(icons::icon("house-filled", 26.0, HOME_GLYPH))
 }
 
 /// `HOME_SIZE` from `ZUpGizmoHelper`: `0.47` of the cube's 60-unit scale.
-const HOME_SIZE: f32 = 28.0;
+const HOME_SIZE: f32 = 34.0;
 /// `gizmoColors.chip`.
 const HOME_CHIP: u32 = SURFACE_0;
 /// A hover step above the chip surface.
