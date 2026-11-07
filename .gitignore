@@ -109,3 +109,4 @@ src/**/AGENTS.md
 # GPUI spike build dirs
 gpui/target-verify/
 spike-declarative/target/
+gpui/target-check/

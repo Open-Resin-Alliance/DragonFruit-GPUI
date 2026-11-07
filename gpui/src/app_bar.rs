@@ -299,6 +299,7 @@ pub struct AppBarState {
     pub logo: Option<PathBuf>,
     /// `window.innerWidth`, for the source's `ResizeObserver` thresholds.
     pub window_width: f32,
+    pub maximized: bool,
     pub printer: PrinterBadge,
     pub monitor: MonitorButton,
 }
@@ -318,6 +319,7 @@ impl Default for AppBarState {
             show_view_menu: false,
             logo: None,
             window_width: 0.0,
+            maximized: false,
             printer: PrinterBadge::default(),
             monitor: MonitorButton::default(),
         }
@@ -360,6 +362,7 @@ pub fn app_bar(state: AppBarState, entity: WeakEntity<DragonFruit>) -> impl Into
         show_view_menu,
         logo,
         window_width,
+        maximized,
         printer,
         monitor,
     } = state;
@@ -615,7 +618,13 @@ pub fn app_bar(state: AppBarState, entity: WeakEntity<DragonFruit>) -> impl Into
             // `ml-1 flex items-center gap-1`.
             div(ml_4, flex, items_center, gap_4) {
                 { window_button(WindowControlArea::Min, 0xf4bf4f, "minimize-2", TintColor::Plain, 0.86) }
-                { window_button(WindowControlArea::Max, 0x40c463, "maximize-2", TintColor::Mix16, 0.86) }
+                { window_button(
+                    WindowControlArea::Max,
+                    0x40c463,
+                    if maximized { "square" } else { "maximize-2" },
+                    TintColor::Mix16,
+                    0.86,
+                ) }
                 { window_button(WindowControlArea::Close, 0xff6b6b, "x", TintColor::Mix18, 0.88) }
             }
         }

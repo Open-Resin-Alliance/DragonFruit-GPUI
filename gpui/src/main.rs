@@ -1117,6 +1117,7 @@ impl Render for DragonFruit {
                     show_view_menu: self.show_view_menu,
                     logo: self.logo.clone(),
                     window_width: self.window_width,
+                    maximized: window.is_maximized(),
                     printer: Default::default(),
                     monitor: Default::default(),
                 },
