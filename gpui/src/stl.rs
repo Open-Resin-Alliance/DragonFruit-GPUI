@@ -125,6 +125,30 @@ pub fn load_stl(path: &Path) -> Result<MeshData> {
     })
 }
 
+/// Write a binary STL with the model matrix applied.
+pub fn export_stl(mesh: &MeshData, transform: glam::Mat4, path: &Path) -> Result<()> {
+    let mut out = Vec::with_capacity(84 + mesh.triangles * 50);
+    out.extend_from_slice(&[0u8; 80]);
+    out.extend_from_slice(&(mesh.triangles as u32).to_le_bytes());
+    for triangle in mesh.vertices.chunks_exact(3) {
+        let normal = transform
+            .transform_vector3(glam::Vec3::from_array(triangle[0].normal))
+            .normalize();
+        for value in [normal.x, normal.y, normal.z] {
+            out.extend_from_slice(&value.to_le_bytes());
+        }
+        for vertex in triangle {
+            let position = transform.transform_point3(glam::Vec3::from_array(vertex.pos));
+            for value in [position.x, position.y, position.z] {
+                out.extend_from_slice(&value.to_le_bytes());
+            }
+        }
+        out.extend_from_slice(&0u16.to_le_bytes());
+    }
+    std::fs::write(path, out).with_context(|| format!("writing {}", path.display()))?;
+    Ok(())
+}
+
 /// Centroids of downward-facing triangles above the plate, the points a
 /// support preview drops from.
 pub fn overhang_points(mesh: &MeshData, angle_degrees: f32) -> Vec<[f32; 3]> {
@@ -176,6 +200,35 @@ pub fn raycast(mesh: &MeshData, origin: GVec3, direction: GVec3) -> bool {
         }
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exports_binary_stl() {
+        let mesh = MeshData {
+            vertices: vec![
+                Vertex { pos: [0.0, 0.0, 0.0], normal: [0.0, 0.0, 1.0], ao: 1.0 },
+                Vertex { pos: [1.0, 0.0, 0.0], normal: [0.0, 0.0, 1.0], ao: 1.0 },
+                Vertex { pos: [0.0, 1.0, 0.0], normal: [0.0, 0.0, 1.0], ao: 1.0 },
+            ],
+            footprint: Vec::new(),
+            center: GVec3::ZERO,
+            radius: 1.0,
+            triangles: 1,
+            name: "test".to_owned(),
+            size: [1.0, 1.0, 0.0],
+            volume: 0.0,
+        };
+        let path = std::env::temp_dir().join("dragonfruit-gpui-export-test.stl");
+        export_stl(&mesh, glam::Mat4::IDENTITY, &path).unwrap();
+        let bytes = std::fs::read(&path).unwrap();
+        assert_eq!(bytes.len(), 84 + 50);
+        assert_eq!(u32::from_le_bytes(bytes[80..84].try_into().unwrap()), 1);
+        let _ = std::fs::remove_file(&path);
+    }
 }
 
 fn convex_hull(points: &[Vec3]) -> Vec<[f32; 2]> {

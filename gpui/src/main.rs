@@ -1109,7 +1109,7 @@ fn left_panel(
             Mode::Prepare | Mode::Support => {
                 support_card(entity.clone(), support_count, show_supports)
             }
-            Mode::Export => export_card(),
+            Mode::Export => export_card(entity.clone()),
             Mode::Printing => printing_card(),
         })
 }
@@ -1243,7 +1243,8 @@ fn support_card(
     })
 }
 
-fn export_card() -> gpui::Div {
+fn export_card(entity: WeakEntity<DragonFruit>) -> gpui::Div {
+    let export_entity = entity.clone();
     card_shell("Export")
         .child(modal_row("Format", "STL"))
         .child(modal_row("Units", "Millimetres"))
@@ -1260,7 +1261,33 @@ fn export_card() -> gpui::Div {
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(rgb(ACCENT_CONTRAST))
                 .child("Export")
-                .hover(|style| style.bg(rgb(PRIMARY_HOVER))),
+                .hover(|style| style.bg(rgb(PRIMARY_HOVER)))
+                .on_click(move |_, _, cx| {
+                    export_entity
+                        .update(cx, |this, cx| {
+                            let Some(mesh) = this.mesh.as_ref() else {
+                                return;
+                            };
+                            let Some(path) = rfd::FileDialog::new()
+                                .add_filter("STL", &["stl"])
+                                .set_file_name("export.stl")
+                                .save_file()
+                            else {
+                                return;
+                            };
+                            let transform = glam::Mat4::from_scale_rotation_translation(
+                                glam::Vec3::splat(this.scale),
+                                glam::Quat::from_rotation_z(this.rotate_z),
+                                glam::Vec3::from_array(this.translate),
+                            );
+                            this.status = match stl::export_stl(mesh, transform, &path) {
+                                Ok(()) => format!("Exported {}", path.display()),
+                                Err(error) => format!("{error:#}"),
+                            };
+                            cx.notify();
+                        })
+                        .ok();
+                }),
         )
 }
 
