@@ -771,14 +771,20 @@ fn step_button(
     let (background, border) = if is_active {
         // `color-mix(accent, white 8%)` border, `color-mix(accent,
         // surface-0 84%)` fill.
-        (mix(ACCENT, SURFACE_0, 0.16), mix(ACCENT, WHITE, 0.92))
+        (
+            gpui::rgb(mix(ACCENT, SURFACE_0, 0.16)),
+            mix(ACCENT, WHITE, 0.92),
+        )
     } else if printing_locked {
         // `color-mix(border-subtle, black 30%)` border, `color-mix(surface-2,
         // black 12%)` fill.
-        (mix(SURFACE_2, BLACK, 0.88), mix(BORDER_SUBTLE, BLACK, 0.70))
+        (
+            gpui::rgb(mix(SURFACE_2, BLACK, 0.88)),
+            mix(BORDER_SUBTLE, BLACK, 0.70),
+        )
     } else {
         // `border-subtle` border, `color-mix(surface-1, transparent 4%)`.
-        (0x1a1b21f5, BORDER_SUBTLE)
+        (gpui::rgba(0x1a1b21f5), BORDER_SUBTLE)
     };
 
     let badge_icon = if is_active { ACCENT } else { TEXT_MUTED };
@@ -805,7 +811,7 @@ fn step_button(
         .rounded(px(5.5))
         .border_1()
         .border_color(rgb(border))
-        .bg(rgb(background));
+        .bg(background);
 
     if is_active {
         step = step.shadow(vec![active_shadow()]);
@@ -956,18 +962,20 @@ fn window_button(
     color: TintColor,
     background_weight: f32,
 ) -> impl IntoElement {
+    // `color-mix(in srgb, tint, var(--text-strong) 16%)` keeps 84% of the
+    // tint; the percentage is the second colour's share.
     let foreground = match color {
         TintColor::Plain => TEXT_STRONG,
-        TintColor::Mix16 => mix(tint, TEXT_STRONG, 0.16),
-        TintColor::Mix18 => mix(tint, TEXT_STRONG, 0.18),
+        TintColor::Mix16 => mix(tint, TEXT_STRONG, 0.84),
+        TintColor::Mix18 => mix(tint, TEXT_STRONG, 0.82),
     };
 
     ui! {
         div(
             w_32, h_32, flex, items_center, justify_center,
             rounded_6, border,
-            border_color = rgb(mix(tint, BORDER_SUBTLE, 0.55)),
-            bg = rgb(mix(tint, SURFACE_1, background_weight)),
+            border_color = rgb(mix(tint, BORDER_SUBTLE, 0.45)),
+            bg = rgb(mix(tint, SURFACE_1, 1.0 - background_weight)),
             window_control_area = area,
         ) {
             { icon(icon_name, 16., foreground) }
