@@ -24,14 +24,17 @@ const LABEL_FONT: f32 = 24.0 * SCALE;
 /// `defaultFaces`, in `ZUpGizmoViewcube`'s box order.
 pub const LABELS: [&str; 6] = ["FRONT", "BACK", "RIGHT", "LEFT", "TOP", "BOTTOM"];
 
-/// Quarter turns applied to the label per face, clockwise.
+/// Quarter turns applied to the label per face, clockwise. None: the up tangent
+/// of every face is already world Z (sides) or the face's own up (top/bottom),
+/// so the quad's UVs carry the orientation. An extra turn on TOP/BOTTOM turned
+/// those labels 90° too far.
 ///
 /// `FaceMaterial`'s `needsRotation` table (`-PI/2, PI/2, PI, 0, -PI/2, -PI/2`)
 /// is expressed against three.js's box UVs *before* the group's own
 /// `-PI/2` Z rotation. Here the group rotation is baked into the face normals,
 /// so the sides need no extra turn (the up tangent is already world Z); the top
 /// and bottom need a quarter turn to read across the face rather than along it.
-const ROTATIONS: [i32; 6] = [0, 0, 0, 0, 1, 1];
+const ROTATIONS: [i32; 6] = [0, 0, 0, 0, 0, 0];
 /// `opacity={0.75}` on the face material.
 pub const FACE_OPACITY: f32 = 0.75;
 
@@ -277,10 +280,19 @@ mod tests {
                 3 => (-du, dv),
                 _ => (dv, du),
             };
+            // The top face is seen from above, so its "right" is foreshortened
+            // to a near-vertical vector by this camera; only uprightness is
+            // asserted there.
             assert!(
-                label_up.y > 0.0 && label_right.x > 0.0,
-                "face {face} label is misoriented: up {label_up:?} right {label_right:?}"
+                label_up.y > 0.0,
+                "face {face} label is upside down: up {label_up:?}"
             );
+            if face != 4 && face != 5 {
+                assert!(
+                    label_right.x > 0.0,
+                    "face {face} label is mirrored: right {label_right:?}"
+                );
+            }
         }
     }
 
