@@ -2780,6 +2780,27 @@ fn aces_filmic(color: vec3<f32>) -> vec3<f32> {
     return saturate(c);
 }
 
+// three.js BRDF_GGX, the dc9dacee calibration.
+fn specular(n: vec3<f32>, v: vec3<f32>, l: vec3<f32>, roughness: f32, f0: vec3<f32>) -> vec3<f32> {
+    let h = normalize(v + l);
+    let n_dot_l = max(dot(n, l), 0.0);
+    let n_dot_v = max(dot(n, v), 0.0);
+    let n_dot_h = max(dot(n, h), 0.0);
+    let v_dot_h = max(dot(v, h), 0.0);
+
+    let alpha = roughness * roughness;
+    let a2 = alpha * alpha;
+    let d = (n_dot_h * a2 - n_dot_h) * n_dot_h + 1.0;
+    let distribution = a2 / (3.14159265 * d * d);
+
+    let gv = n_dot_l * sqrt(n_dot_v * n_dot_v * (1.0 - a2) + a2);
+    let gl = n_dot_v * sqrt(n_dot_l * n_dot_l * (1.0 - a2) + a2);
+    let visibility = 0.5 / max(gv + gl, 0.0001);
+
+    let f = f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - v_dot_h, 5.0);
+    return distribution * visibility * f;
+}
+
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     if (in.world.z > model.clip.x) {
@@ -2788,45 +2809,28 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let n = normalize(in.normal);
     let view_dir = normalize(uniforms.camera_pos - in.world);
 
-    // `Lights` + `ViewHeadlight`, as three sums them.
-    let key_dir = vec3<f32>(0.0, 0.0, 1.0);
-    let fill_dir = vec3<f32>(0.0, 0.0, -1.0);
-    let head_dir = uniforms.headlight_dir;
-    let key_color = vec3<f32>(1.0) * 0.3;
-    let fill_color = vec3<f32>(0.565, 0.655, 1.0) * 0.045;
-    let head_color = vec3<f32>(1.0);
-    let sky = vec3<f32>(0.965, 0.910, 1.0) * 0.72;
-    let ground = vec3<f32>(0.243, 0.255, 0.361) * 0.72;
-    // `HemisphereLight`'s default position is +Y, so its gradient runs along
-    // `n.y` even in this Z-up scene.
-    let hemi = mix(ground, sky, n.y * 0.5 + 0.5);
-    let ambient = vec3<f32>(1.0) * 1.2;
+    let key_dir = normalize(vec3<f32>(0.0, 0.0, 1.0));
+    let fill_dir = normalize(vec3<f32>(0.0, 0.0, -1.0));
+    let sky = vec3<f32>(0.965, 0.910, 1.0);
+    let ground = vec3<f32>(0.243, 0.255, 0.361);
+    let hemi = mix(ground, sky, n.z * 0.5 + 0.5);
 
-    let metalness = 0.02;
-    let roughness = 0.9;
+    let ambient = hemi * 0.25;
+    let key = vec3<f32>(1.0) * max(dot(n, key_dir), 0.0) * 1.2;
+    let fill = vec3<f32>(0.565, 0.655, 1.0) * max(dot(n, fill_dir), 0.0) * 0.168;
+    let head = vec3<f32>(1.0) * max(dot(n, view_dir), 0.0) * 1.0;
+    let lighting = (ambient + key + fill + head) / 3.14159265;
+
     let base = uniforms.base_color;
-    let diffuse_color = base * (1.0 - metalness);
-    let f0 = mix(vec3<f32>(0.04), base, metalness);
-
-    let irradiance = ambient
-        + key_color * max(dot(n, key_dir), 0.0)
-        + fill_color * max(dot(n, fill_dir), 0.0)
-        + hemi
-        + head_color * max(dot(n, head_dir), 0.0);
-    var color = diffuse_color * irradiance / 3.14159265;
-    color += brdf_ggx(key_dir, view_dir, n, roughness, f0) * key_color * max(dot(n, key_dir), 0.0);
-    color += brdf_ggx(fill_dir, view_dir, n, roughness, f0) * fill_color * max(dot(n, fill_dir), 0.0);
-    color += brdf_ggx(head_dir, view_dir, n, roughness, f0) * head_color * max(dot(n, head_dir), 0.0);
-
-    // `softClay.tsx`'s fake cavity term, on `FAKE_LIGHT_DIRECTION`.
-    let fake_dir = normalize(vec3<f32>(0.35, 0.58, 0.74));
-    let n_dot_l = max(dot(n, fake_dir), 0.0);
+    let f0 = mix(vec3<f32>(0.04), base, 0.02);
+    let spec = (specular(n, view_dir, key_dir, 0.55, f0) * 1.2 * max(dot(n, key_dir), 0.0)
+        + specular(n, view_dir, view_dir, 0.55, f0) * 1.0 * max(dot(n, view_dir), 0.0)) * 1.5;
+    let n_dot_l = max(dot(n, key_dir), 0.0);
     let cavity = pow(1.0 - n_dot_l, 1.35);
     let fake_ao = 1.0 - cavity * 0.2;
-    // `bakedOcclusionStrength(0.85)` = 0.75 * 0.85.
-    let baked = mix(1.0, clamp(in.ao, 0.0, 1.0), 0.6375);
-    color = color * fake_ao * baked;
-    return vec4<f32>(aces_filmic(color), 1.0);
+    let baked = mix(1.0, clamp(in.ao, 0.0, 1.0), 0.85);
+    let color = base * lighting * fake_ao * baked + spec;
+    return vec4<f32>(color, 1.0);
 }
 "#;
 
@@ -3004,13 +3008,16 @@ fn fs_main(in: PlateOut) -> @location(0) vec4<f32> {
     let key_dir = vec3<f32>(0.0, 0.0, 1.0);
     let fill_dir = vec3<f32>(0.0, 0.0, -1.0);
     let head_dir = uniforms.headlight_dir;
-    let key_color = vec3<f32>(1.0) * 0.3;
-    let fill_color = vec3<f32>(0.565, 0.655, 1.0) * 0.045;
+    // `useSceneCollectionManager`'s defaults: ambient 0.28, directional 1.12,
+    // headlight 1.0 (`Lights`'s `?? 1.0`). The hemisphere is ambient * 0.6 and
+    // the fill is directional * 0.15; the colours are linear.
+    let key_color = vec3<f32>(1.0) * 1.12;
+    let fill_color = vec3<f32>(0.2789, 0.3864, 1.0) * 0.168;
     let head_color = vec3<f32>(1.0);
-    let sky = vec3<f32>(0.965, 0.910, 1.0) * 0.72;
-    let ground = vec3<f32>(0.243, 0.255, 0.361) * 0.72;
+    let sky = vec3<f32>(0.9216, 0.8070, 1.0) * 0.168;
+    let ground = vec3<f32>(0.0482, 0.0529, 0.1070) * 0.168;
     let hemi = mix(ground, sky, n.y * 0.5 + 0.5);
-    let ambient = vec3<f32>(1.0) * 1.2;
+    let ambient = vec3<f32>(1.0) * 0.28;
 
     let irradiance = ambient
         + key_color * max(dot(n, key_dir), 0.0)
