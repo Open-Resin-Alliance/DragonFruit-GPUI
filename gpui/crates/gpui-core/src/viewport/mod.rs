@@ -78,6 +78,8 @@
 
 mod construct;
 mod cube;
+
+pub use cube::CubeHover;
 mod mesh;
 mod pipeline;
 mod plate;
@@ -137,6 +139,8 @@ pub struct Viewport {
     cube_uniforms: [wgpu::Buffer; 2],
     cube_binds: [wgpu::BindGroup; 2],
     cube_vertex_buffer: wgpu::Buffer,
+    /// `cube::highlight_vertices()`: the edge and corner boxes.
+    cube_highlight_buffer: wgpu::Buffer,
     cube_target: wgpu::Texture,
     cube_target_view: wgpu::TextureView,
     cube_msaa: wgpu::Texture,

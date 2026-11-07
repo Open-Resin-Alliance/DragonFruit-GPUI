@@ -1016,6 +1016,18 @@ impl Viewport {
             &linear_sampler,
         );
 
+        // Edge and corner boxes share the cube pipeline: their UVs point at the
+        // atlas border texel, so a white tint paints them solid accent.
+        let highlight = crate::cube::highlight_vertices();
+        let highlight_flat: Vec<[f32; 5]> = highlight
+            .iter()
+            .map(|p| [p[0], p[1], p[2], 0.0, 0.0])
+            .collect();
+        let cube_highlight_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("viewport cube highlights"),
+            contents: bytemuck::cast_slice(&highlight_flat),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
         Ok(Self {
             surface,
             background,
@@ -1051,6 +1063,7 @@ impl Viewport {
             cube_uniforms,
             cube_binds,
             cube_vertex_buffer,
+            cube_highlight_buffer,
             cube_target,
             cube_target_view,
             cube_msaa,

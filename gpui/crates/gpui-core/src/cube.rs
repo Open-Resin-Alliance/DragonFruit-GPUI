@@ -243,6 +243,85 @@ pub fn vertices() -> Vec<[f32; 5]> {
     out
 }
 
+
+/// `edges` in `ZUpGizmoViewcube`, times `makePositionVector`'s 0.38.
+pub const EDGES: [[f32; 3]; 12] = [
+    [0.38, 0.38, 0.0],
+    [0.38, 0.0, 0.38],
+    [0.38, 0.0, -0.38],
+    [0.38, -0.38, 0.0],
+    [0.0, 0.38, 0.38],
+    [0.0, 0.38, -0.38],
+    [0.0, -0.38, 0.38],
+    [0.0, -0.38, -0.38],
+    [-0.38, 0.38, 0.0],
+    [-0.38, 0.0, 0.38],
+    [-0.38, 0.0, -0.38],
+    [-0.38, -0.38, 0.0],
+];
+
+/// `corners`, same scale.
+pub const CORNERS: [[f32; 3]; 8] = [
+    [0.38, 0.38, 0.38],
+    [0.38, 0.38, -0.38],
+    [0.38, -0.38, 0.38],
+    [0.38, -0.38, -0.38],
+    [-0.38, 0.38, 0.38],
+    [-0.38, 0.38, -0.38],
+    [-0.38, -0.38, 0.38],
+    [-0.38, -0.38, -0.38],
+];
+
+/// [`EDGES`] then [`CORNERS`], each a box scaled by the source's `1.01`.
+///
+/// `edgeDimensions` is `0.5` on the axis the edge runs along and `0.25` across;
+/// `cornerDimensions` is `0.25` on every axis.
+pub fn highlight_vertices() -> Vec<[f32; 3]> {
+    let mut out = Vec::with_capacity((EDGES.len() + CORNERS.len()) * 36);
+    for edge in EDGES {
+        // The zero component is the axis the edge runs along.
+        let half = [
+            if edge[0] == 0.0 { 0.25 } else { 0.25 },
+            if edge[1] == 0.0 { 0.25 } else { 0.25 },
+            if edge[2] == 0.0 { 0.25 } else { 0.25 },
+        ];
+        let half = if edge[0] == 0.0 {
+            [0.125, 0.125, 0.25]
+        } else if edge[1] == 0.0 {
+            [0.25, 0.125, 0.125]
+        } else if edge[2] == 0.0 {
+            [0.25, 0.125, 0.125]
+        } else {
+            half
+        };
+        push_box(&mut out, edge, half);
+    }
+    for corner in CORNERS {
+        push_box(&mut out, corner, [0.125, 0.125, 0.125]);
+    }
+    out
+}
+
+fn push_box(out: &mut Vec<[f32; 3]>, centre: [f32; 3], half: [f32; 3]) {
+    let c = glam::Vec3::from_array(centre);
+    let h = glam::Vec3::from_array(half);
+    let corner = |sx: f32, sy: f32, sz: f32| (c + glam::Vec3::new(sx * h.x, sy * h.y, sz * h.z)).to_array();
+    // Six faces, four corners each.
+    let quads = [
+        ([-1.0, -1.0, 1.0], [1.0, -1.0, 1.0], [1.0, 1.0, 1.0], [-1.0, 1.0, 1.0]),
+        ([1.0, -1.0, -1.0], [-1.0, -1.0, -1.0], [-1.0, 1.0, -1.0], [1.0, 1.0, -1.0]),
+        ([1.0, -1.0, 1.0], [1.0, -1.0, -1.0], [1.0, 1.0, -1.0], [1.0, 1.0, 1.0]),
+        ([-1.0, -1.0, -1.0], [-1.0, -1.0, 1.0], [-1.0, 1.0, 1.0], [-1.0, 1.0, -1.0]),
+        ([-1.0, 1.0, 1.0], [1.0, 1.0, 1.0], [1.0, 1.0, -1.0], [-1.0, 1.0, -1.0]),
+        ([-1.0, -1.0, -1.0], [1.0, -1.0, -1.0], [1.0, -1.0, 1.0], [-1.0, -1.0, 1.0]),
+    ];
+    for (a, b, cc, d) in quads {
+        let (a, b, cc, d) = (corner(a[0], a[1], a[2]), corner(b[0], b[1], b[2]), corner(cc[0], cc[1], cc[2]), corner(d[0], d[1], d[2]));
+        out.extend([a, b, cc]);
+        out.extend([a, cc, d]);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

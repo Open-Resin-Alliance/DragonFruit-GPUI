@@ -271,6 +271,7 @@ pub fn models_add_button(entity: WeakEntity<DragonFruit>) -> impl IntoElement {
             // — `.ui-button`'s `px-11` left 10px of content and squeezed the
             // glyph, which is what looked like a tiny icon.
             &ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Sm)
+                .width(32.0)
                 .padding_x(0.0)
                 .gap(0.0),
             icon("plus", 14.0, TEXT_MUTED),

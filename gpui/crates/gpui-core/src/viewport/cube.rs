@@ -9,6 +9,15 @@ use super::Viewport;
 
 /// The gizmo widget is 120pt; the target is oversampled so the 1px atlas
 /// stroke survives the downscale to the widget.
+/// What the pointer is over on the gizmo. Faces tint the atlas; an edge or a
+/// corner draws its own box, like `EdgeCube`'s `visible={hover}`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CubeHover {
+    Face(usize),
+    Edge(usize),
+    Corner(usize),
+}
+
 pub(super) const CUBE_TARGET_SIZE: u32 = 240;
 /// MSAA for the cube: the face labels and the 1px borders alias badly at this
 /// size without it.
@@ -123,7 +132,7 @@ impl Viewport {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         camera: &Camera,
-        hovered: Option<usize>,
+        hovered: Option<CubeHover>,
         accent: [f32; 3],
     ) {
         let direction = (camera.eye() - camera.target).normalize_or_zero();
@@ -182,9 +191,28 @@ impl Viewport {
             pass.set_bind_group(1, &self.cube_texture_bind, &[]);
             pass.set_bind_group(0, &self.cube_binds[0], &[]);
             pass.draw(0..36, 0..1);
-            if let Some(index) = hovered.filter(|index| *index < 6) {
+            if let Some(index) = hovered.and_then(|hover| match hover {
+                CubeHover::Face(index) => Some(index),
+                _ => None,
+            }) {
                 pass.set_bind_group(0, &self.cube_binds[1], &[]);
                 pass.draw(index as u32 * 6..index as u32 * 6 + 6, 0..1);
+            }
+            // `EdgeCube`: one 36-vertex box per edge, then per corner.
+            let highlight = match hovered {
+                Some(CubeHover::Edge(index)) if index < crate::cube::EDGES.len() => {
+                    Some(index as u32 * 36)
+                }
+                Some(CubeHover::Corner(index)) if index < crate::cube::CORNERS.len() => {
+                    Some((crate::cube::EDGES.len() as u32 + index as u32) * 36)
+                }
+                _ => None,
+            };
+            if let Some(start) = highlight {
+                pass.set_vertex_buffer(0, self.cube_highlight_buffer.slice(..));
+                pass.set_bind_group(1, &self.cube_texture_bind, &[]);
+                pass.set_bind_group(0, &self.cube_binds[0], &[]);
+                pass.draw(start..start + 36, 0..1);
             }
         }
         queue.submit(Some(encoder.finish()));

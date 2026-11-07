@@ -597,7 +597,7 @@ pub fn layer_slider(
         .child(thumb_body(thumb_color, upper_badge, 1.0));
 
     // -- rail ----------------------------------------------------------------
-    let hovered_face: Rc<Cell<Option<usize>>> = Rc::new(Cell::new(None));
+    let hovered_face: Rc<Cell<Option<gpui_core::viewport::CubeHover>>> = Rc::new(Cell::new(None));
     let bounds_for_canvas = bounds.clone();
     let rail = div()
         .id("layer-slider-rail")
@@ -1387,7 +1387,7 @@ pub fn view_cube(
     entity: WeakEntity<DragonFruit>,
 ) -> impl IntoElement {
     let bounds: Rc<Cell<Option<Bounds<Pixels>>>> = Rc::new(Cell::new(None));
-    let hovered_face: Rc<Cell<Option<usize>>> = Rc::new(Cell::new(None));
+    let hovered_face: Rc<Cell<Option<gpui_core::viewport::CubeHover>>> = Rc::new(Cell::new(None));
 
     let bounds_for_canvas = bounds.clone();
     let paint_camera = camera.clone();
@@ -1463,8 +1463,10 @@ pub fn view_cube(
                     let view = cube_view(&camera, center);
                     let faces = project_faces(&view);
                     match cube_hit(&view, &faces, pointer) {
-                        Some(CubeHit::Face(index)) => Some(index),
-                        _ => None,
+                        Some(CubeHit::Face(index)) => Some(gpui_core::viewport::CubeHover::Face(index)),
+                        Some(CubeHit::Edge(index)) => Some(gpui_core::viewport::CubeHover::Edge(index)),
+                        Some(CubeHit::Corner(index)) => Some(gpui_core::viewport::CubeHover::Corner(index)),
+                        None => None,
                     }
                 });
                 if hovered_face.get() != hit {
