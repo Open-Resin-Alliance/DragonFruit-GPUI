@@ -7,9 +7,10 @@
 
 use fontdue::Font;
 
-/// `gizmoColors` from `SceneCanvas.tsx`.
-const FACE: (u8, u8, u8) = (0x1f, 0x29, 0x37);
-const TEXT: (u8, u8, u8) = (0xf8, 0xfa, 0xfc);
+/// `resolveGizmoColors` reads the theme: the face is `--surface-1`, the label
+/// `--text-strong`, the border `--accent-secondary`.
+const FACE: (u8, u8, u8) = (0x1a, 0x1b, 0x21);
+const TEXT: (u8, u8, u8) = (0xf8, 0xf8, 0xfb);
 const STROKE: (u8, u8, u8) = (0xba, 0xf7, 0x2e);
 /// `FaceMaterial`: 128x128 canvas, 20px label, `FACE_LABEL_MAX_WIDTH`.
 pub const FACE_SIZE: u32 = 128;

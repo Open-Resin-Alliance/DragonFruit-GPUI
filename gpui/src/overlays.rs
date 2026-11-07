@@ -1318,11 +1318,11 @@ pub fn home_button(
 /// `HOME_SIZE` from `ZUpGizmoHelper`: `0.47` of the cube's 60-unit scale.
 const HOME_SIZE: f32 = 28.0;
 /// `gizmoColors.chip`.
-const HOME_CHIP: u32 = 0x20242c;
+const HOME_CHIP: u32 = SURFACE_0;
 /// A hover step above the chip surface.
-const HOME_CHIP_HOVER: u32 = 0x2a2f39;
+const HOME_CHIP_HOVER: u32 = SURFACE_1;
 /// `gizmoColors.chipBorder`.
-const HOME_BORDER: u32 = 0x3a3f4b;
+const HOME_BORDER: u32 = BORDER_SUBTLE;
 /// The glyph is painted in `accentColor`.
 const HOME_GLYPH: u32 = 0xbaf72e;
 

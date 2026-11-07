@@ -2947,9 +2947,10 @@ impl Viewport {
         let eye = direction * 3.2;
         let view = glam::Mat4::look_at_rh(eye, glam::Vec3::ZERO, glam::Vec3::Z);
         // The gizmo camera is orthographic: the cube must not foreshorten.
-        // Half-extent 1.15 puts the rotated cube at ~60% of the widget, which is
-        // the footprint `ZUpGizmoViewcube`'s `scale=[60,60,60]` has.
-        let half = 1.15;
+        // A half-extent of 0.97 puts the rotated cube at ~73% of the widget —
+        // the footprint `scale=[60,60,60]` has — while leaving the corner-on
+        // silhouette (0.87 against 0.97) inside the target.
+        let half = 0.97;
         let proj = glam::Mat4::orthographic_rh(-half, half, -half, half, 0.1, 10.0);
         let view_proj = proj * view;
         for (index, tint) in [[1.0f32, 1.0, 1.0, 1.0], [accent[0], accent[1], accent[2], 1.0]]
