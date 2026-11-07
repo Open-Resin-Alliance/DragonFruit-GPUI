@@ -1954,9 +1954,9 @@ fn axis_arrows(metrics: &PlateMetrics) -> Vec<[f32; 6]> {
     let total = length + head_length;
     let segments = 12;
     let axes: [([f32; 3], u32, u32); 3] = [
-        ([1.0, 0.0, 0.0], 0x8d232f, 0xff7a7a),
-        ([0.0, 1.0, 0.0], 0x1e6b35, 0x74ff95),
-        ([0.0, 0.0, 1.0], 0x21428d, 0x74a3ff),
+        ([1.0, 0.0, 0.0], 0x8d232f, 0xff0000),
+        ([0.0, 1.0, 0.0], 0x1e6b35, 0x00ff00),
+        ([0.0, 0.0, 1.0], 0x21428d, 0x0000ff),
     ];
     let mut out: Vec<[f32; 6]> = Vec::new();
     macro_rules! push {
@@ -3104,7 +3104,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let fake_ao = 1.0 - cavity * 0.2;
     let baked = mix(1.0, clamp(in.ao, 0.0, 1.0), 0.85);
     let color = base * irradiance / 3.14159265 * fake_ao * baked + spec;
-    return vec4<f32>(color, 1.0);
+    return vec4<f32>(aces_filmic(color), 1.0);
 }
 "#;
 

@@ -68,7 +68,11 @@ impl Camera {
 
     pub fn orbit(&mut self, dx: f32, dy: f32) {
         self.yaw -= dx * 0.008;
-        self.pitch = (self.pitch + dy * 0.008).clamp(-1.45, 1.45);
+        // OrbitControls leaves the polar range at its default 0..π, so a
+        // straight top-down view is reachable; only the look-at singularity
+        // (forward parallel to up) is excluded.
+        const LIMIT: f32 = std::f32::consts::FRAC_PI_2 - 0.001;
+        self.pitch = (self.pitch + dy * 0.008).clamp(-LIMIT, LIMIT);
     }
 
     pub fn pan(&mut self, dx: f32, dy: f32) {
