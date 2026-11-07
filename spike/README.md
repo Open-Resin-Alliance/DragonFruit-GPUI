@@ -81,6 +81,29 @@ The readback is the correctness check: a frame time says nothing about whether
 the cap drew, so the probe renders into a `COPY_SRC` texture and counts the
 pixels each layer should have produced.
 
+## Probe 5 — interactive overlay
+
+```sh
+cargo run --bin scene -- --interactive
+```
+
+The same scene, plus the hybrid UI the app needs: a GPUI label positioned at a
+projected 3D point, a screen-space axis gizmo drawn as GPUI elements over the
+canvas, and drag-to-rotate routed from the canvas to the scene. The overlay is
+ordinary GPUI layout; only the projection math is shared with the renderer.
+
+Runs without crashing; the overlay's pixels are not part of the readback, so
+this one is a smoke test, not a measured result.
+
+## macOS: a small patch, not a redesign
+
+`gpui_apple`'s `paint_surface` already imports a `CVPixelBuffer` through
+`CVMetalTextureCache::create_texture_from_image` — that is zero-copy — but it
+asserts the format is NV12 (`kCVPixelFormatType_420YpCbCr8BiPlanarFullRange`).
+A BGRA path is a known, bounded patch: issue #64926 has a working fork diff of
++92/−39 across `metal_renderer.rs` and `shaders.metal`. So macOS needs a GPUI
+fork or an upstream change, not a new renderer.
+
 ## Ecosystem note
 
 The GPUI ecosystem is split across incompatible lines. This is the main
@@ -99,8 +122,8 @@ seam. A real port must either fork `gpui-pre` to add the seam, port
 
 ## What the spike does not answer
 
-- macOS: no zero-copy path exists today; needs a GPUI Metal fork or upstream
-  `paint_surface` work.
-- HTML-style labels positioned in 3D, the screen-space transform gizmo, and the
-  273-component UI port.
+- macOS on real hardware: the path is a bounded `paint_surface` BGRA patch, but
+  it has not been built or run here.
+- HTML-style labels positioned in 3D beyond the smoke test, the full
+  screen-space gizmo, and the 273-component UI port.
 - Accessibility and the 2,504-string i18n catalog.

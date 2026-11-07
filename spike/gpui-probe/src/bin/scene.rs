@@ -12,7 +12,7 @@
 //!   is non-zero,
 //! - depth testing throughout, and a GPU-waited frame loop for the number.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -39,13 +39,14 @@ const WARMUP: usize = 10;
 const CLIP_Z: f32 = 0.0;
 
 fn main() {
-    gpui::application().run(|cx: &mut App| {
+    let interactive = std::env::args().any(|arg| arg == "--interactive");
+    gpui::application().run(move |cx: &mut App| {
         let bounds = Bounds::centered(None, size(px(960.), px(640.)), cx);
         let options = gpui_probe::with_wgpu_renderer(WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             ..Default::default()
         });
-        cx.open_window(options, |_, cx| cx.new(|_| SceneProbe::new()))
+        cx.open_window(options, move |_, cx| cx.new(|_| SceneProbe::new(interactive)))
             .expect("a window");
         cx.activate(true);
     });
@@ -54,22 +55,154 @@ fn main() {
 struct SceneProbe {
     state: Rc<RefCell<Option<SceneState>>>,
     status: Rc<RefCell<String>>,
+    angle: Rc<Cell<f32>>,
+    last_x: Rc<Cell<f32>>,
+    interactive: bool,
 }
 
 impl SceneProbe {
-    fn new() -> Self {
+    fn new(interactive: bool) -> Self {
         Self {
             state: Rc::new(RefCell::new(None)),
             status: Rc::new(RefCell::new("waiting for the first paint".to_owned())),
+            angle: Rc::new(Cell::new(0.0)),
+            last_x: Rc::new(Cell::new(0.0)),
+            interactive,
         }
     }
+}
+
+/// Project a world point to canvas pixels, using the same matrices the draw uses.
+fn project(point: GVec3, angle: f32) -> (f32, f32) {
+    let proj = Mat4::perspective_rh(45f32.to_radians(), WIDTH as f32 / HEIGHT as f32, 0.1, 100.0);
+    let view = Mat4::look_at_rh(GVec3::new(0.0, 0.0, 6.0), GVec3::ZERO, GVec3::Y);
+    let view_proj = proj * view * Mat4::from_rotation_z(angle * 0.2);
+    let clip = view_proj * point.extend(1.0);
+    let ndc = clip.truncate() / clip.w;
+    (
+        (ndc.x * 0.5 + 0.5) * WIDTH as f32,
+        (0.5 - ndc.y * 0.5) * HEIGHT as f32,
+    )
 }
 
 impl Render for SceneProbe {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         let state = self.state.clone();
         let status = self.status.clone();
+        let angle = self.angle.clone();
+        let last_x = self.last_x.clone();
+        let interactive = self.interactive;
         let text = self.status.borrow().clone();
+
+        let canvas_state = state.clone();
+        let canvas_status = status.clone();
+        let canvas_angle = angle.clone();
+        let mut viewport = div()
+            .relative()
+            .w(px(WIDTH as f32))
+            .h(px(HEIGHT as f32))
+            .child(
+                gpu_canvas(move |gpu| {
+                    let mut slot = canvas_state.borrow_mut();
+                    let interop = match attach(gpu.try_device::<WgpuRenderer>()) {
+                        Ok(interop) => interop,
+                        Err(error) => {
+                            *canvas_status.borrow_mut() = format!("not wgpu: {error:?}");
+                            return;
+                        }
+                    };
+                    let Some((device, queue)) = interop.adapter().wgpu() else {
+                        *canvas_status.borrow_mut() = "no wgpu device".to_owned();
+                        return;
+                    };
+                    if slot.is_none() {
+                        match SceneState::new(&device, &queue, !interactive) {
+                            Ok(built) => {
+                                let report = built.report.clone();
+                                eprintln!("{report}");
+                                *canvas_status.borrow_mut() = report;
+                                *slot = Some(built);
+                            }
+                            Err(error) => {
+                                let report = format!("scene: {error:#}");
+                                eprintln!("{report}");
+                                *canvas_status.borrow_mut() = report;
+                                return;
+                            }
+                        }
+                    }
+                    let state = slot.as_mut().expect("built above");
+                    state.angle = canvas_angle.get();
+                    if let Err(error) = state.render(&device, &queue) {
+                        *canvas_status.borrow_mut() = format!("render: {error:#}");
+                        return;
+                    }
+                    match state.surface.view().to_imported_handle() {
+                        Ok(handle) => {
+                            gpu.paint_texture(handle, Corners::default(), 1.0, false);
+                            if state.bench && !state.exiting {
+                                state.exiting = true;
+                                std::thread::spawn(|| {
+                                    std::thread::sleep(Duration::from_millis(800));
+                                    std::process::exit(0);
+                                });
+                            }
+                        }
+                        Err(error) => {
+                            *canvas_status.borrow_mut() = format!("import: {error:#}");
+                        }
+                    }
+                })
+                .size_full(),
+            );
+
+        if interactive {
+            let (x, y) = project(GVec3::new(-1.2, -1.2, 0.0), angle.get());
+            viewport = viewport.child(
+                div()
+                    .absolute()
+                    .left(px(x))
+                    .top(px(y))
+                    .bg(rgb(0x1a2230))
+                    .border_1()
+                    .border_color(rgb(0x3a4a60))
+                    .rounded_md()
+                    .px_2()
+                    .py_1()
+                    .text_xs()
+                    .text_color(rgb(0xe6edf5))
+                    .child("Model 0 · label"),
+            );
+
+            // A screen-space gizmo: three bars at the projected origin.
+            let (ox, oy) = project(GVec3::ZERO, angle.get());
+            for (w, h, color) in [
+                (28.0, 2.0, rgb(0xe05252)),
+                (2.0, 28.0, rgb(0x52d07a)),
+                (20.0, 20.0, rgb(0x5a7cff)),
+            ] {
+                viewport = viewport.child(
+                    div()
+                        .absolute()
+                        .left(px(ox))
+                        .top(px(oy))
+                        .w(px(w))
+                        .h(px(h))
+                        .bg(color),
+                );
+            }
+
+            let drag_angle = angle.clone();
+            let drag_last = last_x.clone();
+            viewport = viewport.on_mouse_move(move |event, window, _cx| {
+                if event.dragging() {
+                    let dx = event.position.x.0 - drag_last.get();
+                    drag_angle.set(drag_angle.get() + dx * 0.01);
+                    window.request_animation_frame();
+                }
+                drag_last.set(event.position.x.0);
+            });
+        }
 
         div()
             .size_full()
@@ -90,64 +223,7 @@ impl Render for SceneProbe {
                     .text_color(rgb(0x9aa4b2))
                     .child(text),
             )
-            .child(
-                div()
-                    .w(px(WIDTH as f32))
-                    .h(px(HEIGHT as f32))
-                    .child(
-                        gpu_canvas(move |gpu| {
-                            let mut slot = state.borrow_mut();
-                            let interop = match attach(gpu.try_device::<WgpuRenderer>()) {
-                                Ok(interop) => interop,
-                                Err(error) => {
-                                    *status.borrow_mut() = format!("not wgpu: {error:?}");
-                                    return;
-                                }
-                            };
-                            let Some((device, queue)) = interop.adapter().wgpu() else {
-                                *status.borrow_mut() = "no wgpu device".to_owned();
-                                return;
-                            };
-                            if slot.is_none() {
-                                match SceneState::new(&device, &queue) {
-                                    Ok(built) => {
-                                        let report = built.report.clone();
-                                        eprintln!("{report}");
-                                        *status.borrow_mut() = report;
-                                        *slot = Some(built);
-                                    }
-                                    Err(error) => {
-                                        let report = format!("scene: {error:#}");
-                                        eprintln!("{report}");
-                                        *status.borrow_mut() = report;
-                                        return;
-                                    }
-                                }
-                            }
-                            let state = slot.as_mut().expect("built above");
-                            if let Err(error) = state.render(&device, &queue) {
-                                *status.borrow_mut() = format!("render: {error:#}");
-                                return;
-                            }
-                            match state.surface.view().to_imported_handle() {
-                                Ok(handle) => {
-                                    gpu.paint_texture(handle, Corners::default(), 1.0, false);
-                                    if !state.exiting {
-                                        state.exiting = true;
-                                        std::thread::spawn(|| {
-                                            std::thread::sleep(Duration::from_millis(800));
-                                            std::process::exit(0);
-                                        });
-                                    }
-                                }
-                                Err(error) => {
-                                    *status.borrow_mut() = format!("import: {error:#}");
-                                }
-                            }
-                        })
-                        .size_full(),
-                    ),
-            )
+            .child(viewport)
     }
 }
 
@@ -188,10 +264,11 @@ struct SceneState {
     angle: f32,
     report: String,
     exiting: bool,
+    bench: bool,
 }
 
 impl SceneState {
-    fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Result<Self> {
+    fn new(device: &wgpu::Device, queue: &wgpu::Queue, bench: bool) -> Result<Self> {
         let started = Instant::now();
         let (vertices, indices, _mesh) = sphere(MODEL_RINGS, MODEL_SEGMENTS);
         let (cylinder_vertices, cylinder_indices) = cylinder(12);
@@ -593,51 +670,60 @@ impl SceneState {
             angle: 0.0,
             report: String::new(),
             exiting: false,
+            bench,
         };
 
         let setup = started.elapsed();
 
-        for _ in 0..WARMUP {
-            state.angle += 0.01;
-            state.draw(device, queue, true)?;
+        if bench {
+            for _ in 0..WARMUP {
+                state.angle += 0.01;
+                state.draw(device, queue, true)?;
+            }
+
+            let mut samples = Vec::with_capacity(FRAMES);
+            for _ in 0..FRAMES {
+                state.angle += 0.01;
+                let started = Instant::now();
+                state.draw(device, queue, true)?;
+                samples.push(started.elapsed());
+            }
+
+            samples.sort_unstable();
+            let mean = samples.iter().sum::<Duration>() / samples.len() as u32;
+            let p50 = samples[samples.len() / 2];
+            let p95 = samples[samples.len() * 95 / 100];
+
+            let verification = state.verify(device, queue)?;
+
+            state.report = format!(
+                "{} models × {} tris + {} instanced supports ({} tris each)\n\
+                 setup {:.0} ms · {} frames: mean {:.2} ms ({:.1} fps) · p50 {:.2} ms · p95 {:.2} ms\n\
+                 {}",
+                MODELS,
+                MODEL_RINGS * MODEL_SEGMENTS * 2,
+                SUPPORTS,
+                12 * 2,
+                setup.as_secs_f64() * 1000.0,
+                FRAMES,
+                mean.as_secs_f64() * 1000.0,
+                1.0 / mean.as_secs_f64(),
+                p50.as_secs_f64() * 1000.0,
+                p95.as_secs_f64() * 1000.0,
+                verification,
+            );
+        } else {
+            state.report = format!(
+                "interactive · {} models × {} tris + {} supports · drag to rotate",
+                MODELS,
+                MODEL_RINGS * MODEL_SEGMENTS * 2,
+                SUPPORTS
+            );
         }
-
-        let mut samples = Vec::with_capacity(FRAMES);
-        for _ in 0..FRAMES {
-            state.angle += 0.01;
-            let started = Instant::now();
-            state.draw(device, queue, true)?;
-            samples.push(started.elapsed());
-        }
-
-        samples.sort_unstable();
-        let mean = samples.iter().sum::<Duration>() / samples.len() as u32;
-        let p50 = samples[samples.len() / 2];
-        let p95 = samples[samples.len() * 95 / 100];
-
-        let verification = state.verify(device, queue)?;
-
-        state.report = format!(
-            "{} models × {} tris + {} instanced supports ({} tris each)\n\
-             setup {:.0} ms · {} frames: mean {:.2} ms ({:.1} fps) · p50 {:.2} ms · p95 {:.2} ms\n\
-             {}",
-            MODELS,
-            MODEL_RINGS * MODEL_SEGMENTS * 2,
-            SUPPORTS,
-            12 * 2,
-            setup.as_secs_f64() * 1000.0,
-            FRAMES,
-            mean.as_secs_f64() * 1000.0,
-            1.0 / mean.as_secs_f64(),
-            p50.as_secs_f64() * 1000.0,
-            p95.as_secs_f64() * 1000.0,
-            verification,
-        );
         Ok(state)
     }
 
     fn render(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) -> Result<()> {
-        self.angle += 0.005;
         self.draw(device, queue, false)
     }
 
