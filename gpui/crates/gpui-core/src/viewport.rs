@@ -83,6 +83,8 @@ use crate::camera::Camera;
 use crate::stl::{MeshData, Vertex};
 
 const SAMPLE_COUNT: u32 = 4;
+/// The gizmo widget is 120pt; this is its target in device pixels.
+const CUBE_TARGET_SIZE: u32 = 192;
 
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -101,6 +103,40 @@ struct Uniforms {
     headlight_dir: [f32; 3],
     _pad3: f32,
 }
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct CubeUniform {
+    view_proj: [[f32; 4]; 4],
+    tint: [f32; 4],
+}
+
+/// The orientation cube: one textured quad per face, sampled from the baked
+/// atlas (`cube::atlas`). The cube is convex, so back-face culling replaces a
+/// depth buffer.
+const CUBE_SHADER: &str = r#"
+struct Uniform { view_proj: mat4x4<f32>, tint: vec4<f32> };
+@group(0) @binding(0) var<uniform> u: Uniform;
+@group(1) @binding(0) var face_atlas: texture_2d<f32>;
+@group(1) @binding(1) var face_sampler: sampler;
+
+struct VsIn { @location(0) pos: vec3<f32>, @location(1) uv: vec2<f32> };
+struct VsOut { @builtin(position) clip: vec4<f32>, @location(0) uv: vec2<f32> };
+
+@vertex
+fn vs_main(in: VsIn) -> VsOut {
+    var out: VsOut;
+    out.clip = u.view_proj * vec4<f32>(in.pos, 1.0);
+    out.uv = in.uv;
+    return out;
+}
+
+@fragment
+fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
+    let texel = textureSample(face_atlas, face_sampler, in.uv);
+    return vec4<f32>(texel.rgb * u.tint.rgb, texel.a);
+}
+"#;
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -196,6 +232,13 @@ pub struct Viewport {
     z_label_bind: wgpu::BindGroup,
     plate_uniform: wgpu::Buffer,
     plate_bind: wgpu::BindGroup,
+    cube_pipeline: wgpu::RenderPipeline,
+    cube_uniforms: [wgpu::Buffer; 2],
+    cube_binds: [wgpu::BindGroup; 2],
+    cube_vertex_buffer: wgpu::Buffer,
+    cube_target: wgpu::Texture,
+    cube_target_view: wgpu::TextureView,
+    cube_texture_bind: wgpu::BindGroup,
     decal: wgpu::RenderPipeline,
     decal_buffer: wgpu::Buffer,
     decal_uniform: wgpu::Buffer,
@@ -656,6 +699,165 @@ impl Viewport {
                 resource: volume_fill_uniform.as_entire_binding(),
             }],
         });
+        // Orientation cube: a textured quad per face into its own target, so the
+        // overlay can import and paint it (`ZUpGizmoViewcube`).
+        let cube_uniform_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("viewport cube uniform"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+        let cube_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("viewport cube"),
+                bind_group_layouts: &[Some(&cube_uniform_layout), Some(&texture_layout)],
+                immediate_size: 0,
+            });
+        let cube_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("viewport cube"),
+            source: wgpu::ShaderSource::Wgsl(CUBE_SHADER.into()),
+        });
+        let cube_uniforms = std::array::from_fn(|_| {
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("viewport cube uniform"),
+                size: std::mem::size_of::<CubeUniform>() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            })
+        });
+        let cube_binds = std::array::from_fn(|index| {
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("viewport cube uniform"),
+                layout: &cube_uniform_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: cube_uniforms[index].as_entire_binding(),
+                }],
+            })
+        });
+        let (atlas_w, atlas_h, atlas_data) = crate::cube::atlas();
+        let atlas = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("viewport cube atlas"),
+            size: wgpu::Extent3d {
+                width: atlas_w,
+                height: atlas_h,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &atlas,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &atlas_data,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(atlas_w * 4),
+                rows_per_image: Some(atlas_h),
+            },
+            wgpu::Extent3d {
+                width: atlas_w,
+                height: atlas_h,
+                depth_or_array_layers: 1,
+            },
+        );
+        let atlas_view = atlas.create_view(&wgpu::TextureViewDescriptor::default());
+        let cube_texture_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("viewport cube atlas"),
+            layout: &texture_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&atlas_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&linear_sampler),
+                },
+            ],
+        });
+        let cube_vertices = crate::cube::vertices();
+        let cube_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("viewport cube vertices"),
+            contents: bytemuck::cast_slice(&cube_vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        let cube_target = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("viewport cube target"),
+            size: wgpu::Extent3d {
+                width: CUBE_TARGET_SIZE,
+                height: CUBE_TARGET_SIZE,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let cube_target_view = cube_target.create_view(&wgpu::TextureViewDescriptor::default());
+        let cube_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("viewport cube"),
+            layout: Some(&cube_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &cube_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: 20,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32x3,
+                            offset: 0,
+                            shader_location: 0,
+                        },
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32x2,
+                            offset: 12,
+                            shader_location: 1,
+                        },
+                    ],
+                })],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &cube_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: Some(wgpu::Face::Back),
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
         let plate_uniform = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("viewport plate uniform"),
             size: 16,
@@ -1066,6 +1268,13 @@ impl Viewport {
             z_label_bind,
             plate_uniform,
             plate_bind,
+            cube_pipeline,
+            cube_uniforms,
+            cube_binds,
+            cube_vertex_buffer,
+            cube_target,
+            cube_target_view,
+            cube_texture_bind,
             decal,
             decal_buffer,
             decal_uniform,
@@ -1655,6 +1864,66 @@ impl Viewport {
         drop(data);
         buffer.unmap();
         Ok((painted, (width * height) as usize))
+    }
+
+    /// Non-transparent pixel count in the cube target — the same observation the
+    /// smoke test makes of the viewport.
+    pub fn cube_readback(&self, device: &wgpu::Device, queue: &wgpu::Queue) -> Result<(usize, usize)> {
+        let size = CUBE_TARGET_SIZE;
+        let padded = (size * 4).div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)
+            * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("cube readback"),
+            size: (padded * size) as u64,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("cube readback"),
+        });
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.cube_target,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(padded),
+                    rows_per_image: Some(size),
+                },
+            },
+            wgpu::Extent3d {
+                width: size,
+                height: size,
+                depth_or_array_layers: 1,
+            },
+        );
+        queue.submit(Some(encoder.finish()));
+
+        let slice = buffer.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |result| {
+            let _ = tx.send(result);
+        });
+        let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        rx.recv()??;
+        let data = slice.get_mapped_range()?;
+        let mut painted = 0usize;
+        for row in 0..size as usize {
+            let start = row * padded as usize;
+            for column in 0..size as usize {
+                if data[start + column * 4 + 3] > 0 {
+                    painted += 1;
+                }
+            }
+        }
+        drop(data);
+        buffer.unmap();
+        Ok((painted, (size * size) as usize))
     }
 }
 
@@ -2653,6 +2922,83 @@ fn decal_vertices(metrics: &PlateMetrics) -> Vec<[f32; 5]> {
         0.12,
     );
     out
+}
+
+impl Viewport {
+    /// The cube target, for the overlay's imported texture.
+    pub fn cube_texture_view(&self) -> &wgpu::TextureView {
+        &self.cube_target_view
+    }
+
+    /// `ZUpGizmoViewcube`'s render: the scene camera's direction, an orthographic
+    /// cube at the origin, and the hovered face tinted with `gizmoColors.accent`.
+    pub fn render_cube(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        camera: &Camera,
+        hovered: Option<usize>,
+        accent: [f32; 3],
+    ) {
+        let direction = (camera.eye() - camera.target).normalize_or_zero();
+        let direction = if direction.length_squared() < 0.5 {
+            glam::Vec3::new(0.0, -1.0, 0.0)
+        } else {
+            direction
+        };
+        let eye = direction * 3.2;
+        let view = glam::Mat4::look_at_rh(eye, glam::Vec3::ZERO, glam::Vec3::Z);
+        // `new THREE.PerspectiveCamera(50, ...)` on a 1:1 target.
+        let proj = glam::Mat4::perspective_rh(50f32.to_radians(), 1.0, 0.1, 10.0);
+        let view_proj = proj * view;
+        for (index, tint) in [[1.0f32, 1.0, 1.0, 1.0], [accent[0], accent[1], accent[2], 1.0]]
+            .into_iter()
+            .enumerate()
+        {
+            let uniform = CubeUniform {
+                view_proj: view_proj.to_cols_array_2d(),
+                tint,
+            };
+            queue.write_buffer(
+                &self.cube_uniforms[index],
+                0,
+                bytemuck::cast_slice(&[uniform]),
+            );
+        }
+
+        let mut encoder = device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("viewport cube"),
+            });
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("viewport cube"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.cube_target_view,
+                    resolve_target: None,
+                    depth_slice: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(&self.cube_pipeline);
+            pass.set_vertex_buffer(0, self.cube_vertex_buffer.slice(..));
+            pass.set_bind_group(1, &self.cube_texture_bind, &[]);
+            pass.set_bind_group(0, &self.cube_binds[0], &[]);
+            pass.draw(0..36, 0..1);
+            if let Some(index) = hovered.filter(|index| *index < 6) {
+                pass.set_bind_group(0, &self.cube_binds[1], &[]);
+                pass.draw(index as u32 * 6..index as u32 * 6 + 6, 0..1);
+            }
+        }
+        queue.submit(Some(encoder.finish()));
+    }
 }
 
 fn pipeline(

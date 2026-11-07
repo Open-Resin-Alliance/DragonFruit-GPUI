@@ -106,19 +106,21 @@
 //!   printing mode). The caller places this 120×120 widget so its centre lands
 //!   there; the widget itself is unpositioned.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::f32::consts::FRAC_PI_2;
 use std::rc::Rc;
 
 use gpui::{
-    App, Bounds, BoxShadow, ClickEvent, DragMoveEvent, EmptyView, EntityId, Font, FontWeight,
-    IntoElement, MouseButton, PathBuilder, Pixels, Point, ScrollDelta, SharedString, TextAlign,
-    TextRun, WeakEntity, Window, canvas, div, linear_color_stop, linear_gradient, point,
-    prelude::*, px, relative, rgb, rgba,
+    App, Bounds, BoxShadow, ClickEvent, Corners, DragMoveEvent, EmptyView, EntityId, FontWeight,
+    IntoElement, MouseButton, Pixels, Point, ScrollDelta, SharedString, WeakEntity, canvas, div,
+    gpu_canvas, linear_color_stop, linear_gradient, prelude::*, px, relative, rgb, rgba,
 };
 
 use gpui_core::camera::Camera;
 use gpui_core::theme::*;
+use gpui_core::viewport::Viewport;
+use gpui_interop::attach;
+use gpui_wgpu::{ImportedTextureExt as _, WgpuRenderer};
 use crate::DragonFruit;
 
 // ---------------------------------------------------------------------------
@@ -895,15 +897,6 @@ pub fn layer_slider(
 const CUBE_HALF: f32 = 30.0;
 /// The gizmo's HUD footprint; the cube sits inside it with room for the labels.
 const CUBE_WIDGET: f32 = 120.0;
-/// `gizmoColors.face` in `SceneCanvas.tsx`.
-const CUBE_FACE: u32 = 0x1f2937;
-/// `gizmoColors.text`.
-const CUBE_TEXT: u32 = 0xf8fafc;
-/// `gizmoColors.accent`, also the stroke and hover color.
-const CUBE_ACCENT: u32 = 0xbaf72e;
-const CUBE_STROKE: u32 = 0xbaf72e;
-/// `opacity={0.75}` on the face material.
-const CUBE_OPACITY: f32 = 0.75;
 /// `opacity={0.6}` on the edge/corner material.
 const EDGE_OPACITY: f32 = 0.6;
 /// `makePositionVector`: `0.38` in cube units.
@@ -913,14 +906,6 @@ const EDGE_LONG: f32 = 0.5 * 60.0;
 const EDGE_SHORT: f32 = 0.25 * 60.0;
 /// `scale={1.01}` on every edge/corner mesh.
 const EDGE_MESH_SCALE: f32 = 1.01;
-/// `FaceMaterial`'s canvas is 128px wide.
-const FACE_TEXTURE: f32 = 128.0;
-/// `font="600 24px Inter, system-ui, sans-serif"`.
-const FACE_FONT: f32 = 24.0;
-/// `FACE_LABEL_MAX_WIDTH`.
-const FACE_LABEL_MAX_WIDTH: f32 = 112.0;
-/// `strokeRect(0, 0, 128, 128)` with the canvas default 1px line.
-const FACE_STROKE: f32 = 1.5;
 /// `polarTilt` in `ZUpGizmoHelper`.
 const POLAR_TILT: f32 = 0.0087;
 
@@ -1297,225 +1282,6 @@ fn cube_hit(view: &CubeView, faces: &[FaceProjection], pointer: [f32; 2]) -> Opt
         .or_else(|| face_hit.map(CubeHit::Face))
 }
 
-fn paint_quad(window: &mut Window, polygon: &[[f32; 2]; 4], fill: u32, stroke: u32) {
-    let mut builder = PathBuilder::fill();
-    builder.move_to(point(px(polygon[0][0]), px(polygon[0][1])));
-    for corner in &polygon[1..] {
-        builder.line_to(point(px(corner[0]), px(corner[1])));
-    }
-    builder.close();
-    if let Ok(path) = builder.build() {
-        window.paint_path(path, rgb(fill).alpha(CUBE_OPACITY));
-    }
-
-    // `strokeColor` from SceneCanvas is the accent; the texture's 1px border
-    // maps to 0.47px on the 60px face.
-    let mut builder = PathBuilder::stroke(px(FACE_STROKE));
-    builder.move_to(point(px(polygon[0][0]), px(polygon[0][1])));
-    for corner in &polygon[1..] {
-        builder.line_to(point(px(corner[0]), px(corner[1])));
-    }
-    builder.close();
-    if let Ok(path) = builder.build() {
-        window.paint_path(path, rgb(stroke).alpha(CUBE_OPACITY));
-    }
-}
-
-/// Sutherland–Hodgman clip of a projected polygon against the half-plane
-/// `depth > min_depth` (the cube's surface). Only the part of an edge/corner
-/// box that pokes in front of the cube survives, exactly as the depth test
-/// hides the rest in three.js.
-fn clip_polygon_to_depth(
-    points: &[[f32; 2]],
-    depths: &[f32],
-    min_depth: f32,
-) -> Vec<[f32; 2]> {
-    let len = points.len();
-    let mut out = Vec::with_capacity(len + 2);
-    for index in 0..len {
-        let next = (index + 1) % len;
-        let (a, b) = (points[index], points[next]);
-        let (depth_a, depth_b) = (depths[index], depths[next]);
-        let a_in = depth_a > min_depth;
-        let b_in = depth_b > min_depth;
-        if a_in {
-            out.push(a);
-        }
-        if a_in != b_in {
-            let t = (min_depth - depth_a) / (depth_b - depth_a);
-            out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
-        }
-    }
-    out
-}
-
-fn paint_box(window: &mut Window, view: &CubeView, box_: &GizmoBox) {
-    let normals = [
-        [1.0, 0.0, 0.0],
-        [-1.0, 0.0, 0.0],
-        [0.0, 1.0, 0.0],
-        [0.0, -1.0, 0.0],
-        [0.0, 0.0, 1.0],
-        [0.0, 0.0, -1.0],
-    ];
-    let cube_depth =
-        CUBE_HALF * (view.eye[0].abs() + view.eye[1].abs() + view.eye[2].abs());
-    for normal in normals {
-        // `meshBasicMaterial` with `side` default: back faces are culled.
-        if dot(normal, view.eye) <= 0.0 {
-            continue;
-        }
-        let corners = box_face_corners(box_.center, box_.half, normal);
-        let mut points = [[0.0f32; 2]; 4];
-        let mut depths = [0.0f32; 4];
-        for (slot, corner) in corners.iter().enumerate() {
-            points[slot] = project(view, *corner);
-            depths[slot] = dot(*corner, view.eye);
-        }
-        let polygon = clip_polygon_to_depth(&points, &depths, cube_depth);
-        if polygon.len() < 3 {
-            continue;
-        }
-        let mut builder = PathBuilder::fill();
-        builder.move_to(point(px(polygon[0][0]), px(polygon[0][1])));
-        for corner in &polygon[1..] {
-            builder.line_to(point(px(corner[0]), px(corner[1])));
-        }
-        builder.close();
-        if let Ok(path) = builder.build() {
-            window.paint_path(path, rgb(CUBE_STROKE).alpha(EDGE_OPACITY));
-        }
-    }
-}
-
-/// Paint one face label the way `FaceMaterial` draws it into its 128px canvas:
-/// 24px semibold, centred, shrunk to the 112px margin with `fitFontToWidth`.
-///
-/// `facing` is `cos` of the angle between the face normal and the eye: the
-/// texture is foreshortened by exactly that factor, so the screen-aligned
-/// label is scaled by it too (GPUI cannot apply the face's affine map).
-fn paint_label(
-    window: &mut Window,
-    cx: &mut App,
-    centroid: [f32; 2],
-    text: &'static str,
-    color: u32,
-    facing: f32,
-) {
-    let face_px = CUBE_HALF * 2.0;
-    let texture_scale = face_px / FACE_TEXTURE;
-    let max_width = FACE_LABEL_MAX_WIDTH * texture_scale;
-    let font = Font {
-        family: "Geist".into(),
-        weight: FontWeight::SEMIBOLD,
-        ..Default::default()
-    };
-    let run = || TextRun {
-        len: text.len(),
-        font: font.clone(),
-        color: rgb(color).alpha(CUBE_OPACITY).into(),
-        background_color: None,
-        underline: None,
-        strikethrough: None,
-    };
-
-    let mut size = FACE_FONT * texture_scale;
-    let line = window
-        .text_system()
-        .shape_line(text.into(), px(size), &[run()], None);
-    if line.width().0 > max_width {
-        // `fitFontToWidth`: floor the texture-size result, minimum 8px.
-        let shrunk = (FACE_FONT * (max_width / line.width().0))
-            .floor()
-            .max(8.0);
-        size = shrunk * texture_scale;
-    }
-    size *= facing;
-    if size < 1.0 {
-        return;
-    }
-
-    let line = window
-        .text_system()
-        .shape_line(text.into(), px(size), &[run()], None);
-    let _ = line.paint(
-        point(px(centroid[0] - face_px * 0.5), px(centroid[1] - size * 0.5)),
-        px(size),
-        TextAlign::Center,
-        Some(px(face_px)),
-        window,
-        cx,
-    );
-}
-
-/// The projected area of a face polygon; an edge-on face has none.
-fn polygon_area(polygon: &[[f32; 2]; 4]) -> f32 {
-    let mut area = 0.0;
-    for index in 0..polygon.len() {
-        let next = (index + 1) % polygon.len();
-        area += polygon[index][0] * polygon[next][1] - polygon[next][0] * polygon[index][1];
-    }
-    (area * 0.5).abs()
-}
-
-fn paint_cube(bounds: Bounds<Pixels>, camera: &Camera, window: &mut Window, cx: &mut App) {
-    let size = bounds.size.width.0.min(bounds.size.height.0);
-    let origin = [bounds.origin.x.0, bounds.origin.y.0];
-    let center = [origin[0] + size * 0.5, origin[1] + size * 0.5];
-    let view = cube_view(camera, center);
-    let faces = project_faces(&view);
-
-    // Hover is read from the live pointer each paint, so no hover state has to
-    // survive a frame. The polygons are in window coordinates, and so is the
-    // pointer.
-    let mouse = window.mouse_position();
-    let pointer = [mouse.x.0, mouse.y.0];
-    let hit = cube_hit(&view, &faces, pointer);
-
-    for face in &faces {
-        // An edge-on face has no area; three.js draws nothing for it.
-        if polygon_area(&face.polygon) < 0.1 {
-            continue;
-        }
-        let hovered = hit == Some(CubeHit::Face(face.index));
-        // `color={hover ? hoverColor : 'white'}` multiplies the texture.
-        let fill = if hovered {
-            multiply(CUBE_FACE, CUBE_ACCENT)
-        } else {
-            CUBE_FACE
-        };
-        let stroke = CUBE_STROKE;
-        paint_quad(window, &face.polygon, fill, stroke);
-    }
-
-    match hit {
-        Some(CubeHit::Edge(index)) => paint_box(window, &view, &edge_box(EDGE_DIRS[index])),
-        Some(CubeHit::Corner(index)) => paint_box(window, &view, &corner_box(CORNER_DIRS[index])),
-        _ => {}
-    }
-
-    for face in &faces {
-        if polygon_area(&face.polygon) < 0.1 {
-            continue;
-        }
-        let facing = dot(CUBE_FACES[face.index].normal, view.eye);
-        let hovered = hit == Some(CubeHit::Face(face.index));
-        let color = if hovered {
-            multiply(CUBE_TEXT, CUBE_ACCENT)
-        } else {
-            CUBE_TEXT
-        };
-        paint_label(
-            window,
-            cx,
-            face.centroid,
-            CUBE_FACES[face.index].label,
-            color,
-            facing,
-        );
-    }
-}
-
 /// `ZUpGizmoHelper`'s home chip: a rounded button on the cube's bottom-right
 /// diagonal that returns the camera to the home pose.
 pub fn home_button(
@@ -1564,12 +1330,14 @@ pub fn home_button(
 /// notifies `entity`; hovering tints the target with the gizmo accent.
 pub fn view_cube(
     camera: Rc<std::cell::RefCell<Camera>>,
+    viewport: Rc<RefCell<Option<Viewport>>>,
     entity: WeakEntity<DragonFruit>,
 ) -> impl IntoElement {
     let bounds: Rc<Cell<Option<Bounds<Pixels>>>> = Rc::new(Cell::new(None));
 
     let bounds_for_canvas = bounds.clone();
     let paint_camera = camera.clone();
+    let cube_viewport = viewport.clone();
 
     div()
         .id("view-cube")
@@ -1581,11 +1349,42 @@ pub fn view_cube(
                 move |canvas_bounds, _window, _cx| {
                     bounds_for_canvas.set(Some(canvas_bounds));
                 },
-                move |canvas_bounds, _, window, cx| {
-                    let camera = paint_camera.borrow();
-                    paint_cube(canvas_bounds, &camera, window, cx);
-                },
+                |_, _, _, _| {},
             )
+            .absolute()
+            .top(px(0.0))
+            .left(px(0.0))
+            .size_full(),
+        )
+        .child(
+            gpu_canvas(move |gpu| {
+                let interop = match attach(gpu.try_device::<WgpuRenderer>()) {
+                    Ok(interop) => interop,
+                    Err(_) => return,
+                };
+                let Some((device, queue)) = interop.adapter().wgpu() else {
+                    return;
+                };
+                let mut slot = cube_viewport.borrow_mut();
+                let Some(state) = slot.as_mut() else {
+                    return;
+                };
+                let camera = paint_camera.borrow();
+                state.render_cube(
+                    &device,
+                    &queue,
+                    &camera,
+                    None,
+                    [0xba as f32 / 255.0, 0xf7 as f32 / 255.0, 0x2e as f32 / 255.0],
+                );
+                drop(camera);
+                match state.cube_texture_view().to_imported_handle() {
+                    Ok(handle) => {
+                        gpu.paint_texture(handle, Corners::default(), 1.0, false);
+                    }
+                    Err(error) => eprintln!("cube: import: {error:#}"),
+                }
+            })
             .absolute()
             .top(px(0.0))
             .left(px(0.0))

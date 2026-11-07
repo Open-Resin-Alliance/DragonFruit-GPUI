@@ -555,6 +555,7 @@ impl Render for DragonFruit {
         };
         let camera = self.camera.clone();
         let viewport = self.viewport.clone();
+        let cube_viewport = self.viewport.clone();
         let drag = self.drag.clone();
         let hovered = self.hovered.clone();
         let last = self.last.clone();
@@ -1140,7 +1141,11 @@ impl Render for DragonFruit {
                     .absolute()
                     .bottom(px(22.))
                     .right(px(72.))
-                    .child(overlays::view_cube(camera.clone(), entity.clone())),
+                    .child(overlays::view_cube(
+                        camera.clone(),
+                        cube_viewport.clone(),
+                        entity.clone(),
+                    )),
             )
             .child(
                 div()
