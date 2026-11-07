@@ -19,10 +19,14 @@ const LABEL_FONT: f32 = 20.0;
 /// `defaultFaces`, in `ZUpGizmoViewcube`'s box order.
 pub const LABELS: [&str; 6] = ["FRONT", "BACK", "RIGHT", "LEFT", "TOP", "BOTTOM"];
 
-/// `needsRotation` in `FaceMaterial`, in quarter turns: the labels are painted
-/// on the canvas at the source's angles (`-PI/2, PI/2, PI, 0, -PI/2, -PI/2`)
-/// so they read upright once the box is mapped into the Z-up scene.
-const ROTATIONS: [i32; 6] = [-1, 1, 2, 0, -1, -1];
+/// Quarter turns applied to the label per face, clockwise.
+///
+/// `FaceMaterial`'s `needsRotation` table (`-PI/2, PI/2, PI, 0, -PI/2, -PI/2`)
+/// is expressed against three.js's box UVs *before* the group's own
+/// `-PI/2` Z rotation. Here the group rotation is baked into the face normals,
+/// so the sides need no extra turn (the up tangent is already world Z); the top
+/// and bottom need a quarter turn to read across the face rather than along it.
+const ROTATIONS: [i32; 6] = [0, 0, 0, 0, 1, 1];
 /// `opacity={0.75}` on the face material.
 pub const FACE_OPACITY: f32 = 0.75;
 
@@ -190,6 +194,46 @@ mod tests {
         // The fill and the stroke are both present.
         assert!(data.chunks(4).any(|px| px[0] == FACE.0 && px[1] == FACE.1));
         assert!(data.chunks(4).any(|px| px[0] == STROKE.0 && px[1] == STROKE.1));
+    }
+
+
+    #[test]
+    fn labels_read_upright_from_the_default_camera() {
+        let dir = glam::Vec3::new(-0.55, -0.55, 0.65).normalize();
+        let eye = dir * 3.2;
+        let view = glam::Mat4::look_at_rh(eye, glam::Vec3::ZERO, glam::Vec3::Z);
+        let proj = glam::Mat4::orthographic_rh(-1.15, 1.15, -1.15, 1.15, 0.1, 10.0);
+        let vp = proj * view;
+        let verts = vertices();
+        for face in 0..6 {
+            let quad = &verts[face * 6..face * 6 + 6];
+            // corner 0 = (u0,v0), 1 = (u1,v0), 3 = (u0,v1)
+            let project = |index: usize| {
+                let v = quad[index];
+                let clip = vp * glam::Vec4::new(v[0], v[1], v[2], 1.0);
+                glam::Vec2::new(clip.x / clip.w, clip.y / clip.w)
+            };
+            let normal = glam::Vec3::new(quad[0][0], quad[0][1], quad[0][2]);
+            let centroid = normal.normalize() * 0.5;
+            let facing = normal.normalize().dot((eye - centroid).normalize());
+            if facing <= 0.0 {
+                continue;
+            }
+            let du = project(1) - project(0);
+            let dv = project(5) - project(0);
+            // The atlas label is turned clockwise by ROTATIONS[face], so the
+            // face-space axes of the *text* are the quad's axes rotated back.
+            let (label_up, label_right) = match ROTATIONS[face].rem_euclid(4) {
+                1 => (du, -dv),
+                2 => (-dv, -du),
+                3 => (-du, dv),
+                _ => (dv, du),
+            };
+            assert!(
+                label_up.y > 0.0 && label_right.x > 0.0,
+                "face {face} label is misoriented: up {label_up:?} right {label_right:?}"
+            );
+        }
     }
 
     #[test]
