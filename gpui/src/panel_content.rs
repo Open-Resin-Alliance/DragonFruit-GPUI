@@ -116,7 +116,8 @@ use gpui_core::theme::*;
 use gpui_ui::ui::{
     ContextMenuEntry, SettingDensity, SettingSurface, context_menu, setting_row, toggle,
 };
-use crate::{DragonFruit, stl};
+use crate::DragonFruit;
+use gpui_core::stl;
 
 /// `#ffffff` — the ghost hover and the `color-mix(..., white 86%)` borders.
 const WHITE: u32 = 0xffffff;

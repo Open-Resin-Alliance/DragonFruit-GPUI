@@ -3,9 +3,12 @@
 //! installation and the file logger.
 
 pub mod camera;
+pub mod empty_state;
 pub mod fonts;
 pub mod icons;
+pub mod panel_layout;
 pub mod log;
+pub mod state;
 pub mod stl;
 pub mod support_state;
 pub mod theme;

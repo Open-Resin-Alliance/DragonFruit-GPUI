@@ -94,73 +94,14 @@ use gpui::{
 use gpui_core::icons::icon;
 use gpui_core::theme::*;
 use crate::{DragonFruit, Mode};
+pub use gpui_core::state::MeshShaderType;
 
 const WHITE: u32 = 0xffffff;
 const BLACK: u32 = 0x000000;
 
 // ── Mesh view types ─────────────────────────────────────────────────────────
 
-/// `MeshShaderType` from `src/features/shaders/mesh/types.ts`, in
-/// `MESH_SHADER_TYPES` order.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
-pub enum MeshShaderType {
-    #[default]
-    SoftClay,
-    FlatUnlit,
-    Matcap,
-    NormalDebug,
-    Wireframe,
-    OpaqueWireMesh,
-    Xray,
-    OverhangHeatmap,
-}
-
-impl MeshShaderType {
-    /// The stored value (`MESH_SHADER_TYPES`).
-    pub fn value(self) -> &'static str {
-        match self {
-            Self::SoftClay => "soft_clay",
-            Self::FlatUnlit => "flat_unlit",
-            Self::Matcap => "matcap",
-            Self::NormalDebug => "normal_debug",
-            Self::Wireframe => "wireframe",
-            Self::OpaqueWireMesh => "opaque_wire_mesh",
-            Self::Xray => "xray",
-            Self::OverhangHeatmap => "overhang_heatmap",
-        }
-    }
-
-    /// `MESH_SHADER_OPTIONS[..].label`, or the raw value when the type is not
-    /// one of the dropdown's options (`ViewTypeDropdown`'s `option ? label :
-    /// value` fallback).
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::SoftClay => "Standard",
-            Self::OverhangHeatmap => "Overhangs",
-            Self::OpaqueWireMesh => "Mesh",
-            Self::Wireframe => "Wireframe",
-            Self::Xray => "X-Ray",
-            Self::NormalDebug => "Normals",
-            Self::FlatUnlit | Self::Matcap => self.value(),
-        }
-    }
-
-    /// `getViewTypeIcon` from `ViewTypeDropdown.tsx`.
-    pub fn icon(self) -> &'static str {
-        match self {
-            Self::SoftClay => "paintbrush",
-            Self::NormalDebug => "scan",
-            Self::Wireframe => "grid-3x3",
-            Self::OverhangHeatmap => "alert-diamond-custom",
-            Self::OpaqueWireMesh => "layers",
-            Self::Xray => "eye",
-            // `default:` — `flat_unlit` and `matcap` fall through.
-            Self::FlatUnlit | Self::Matcap => "app-window",
-        }
-    }
-}
-
-/// `MESH_SHADER_OPTIONS`, in the order the dropdown lists them.
+/// `MESH_SHADER_OPTIONS` from `ViewTypeDropdown.tsx`: the dropdown's menu.
 pub const MESH_SHADER_OPTIONS: [MeshShaderType; 6] = [
     MeshShaderType::SoftClay,
     MeshShaderType::OverhangHeatmap,
@@ -670,6 +611,7 @@ pub fn app_bar(state: AppBarState, entity: WeakEntity<DragonFruit>) -> impl Into
             absolute, top_0, left_0, right_0,
             h = px(TOPBAR_HEIGHT),
             flex, items_center, gap_12,
+            h = px(TOPBAR_HEIGHT),
             px_4, pt_3, pb_9,
             on_mouse_down = move |_, window, _| {
                 gpui_core::log::log("appbar: drag root");

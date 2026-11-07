@@ -223,15 +223,15 @@ struct DragonFruit {
     smoke_done: Rc<Cell<bool>>,
     mode: Mode,
     show_settings: bool,
-    layout: panels::PanelLayout,
-    empty_scene: empty_scene::EmptySceneState,
-    stats: empty_scene::ModelStatsCardState,
+    layout: gpui_core::panel_layout::PanelLayout,
+    empty_scene: gpui_core::empty_state::EmptySceneState,
+    stats: gpui_core::empty_state::ModelStatsCardState,
     islands: gpui_core::support_state::IslandsPanelState,
     island_list: gpui_core::support_state::IslandListState,
     hollowing: gpui_core::support_state::HollowingState,
     hole_punch: gpui_core::support_state::HolePunchState,
     support_settings: gpui_core::support_state::SupportSettingsState,
-    printing_preview: printing_preview::PrintingPreviewState,
+    printing_preview: gpui_core::state::PrintingPreviewState,
     /// Upper layer index, `0..=num_layers`.
     layer: f32,
     /// Lower layer index (the second thumb).
@@ -261,7 +261,7 @@ struct DragonFruit {
     /// `TopBar`'s view-mode dropdown (`SelectDropdown` under the trigger).
     show_view_menu: bool,
     /// `viewType` — the persisted mesh shader the dropdown shows.
-    view_type: app_bar::MeshShaderType,
+    view_type: gpui_core::state::MeshShaderType,
     /// Opened by the top bar's monitor button; the printing monitor modal is
     /// not ported.
     #[allow(dead_code)]
@@ -305,15 +305,15 @@ impl DragonFruit {
             smoke_done: Rc::new(Cell::new(false)),
             mode: Mode::Prepare,
             show_settings: false,
-            layout: panels::PanelLayout::new(),
-            empty_scene: empty_scene::EmptySceneState::default(),
-            stats: empty_scene::ModelStatsCardState::default(),
+            layout: gpui_core::panel_layout::PanelLayout::new(),
+            empty_scene: gpui_core::empty_state::EmptySceneState::default(),
+            stats: gpui_core::empty_state::ModelStatsCardState::default(),
             islands: gpui_core::support_state::IslandsPanelState::new(),
             island_list: gpui_core::support_state::IslandListState::new(),
             hollowing: gpui_core::support_state::HollowingState::new(),
             hole_punch: gpui_core::support_state::HolePunchState::new(),
             support_settings: gpui_core::support_state::SupportSettingsState::new(),
-            printing_preview: printing_preview::PrintingPreviewState::default(),
+            printing_preview: gpui_core::state::PrintingPreviewState::default(),
             layer: 0.0,
             lower_layer: 0.0,
             cross_section: true,
@@ -335,7 +335,7 @@ impl DragonFruit {
             show_support_settings: false,
             show_app_menu: false,
             show_view_menu: false,
-            view_type: app_bar::MeshShaderType::SoftClay,
+            view_type: gpui_core::state::MeshShaderType::SoftClay,
             show_monitor: false,
             select_fleet_unit: None,
             settings_tab: 0,

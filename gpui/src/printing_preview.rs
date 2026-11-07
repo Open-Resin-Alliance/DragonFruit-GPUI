@@ -74,6 +74,7 @@ use gpui::{
 };
 
 use crate::DragonFruit;
+pub use gpui_core::state::PrintingPreviewState;
 use crate::overlays;
 use gpui_core::theme::*;
 
@@ -103,45 +104,6 @@ const DASH_GAP: f32 = 3.0;
 /// `activePrinterProfile?.buildVolumeMm?.width ?? 143` and `?.depth ?? 89`.
 const DEFAULT_BUILD_WIDTH_MM: f32 = 143.0;
 const DEFAULT_BUILD_DEPTH_MM: f32 = 89.0;
-
-/// The pane's inputs, named after the props `PrintingPreviewPane` receives.
-///
-/// The three.js and per-layer-URL props are not modelled — see the module's
-/// `PORT DEVIATIONS`.
-#[derive(Clone)]
-pub struct PrintingPreviewState {
-    /// `printingPreviewTotalLayers` — `activeSlice.totalLayers`, `0` when the
-    /// plate has not been sliced.
-    pub total_layers: u32,
-    /// `printingSelectedLayer` — the slider's upper thumb.
-    pub selected_layer: f32,
-    /// `crossSectionEnabled` — colours the slider and is what its double-click
-    /// toggles.
-    pub cross_section: bool,
-    /// `printingPreviewPngUrlForDisplay` / `selectedPrintingLayerPreviewUrl`,
-    /// resolved to a local file. `None` renders the empty state when the plate
-    /// also has no layers.
-    pub preview_image: Option<PathBuf>,
-    /// `printingPreviewTargetResolution`'s `viewportWidth` / `viewportHeight`.
-    /// Takes precedence over the printer profile, as at the source.
-    pub viewport_mm: Option<(f32, f32)>,
-    /// `activePrinterProfile.buildVolumeMm`'s `(width, depth)`. `None` is the
-    /// source's `?? 143` / `?? 89` fallback.
-    pub build_volume_mm: Option<(f32, f32)>,
-}
-
-impl Default for PrintingPreviewState {
-    fn default() -> Self {
-        Self {
-            total_layers: 0,
-            selected_layer: 1.0,
-            cross_section: true,
-            preview_image: None,
-            viewport_mm: None,
-            build_volume_mm: None,
-        }
-    }
-}
 
 /// `PrintingPreviewPane` — the printing-mode right column.
 ///

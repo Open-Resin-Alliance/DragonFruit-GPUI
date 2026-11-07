@@ -84,6 +84,7 @@ use std::rc::Rc;
 
 use gpui_core::icons::icon;
 use gpui_core::theme::*;
+pub use gpui_core::state::ToastTone;
 
 /// Tailwind v4's radius scale — what `rounded-*` utilities actually resolve to.
 /// See the module docs for why these are not `theme::RADIUS_*`.
@@ -1196,14 +1197,6 @@ pub fn spinner_colored(size: f32, color: u32) -> Div {
 
 // ── Toast ───────────────────────────────────────────────────────────────────
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum ToastTone {
-    Neutral,
-    Info,
-    Success,
-    Warning,
-    Error,
-}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ToastShape {
