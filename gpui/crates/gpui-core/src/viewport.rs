@@ -1935,15 +1935,16 @@ fn axis_arrows(metrics: &PlateMetrics) -> Vec<[f32; 6]> {
                 origin[2] + dir[2] * t + (u[2] * cos + v[2] * sin) * radius,
             ]
         };
-        // The source maps the same gradient texture over each geometry: the
-        // shaft runs dark→light over its own length, and the cone restarts the
-        // gradient at its base, so the cone is not a light blob.
+        // The source's gradient texture is a CanvasTexture, and three.js
+        // uploads textures flipped: v=0 (the geometry's base) samples the
+        // gradient's `to` colour, v=1 (the tip) its `from` colour. So each
+        // geometry runs light at its base to dark at its tip.
         let shade = |t: f32, span: f32| -> [f32; 3] {
             let k = (t / span).clamp(0.0, 1.0);
             [
-                base[0] + (tip[0] - base[0]) * k,
-                base[1] + (tip[1] - base[1]) * k,
-                base[2] + (tip[2] - base[2]) * k,
+                tip[0] + (base[0] - tip[0]) * k,
+                tip[1] + (base[1] - tip[1]) * k,
+                tip[2] + (base[2] - tip[2]) * k,
             ]
         };
         let tip_point = [
@@ -1979,10 +1980,8 @@ fn axis_arrows(metrics: &PlateMetrics) -> Vec<[f32; 6]> {
             push(center_at(0.0), c0);
             push(p01, c0);
             push(p00, c0);
-            // Top cap.
-            push(center_at(length), c1);
-            push(p10, c1);
-            push(p11, c1);
+            // The shaft's top cap is omitted: the cone's base cap sits on the
+            // same plane, and two coplanar discs z-fight into a bright rim.
             // Cone: `ConeGeometry(headRadius, headLength, 12)`, base capped.
             let b0 = ring(length, head_radius, a0);
             let b1 = ring(length, head_radius, a1);

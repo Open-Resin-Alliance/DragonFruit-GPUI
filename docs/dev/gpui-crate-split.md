@@ -42,6 +42,18 @@ Module map:
 | `gpui-settings` | `settings` |
 | `gpui-app` | `main` |
 
+## What shipped
+
+`gpui-core` (theme, icons, camera, STL, wgpu viewport, window, fonts, logger,
+plus the feature state types: `support_state`, `empty_state`, `panel_layout`,
+`state`) and `gpui-ui` (atoms, field widgets) are separate crates. The binary
+keeps `DragonFruit` and every feature module.
+
+**`DragonFruit` cannot move to `gpui-core`**: `Render` is gpui's trait, so the
+orphan rule only lets the crate that defines `DragonFruit` implement it — and
+that impl composes every feature crate. A wrapper entity (`Root`) would be the
+way to split the features; until then the binary owns the render tree.
+
 ## Rules that keep the graph acyclic
 
 - **State lives in `gpui-core`.** A feature that needs a new field on
