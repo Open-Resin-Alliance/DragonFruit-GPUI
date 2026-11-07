@@ -307,7 +307,7 @@ impl Viewport {
             SAMPLE_COUNT,
         );
 
-        let (plate_vertices, plate_indices) = plate_mesh(224.88, 128.88, 3.0, -0.08);
+        let (plate_vertices, plate_indices) = plate_mesh(224.88, 128.88, 3.0, -0.08, 3.0, 8);
         let plate_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("viewport plate vertices"),
             contents: bytemuck::cast_slice(&plate_vertices),
@@ -467,14 +467,17 @@ impl Viewport {
             pass.set_bind_group(0, &self.scene_bind, &[]);
             pass.set_pipeline(&self.background);
             pass.draw(0..3, 0..1);
-            pass.set_pipeline(&self.plate);
-            pass.set_vertex_buffer(0, self.plate_vertex_buffer.slice(..));
-            pass.set_index_buffer(self.plate_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-            pass.draw_indexed(0..self.plate_index_count, 0, 0..1);
-            pass.set_pipeline(&self.grid);
-            pass.draw(0..6, 0..1);
+            let below_plate = eye.z < 0.0;
+            if !below_plate {
+                pass.set_pipeline(&self.plate);
+                pass.set_vertex_buffer(0, self.plate_vertex_buffer.slice(..));
+                pass.set_index_buffer(self.plate_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(0..self.plate_index_count, 0, 0..1);
+                pass.set_pipeline(&self.grid);
+                pass.draw(0..6, 0..1);
+            }
             if let Some(mesh) = &self.mesh {
-                if mesh.footprint_vertex_count > 0 {
+                if !below_plate && mesh.footprint_vertex_count > 0 {
                     pass.set_pipeline(&self.footprint);
                     pass.set_vertex_buffer(0, mesh.footprint_buffer.slice(..));
                     pass.draw(0..mesh.footprint_vertex_count, 0..1);
@@ -647,48 +650,79 @@ impl Targets {
     }
 }
 
-fn plate_mesh(width: f32, depth: f32, thickness: f32, top: f32) -> (Vec<Vertex>, Vec<u32>) {
-    let hx = width * 0.5;
-    let hy = depth * 0.5;
+fn plate_mesh(
+    width: f32,
+    depth: f32,
+    thickness: f32,
+    top: f32,
+    radius: f32,
+    segments: u32,
+) -> (Vec<Vertex>, Vec<u32>) {
+    let half_w = width * 0.5;
+    let half_d = depth * 0.5;
+    let r = radius.min(half_w - 0.01).min(half_d - 0.01);
     let z0 = top;
     let z1 = top - thickness;
+
+    let mut perimeter: Vec<[f32; 2]> = Vec::new();
+    perimeter.push([-half_w + r, -half_d]);
+    let arc = |cx: f32, cy: f32, a0: f32, a1: f32, points: &mut Vec<[f32; 2]>| {
+        for i in 0..=segments {
+            let a = a0 + (a1 - a0) * i as f32 / segments as f32;
+            points.push([cx + r * a.cos(), cy + r * a.sin()]);
+        }
+    };
+    arc(half_w - r, -half_d + r, -std::f32::consts::FRAC_PI_2, 0.0, &mut perimeter);
+    arc(half_w - r, half_d - r, 0.0, std::f32::consts::FRAC_PI_2, &mut perimeter);
+    arc(-half_w + r, half_d - r, std::f32::consts::FRAC_PI_2, std::f32::consts::PI, &mut perimeter);
+    arc(-half_w + r, -half_d + r, std::f32::consts::PI, 1.5 * std::f32::consts::PI, &mut perimeter);
+    perimeter.dedup_by(|a, b| (a[0] - b[0]).abs() < 1e-5 && (a[1] - b[1]).abs() < 1e-5);
+
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
-    let mut face = |corners: [[f32; 3]; 4], normal: [f32; 3]| {
+    let count = perimeter.len();
+
+    // Top and bottom fans around the centre; the rounded rectangle is convex.
+    let top_center = vertices.len() as u32;
+    vertices.push(Vertex { pos: [0.0, 0.0, z0], normal: [0.0, 0.0, 1.0], ao: 1.0 });
+    let top_start = vertices.len() as u32;
+    for p in &perimeter {
+        vertices.push(Vertex { pos: [p[0], p[1], z0], normal: [0.0, 0.0, 1.0], ao: 1.0 });
+    }
+    for i in 0..count {
+        let a = top_start + i as u32;
+        let b = top_start + ((i + 1) % count) as u32;
+        indices.extend_from_slice(&[top_center, a, b]);
+    }
+
+    let bottom_center = vertices.len() as u32;
+    vertices.push(Vertex { pos: [0.0, 0.0, z1], normal: [0.0, 0.0, -1.0], ao: 1.0 });
+    let bottom_start = vertices.len() as u32;
+    for p in &perimeter {
+        vertices.push(Vertex { pos: [p[0], p[1], z1], normal: [0.0, 0.0, -1.0], ao: 1.0 });
+    }
+    for i in 0..count {
+        let a = bottom_start + i as u32;
+        let b = bottom_start + ((i + 1) % count) as u32;
+        indices.extend_from_slice(&[bottom_center, b, a]);
+    }
+
+    // Side walls, one quad per perimeter edge.
+    for i in 0..count {
+        let p0 = perimeter[i];
+        let p1 = perimeter[(i + 1) % count];
+        let dx = p1[0] - p0[0];
+        let dy = p1[1] - p0[1];
+        let length = (dx * dx + dy * dy).sqrt().max(1e-6);
+        let normal = [dy / length, -dx / length, 0.0];
         let base = vertices.len() as u32;
-        for corner in corners {
-            vertices.push(Vertex {
-                pos: corner,
-                normal,
-                ao: 1.0,
-            });
-        }
+        vertices.push(Vertex { pos: [p0[0], p0[1], z0], normal, ao: 1.0 });
+        vertices.push(Vertex { pos: [p1[0], p1[1], z0], normal, ao: 1.0 });
+        vertices.push(Vertex { pos: [p1[0], p1[1], z1], normal, ao: 1.0 });
+        vertices.push(Vertex { pos: [p0[0], p0[1], z1], normal, ao: 1.0 });
         indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
-    };
-    face(
-        [[-hx, -hy, z0], [hx, -hy, z0], [hx, hy, z0], [-hx, hy, z0]],
-        [0.0, 0.0, 1.0],
-    );
-    face(
-        [[-hx, -hy, z1], [-hx, hy, z1], [hx, hy, z1], [hx, -hy, z1]],
-        [0.0, 0.0, -1.0],
-    );
-    face(
-        [[-hx, -hy, z1], [hx, -hy, z1], [hx, -hy, z0], [-hx, -hy, z0]],
-        [0.0, -1.0, 0.0],
-    );
-    face(
-        [[-hx, hy, z0], [hx, hy, z0], [hx, hy, z1], [-hx, hy, z1]],
-        [0.0, 1.0, 0.0],
-    );
-    face(
-        [[-hx, -hy, z0], [-hx, hy, z0], [-hx, hy, z1], [-hx, -hy, z1]],
-        [-1.0, 0.0, 0.0],
-    );
-    face(
-        [[hx, -hy, z1], [hx, hy, z1], [hx, hy, z0], [hx, -hy, z0]],
-        [1.0, 0.0, 0.0],
-    );
+    }
+
     (vertices, indices)
 }
 
@@ -967,8 +1001,8 @@ fn fs_main(in: GridOut) -> @location(0) vec4<f32> {
     let plate = vec3<f32>(0.032, 0.040, 0.054);
     let minor = vec3<f32>(0.025, 0.031, 0.040);
     let major = vec3<f32>(0.078, 0.090, 0.116);
-    var color = mix(plate, minor, line * 0.7);
-    color = mix(color, major, axis * 0.6);
+    var color = mix(plate, minor, line);
+    color = mix(color, major, axis);
     return vec4<f32>(color, 1.0);
 }
 "#;
