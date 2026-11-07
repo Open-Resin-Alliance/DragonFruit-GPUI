@@ -1411,6 +1411,38 @@ pub fn view_cube(
             .left(px(0.0))
             .size_full(),
         )
+        .child(quarter_arrow(
+            "cube-turn-up",
+            "quarter-up",
+            0.0,
+            -CUBE_WIDGET * 0.5 + 2.0,
+            camera.clone(),
+            entity.clone(),
+        ))
+        .child(quarter_arrow(
+            "cube-turn-down",
+            "quarter-down",
+            0.0,
+            CUBE_WIDGET * 0.5 - 2.0,
+            camera.clone(),
+            entity.clone(),
+        ))
+        .child(quarter_arrow(
+            "cube-turn-left",
+            "quarter-left",
+            -CUBE_WIDGET * 0.5 + 2.0,
+            0.0,
+            camera.clone(),
+            entity.clone(),
+        ))
+        .child(quarter_arrow(
+            "cube-turn-right",
+            "quarter-right",
+            CUBE_WIDGET * 0.5 - 2.0,
+            0.0,
+            camera.clone(),
+            entity.clone(),
+        ))
         .child(
             gpu_canvas(move |gpu| {
                 let interop = match attach(gpu.try_device::<WgpuRenderer>()) {
