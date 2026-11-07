@@ -173,6 +173,30 @@ pub fn overhang_points(mesh: &MeshData, angle_degrees: f32) -> Vec<[f32; 3]> {
 /// Whether a world-space ray hits the model, by Moller-Trumbore.
 pub fn raycast(mesh: &MeshData, origin: GVec3, direction: GVec3) -> bool {
     let direction = direction.normalize();
+    // Slab test against the bounding box first: hover raycasts run on every
+    // pointer move, and most of them miss the model entirely.
+    let half = GVec3::from_array(mesh.size) * 0.5;
+    let min = mesh.center - half;
+    let max = mesh.center + half;
+    let mut t_min = f32::NEG_INFINITY;
+    let mut t_max = f32::INFINITY;
+    for axis in 0..3 {
+        let d = direction[axis];
+        let o = origin[axis];
+        if d.abs() < 1e-8 {
+            if o < min[axis] || o > max[axis] {
+                return false;
+            }
+        } else {
+            let t1 = (min[axis] - o) / d;
+            let t2 = (max[axis] - o) / d;
+            t_min = t_min.max(t1.min(t2));
+            t_max = t_max.min(t1.max(t2));
+        }
+    }
+    if t_max < t_min.max(0.0) {
+        return false;
+    }
     for triangle in mesh.vertices.chunks_exact(3) {
         let a = GVec3::from_array(triangle[0].pos);
         let b = GVec3::from_array(triangle[1].pos);

@@ -1941,8 +1941,18 @@ fn axis_arrows(metrics: &PlateMetrics) -> Vec<[f32; 6]> {
         };
     }
     for (dir, base_hex, tip_hex) in axes {
-        let base = srgb_linear(base_hex);
-        let tip = srgb_linear(tip_hex);
+        // three.js samples the CanvasTexture without a colour space, so the
+        // sRGB bytes are treated as linear and re-encoded on output. Feeding
+        // the raw sRGB values as linear reproduces that (brighter) result.
+        let raw = |hex: u32| -> [f32; 3] {
+            [
+                ((hex >> 16) & 0xff) as f32 / 255.0,
+                ((hex >> 8) & 0xff) as f32 / 255.0,
+                (hex & 0xff) as f32 / 255.0,
+            ]
+        };
+        let base = raw(base_hex);
+        let tip = raw(tip_hex);
         let helper = if dir[2].abs() > 0.9 {
             [1.0, 0.0, 0.0]
         } else {
@@ -1958,16 +1968,15 @@ fn axis_arrows(metrics: &PlateMetrics) -> Vec<[f32; 6]> {
                 origin[2] + dir[2] * t + (u[2] * cos + v[2] * sin) * radius,
             ]
         };
-        // The source's gradient texture is a CanvasTexture, and three.js
-        // uploads textures flipped: v=0 (the geometry's base) samples the
-        // gradient's `to` colour, v=1 (the tip) its `from` colour. So each
-        // geometry runs light at its base to dark at its tip.
+        // The source draws the gradient from the canvas bottom (dark) to its
+        // top (light) and three.js samples v=0 at the canvas bottom, so each
+        // geometry runs dark at its base to light at its tip.
         let shade = |t: f32, span: f32| -> [f32; 3] {
             let k = (t / span).clamp(0.0, 1.0);
             [
-                tip[0] + (base[0] - tip[0]) * k,
-                tip[1] + (base[1] - tip[1]) * k,
-                tip[2] + (base[2] - tip[2]) * k,
+                base[0] + (tip[0] - base[0]) * k,
+                base[1] + (tip[1] - base[1]) * k,
+                base[2] + (tip[2] - base[2]) * k,
             ]
         };
         let tip_point = [

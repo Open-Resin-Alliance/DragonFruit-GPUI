@@ -219,6 +219,8 @@ struct DragonFruit {
     status: String,
     loading: bool,
     selected: Rc<Cell<bool>>,
+    /// `hoveredMeshModelId` — the pointer is over the model.
+    hovered: Rc<Cell<bool>>,
     smoke: bool,
     smoke_done: Rc<Cell<bool>>,
     mode: Mode,
@@ -301,6 +303,7 @@ impl DragonFruit {
             status: String::new(),
             loading: false,
             selected: Rc::new(Cell::new(true)),
+            hovered: Rc::new(Cell::new(false)),
             smoke,
             smoke_done: Rc::new(Cell::new(false)),
             mode: Mode::Prepare,
@@ -529,9 +532,11 @@ impl Render for DragonFruit {
         let camera = self.camera.clone();
         let viewport = self.viewport.clone();
         let drag = self.drag.clone();
+        let hovered = self.hovered.clone();
         let last = self.last.clone();
         let smoke = self.smoke;
         let selected_state = self.selected.clone();
+        let hovered_state = self.hovered.clone();
         let smoke_done = self.smoke_done.clone();
         let triangles = self.mesh.as_ref().map(|mesh| mesh.triangles).unwrap_or(0);
         let loading = self.loading;
@@ -566,7 +571,7 @@ impl Render for DragonFruit {
             let width = (bounds.size.width.0 * scale).round().max(1.0) as u32;
             let height = (bounds.size.height.0 * scale).round().max(1.0) as u32;
             let mesh_ref = mesh.as_deref();
-            let base_color = mesh_color(selected_state.get());
+            let base_color = mesh_color(selected_state.get(), hovered_state.get());
             if let Err(error) = state.render(
                 &device,
                 &queue,
@@ -643,7 +648,9 @@ impl Render for DragonFruit {
             let last = last.clone();
             let camera = camera.clone();
             let entity = entity.clone();
-            move |event, _window, cx| {
+            let hovered = hovered.clone();
+            let hover_mesh = click_mesh.clone();
+            move |event, window, cx| {
                 if let Some(button) = drag.get() {
                     let (lx, ly) = last.get();
                     let dx = event.position.x.0 - lx;
@@ -655,6 +662,25 @@ impl Render for DragonFruit {
                         MouseButton::Middle => camera.pan(dx, dy),
                         _ => {}
                     }
+                    entity.update(cx, |_, cx| cx.notify()).ok();
+                    return;
+                }
+                // `hoveredMeshModelId`: the pointer over the model tints it.
+                let hit = hover_mesh.as_ref().is_some_and(|mesh| {
+                    let size = window.viewport_size();
+                    let width = size.width.0.max(1.0);
+                    let height = size.height.0.max(1.0);
+                    let ndc_x = event.position.x.0 / width * 2.0 - 1.0;
+                    let ndc_y = 1.0 - event.position.y.0 / height * 2.0;
+                    let (origin, direction) =
+                        camera.borrow().ray(width / height, ndc_x, ndc_y);
+                    let inverse = model_matrix.inverse();
+                    let origin = inverse.transform_point3(origin);
+                    let direction = inverse.transform_vector3(direction);
+                    stl::raycast(mesh, origin, direction)
+                });
+                if hovered.get() != hit {
+                    hovered.set(hit);
                     entity.update(cx, |_, cx| cx.notify()).ok();
                 }
             }
@@ -1274,12 +1300,26 @@ fn srgb_to_linear(channel: u8) -> f32 {
 
 /// `blendTintColor` from `src/features/shaders/mesh/tint.ts`: linear lerp from
 /// the unselected `#a3a3a3` toward the theme selection `#ec2a77` at 0.70.
-fn mesh_color(selected: bool) -> [f32; 3] {
+fn mesh_color(selected: bool, hovered: bool) -> [f32; 3] {
     // Calibrated against the real app's selected poussin render: the model's
     // material is a saturated pink, not the #a3a3a3 default blended with the
     // selection tint (whose red cannot reach this value).
     if selected {
         [0.78, 0.10, 0.22]
+    } else if hovered {
+        // `blendTintColor('#a3a3a3', meshHoverColor, 0.5)` in linear space;
+        // the dark theme's hover colour is the accent.
+        let base = srgb_to_linear(0xa3);
+        let tint = [
+            srgb_to_linear(0xec),
+            srgb_to_linear(0x2a),
+            srgb_to_linear(0x77),
+        ];
+        [
+            base + (tint[0] - base) * 0.5,
+            base + (tint[1] - base) * 0.5,
+            base + (tint[2] - base) * 0.5,
+        ]
     } else {
         [srgb_to_linear(0xa3), srgb_to_linear(0xa3), srgb_to_linear(0xa3)]
     }
