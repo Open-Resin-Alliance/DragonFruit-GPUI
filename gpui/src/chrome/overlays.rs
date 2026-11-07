@@ -1344,7 +1344,7 @@ pub fn home_button(
         .w(px(HOME_SIZE))
         .h(px(HOME_SIZE))
         // `roundRect(..., 16)` on a 64px canvas drawn at 28px: 7px on screen.
-        .rounded(px(8.5))
+        .rounded(px(8.0))
         .border_1()
         .border_color(rgb(HOME_BORDER))
         .bg(rgb(HOME_CHIP))
@@ -1362,11 +1362,11 @@ pub fn home_button(
         // `HomeButton` fills lucide's closed silhouette and paints the open
         // detail (the door) in the chip's own colour, so the glyph reads solid
         // rather than as an outline.
-        .child(icons::icon("house-filled", 26.0, HOME_GLYPH))
+        .child(icons::icon("house-filled", 24.0, HOME_GLYPH))
 }
 
 /// `HOME_SIZE` from `ZUpGizmoHelper`: `0.47` of the cube's 60-unit scale.
-const HOME_SIZE: f32 = 34.0;
+const HOME_SIZE: f32 = 32.0;
 /// `gizmoColors.chip`.
 const HOME_CHIP: u32 = SURFACE_0;
 /// A hover step above the chip surface.
