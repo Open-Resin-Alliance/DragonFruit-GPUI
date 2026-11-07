@@ -78,7 +78,7 @@ struct DragonFruit {
     last: Rc<Cell<(f32, f32)>>,
     status: String,
     loading: bool,
-    selected: bool,
+    selected: Rc<Cell<bool>>,
     smoke: bool,
     smoke_done: Rc<Cell<bool>>,
     mode: Mode,
@@ -111,7 +111,7 @@ impl DragonFruit {
             last: Rc::new(Cell::new((0.0, 0.0))),
             status: "No model loaded".to_owned(),
             loading: false,
-            selected: true,
+            selected: Rc::new(Cell::new(true)),
             smoke,
             smoke_done: Rc::new(Cell::new(false)),
             mode: Mode::Prepare,
@@ -176,12 +176,14 @@ impl DragonFruit {
 impl Render for DragonFruit {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let mesh = self.mesh.clone();
+        let click_mesh = self.mesh.clone();
         let camera = self.camera.clone();
         let viewport = self.viewport.clone();
         let drag = self.drag.clone();
         let last = self.last.clone();
         let smoke = self.smoke;
-        let selected = self.selected;
+        let selected = self.selected.get();
+        let selected_state = self.selected.clone();
         let smoke_done = self.smoke_done.clone();
         let status = self.status.clone();
         let triangles = self.mesh.as_ref().map(|mesh| mesh.triangles).unwrap_or(0);
@@ -218,7 +220,7 @@ impl Render for DragonFruit {
             let width = (bounds.size.width.0 * scale).round().max(1.0) as u32;
             let height = (bounds.size.height.0 * scale).round().max(1.0) as u32;
             let mesh_ref = mesh.as_deref();
-            let base_color = mesh_color(selected);
+            let base_color = mesh_color(selected_state.get());
             if let Err(error) = state.render(
                 &device,
                 &queue,
@@ -306,6 +308,29 @@ impl Render for DragonFruit {
                 }
             }
         })
+        .on_mouse_down(MouseButton::Left, {
+            let camera = camera.clone();
+            let mesh = click_mesh.clone();
+            let entity = entity.clone();
+            move |event, window, cx| {
+                let Some(mesh) = mesh.as_ref() else {
+                    return;
+                };
+                let size = window.viewport_size();
+                let width = size.width.0.max(1.0);
+                let height = size.height.0.max(1.0);
+                let ndc_x = event.position.x.0 / width * 2.0 - 1.0;
+                let ndc_y = 1.0 - event.position.y.0 / height * 2.0;
+                let (origin, direction) = camera.borrow().ray(width / height, ndc_x, ndc_y);
+                let hit = stl::raycast(mesh, origin, direction);
+                entity
+                    .update(cx, |this, cx| {
+                        this.selected.set(hit);
+                        cx.notify();
+                    })
+                    .ok();
+            }
+        })
         .on_scroll_wheel({
             let camera = camera.clone();
             let entity = entity.clone();
@@ -372,7 +397,7 @@ impl Render for DragonFruit {
             .child(canvas)
             .child(top_bar(
                 mode,
-                status,
+                status.clone(),
                 triangles,
                 entity.clone(),
                 loading,
@@ -393,6 +418,22 @@ impl Render for DragonFruit {
             .child(orientation_cube(camera.clone(), entity.clone()))
             .child(info_card(mesh_name, triangles, size, volume))
             .child(layer_bar(layer, entity.clone(), self.window_width))
+            .child(
+                div()
+                    .absolute()
+                    .bottom(px(110.))
+                    .left(px(56.))
+                    .max_w(px(420.))
+                    .rounded(px(8.))
+                    .border_1()
+                    .border_color(rgb(BORDER_SUBTLE))
+                    .bg(rgb(SURFACE_0))
+                    .px(px(10.))
+                    .py(px(6.))
+                    .text_size(px(11.))
+                    .text_color(rgb(TEXT_MUTED))
+                    .child(status.clone()),
+            )
             .when(show_settings, |this| {
                 this.child(settings_modal(entity.clone()))
             })
@@ -480,7 +521,7 @@ fn top_bar(
         .on_click(move |_, _, cx| {
             selection_entity
                 .update(cx, |this, cx| {
-                    this.selected = !this.selected;
+                    this.selected.set(!this.selected.get());
                     cx.notify();
                 })
                 .ok();
@@ -758,7 +799,9 @@ fn left_panel(
         });
     }
 
+    let row_entity = entity.clone();
     let model_row = div()
+        .id("model-row")
         .flex()
         .items_center()
         .gap(px(8.))
@@ -766,6 +809,14 @@ fn left_panel(
         .py(px(8.))
         .rounded(px(6.))
         .bg(rgb(SURFACE_1))
+        .on_click(move |_, _, cx| {
+            row_entity
+                .update(cx, |this, cx| {
+                    this.selected.set(!this.selected.get());
+                    cx.notify();
+                })
+                .ok();
+        })
         .child(
             div()
                 .w(px(18.))

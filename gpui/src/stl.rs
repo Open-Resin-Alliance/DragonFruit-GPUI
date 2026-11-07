@@ -125,6 +125,38 @@ pub fn load_stl(path: &Path) -> Result<MeshData> {
     })
 }
 
+/// Whether a world-space ray hits the model, by Moller-Trumbore.
+pub fn raycast(mesh: &MeshData, origin: GVec3, direction: GVec3) -> bool {
+    let direction = direction.normalize();
+    for triangle in mesh.vertices.chunks_exact(3) {
+        let a = GVec3::from_array(triangle[0].pos);
+        let b = GVec3::from_array(triangle[1].pos);
+        let c = GVec3::from_array(triangle[2].pos);
+        let edge1 = b - a;
+        let edge2 = c - a;
+        let pvec = direction.cross(edge2);
+        let det = edge1.dot(pvec);
+        if det.abs() < 1e-8 {
+            continue;
+        }
+        let inv = 1.0 / det;
+        let tvec = origin - a;
+        let u = tvec.dot(pvec) * inv;
+        if !(0.0..=1.0).contains(&u) {
+            continue;
+        }
+        let qvec = tvec.cross(edge1);
+        let v = direction.dot(qvec) * inv;
+        if v < 0.0 || u + v > 1.0 {
+            continue;
+        }
+        if direction.dot(qvec) * inv > 0.0 {
+            return true;
+        }
+    }
+    false
+}
+
 fn convex_hull(points: &[Vec3]) -> Vec<[f32; 2]> {
     let mut sorted: Vec<[f32; 2]> = points.iter().map(|p| [p.x, p.y]).collect();
     sorted.sort_by(|a, b| {

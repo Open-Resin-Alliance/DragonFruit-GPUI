@@ -50,6 +50,16 @@ impl Camera {
         self.projection(aspect) * view
     }
 
+    /// A world-space ray through a normalised device coordinate.
+    pub fn ray(&self, aspect: f32, ndc_x: f32, ndc_y: f32) -> (Vec3, Vec3) {
+        let inverse = self.view_proj(aspect).inverse();
+        let near = inverse * glam::Vec4::new(ndc_x, ndc_y, 0.0, 1.0);
+        let far = inverse * glam::Vec4::new(ndc_x, ndc_y, 1.0, 1.0);
+        let near = near.truncate() / near.w;
+        let far = far.truncate() / far.w;
+        (near, (far - near).normalize())
+    }
+
     pub fn orbit(&mut self, dx: f32, dy: f32) {
         self.yaw -= dx * 0.008;
         self.pitch = (self.pitch + dy * 0.008).clamp(-1.45, 1.45);
