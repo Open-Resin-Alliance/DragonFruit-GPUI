@@ -93,6 +93,8 @@ pub struct Viewport {
     support_buffer: wgpu::Buffer,
     support_vertex_count: u32,
     support_ptr: usize,
+    model_uniform: wgpu::Buffer,
+    model_bind: wgpu::BindGroup,
 }
 
 impl Viewport {
@@ -300,9 +302,42 @@ impl Viewport {
             }],
         };
 
+        let model_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("viewport model"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+        let mesh_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("viewport mesh"),
+                bind_group_layouts: &[Some(&uniform_layout), Some(&model_layout)],
+                immediate_size: 0,
+            });
+        let model_uniform = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("viewport model"),
+            size: 64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let model_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("viewport model"),
+            layout: &model_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: model_uniform.as_entire_binding(),
+            }],
+        });
         let mesh_pipeline = pipeline(
             device,
-            &uniform_pipeline_layout,
+            &mesh_pipeline_layout,
             &mesh_shader,
             &[Some(vertex_layout.clone())],
             wgpu::PrimitiveTopology::TriangleList,
@@ -660,6 +695,8 @@ impl Viewport {
             }),
             support_vertex_count: 0,
             support_ptr: 0,
+            model_uniform,
+            model_bind,
         })
     }
 
@@ -674,6 +711,7 @@ impl Viewport {
         mesh: Option<&MeshData>,
         supports: &[[f32; 3]],
         layers: ViewLayers,
+        model: glam::Mat4,
         camera: &Camera,
         base_color: [f32; 3],
         width: u32,
@@ -739,6 +777,11 @@ impl Viewport {
             }),
         );
 
+        queue.write_buffer(
+            &self.model_uniform,
+            0,
+            bytemuck::cast_slice(&model.to_cols_array_2d()),
+        );
         let support_ptr = supports.as_ptr() as usize;
         if support_ptr != self.support_ptr {
             self.support_ptr = support_ptr;
@@ -863,6 +906,7 @@ impl Viewport {
                     pass.draw(0..mesh.footprint_vertex_count, 0..1);
                 }
                 pass.set_pipeline(&self.mesh_pipeline);
+                pass.set_bind_group(1, &self.model_bind, &[]);
                 pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
                 pass.draw(0..mesh.vertex_count, 0..1);
             }
@@ -1500,6 +1544,11 @@ struct Uniforms {
 };
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
 
+struct Model {
+    matrix: mat4x4<f32>,
+};
+@group(1) @binding(0) var<uniform> model: Model;
+
 struct VertexOut {
     @builtin(position) position: vec4<f32>,
     @location(0) normal: vec3<f32>,
@@ -1514,9 +1563,10 @@ fn vs_main(
     @location(2) ao: f32,
 ) -> VertexOut {
     var out: VertexOut;
-    out.position = uniforms.view_proj * vec4<f32>(position, 1.0);
-    out.normal = normal;
-    out.world = position;
+    let world = model.matrix * vec4<f32>(position, 1.0);
+    out.position = uniforms.view_proj * world;
+    out.normal = (model.matrix * vec4<f32>(normal, 0.0)).xyz;
+    out.world = world.xyz;
     out.ao = ao;
     return out;
 }

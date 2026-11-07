@@ -90,6 +90,9 @@ struct DragonFruit {
     show_grid: bool,
     show_plate: bool,
     show_box: bool,
+    translate: [f32; 3],
+    rotate_z: f32,
+    scale: f32,
     focus: FocusHandle,
     focused: bool,
     show_printer_menu: bool,
@@ -129,6 +132,9 @@ impl DragonFruit {
             show_grid: true,
             show_plate: true,
             show_box: true,
+            translate: [0.0; 3],
+            rotate_z: 0.0,
+            scale: 1.0,
             focus: cx.focus_handle(),
             focused: false,
             show_printer_menu: false,
@@ -190,6 +196,11 @@ impl Render for DragonFruit {
         let mesh = self.mesh.clone();
         let click_mesh = self.mesh.clone();
         let supports = self.supports.clone();
+        let model_matrix = glam::Mat4::from_scale_rotation_translation(
+            glam::Vec3::splat(self.scale),
+            glam::Quat::from_rotation_z(self.rotate_z),
+            glam::Vec3::from_array(self.translate),
+        );
         let show_layers = viewport::ViewLayers {
             grid: self.show_grid,
             plate: self.show_plate,
@@ -245,6 +256,7 @@ impl Render for DragonFruit {
                 mesh_ref,
                 &supports.borrow(),
                 show_layers,
+                model_matrix,
                 &canvas_camera.borrow(),
                 base_color,
                 width,
@@ -342,6 +354,9 @@ impl Render for DragonFruit {
                 let ndc_x = event.position.x.0 / width * 2.0 - 1.0;
                 let ndc_y = 1.0 - event.position.y.0 / height * 2.0;
                 let (origin, direction) = camera.borrow().ray(width / height, ndc_x, ndc_y);
+                let inverse = model_matrix.inverse();
+                let origin = inverse.transform_point3(origin);
+                let direction = inverse.transform_vector3(direction);
                 let hit = stl::raycast(mesh, origin, direction);
                 entity
                     .update(cx, |this, cx| {
@@ -399,7 +414,12 @@ impl Render for DragonFruit {
                     _ => None,
                 };
                 let escape = key == "escape";
-                if next_mode.is_none() && !escape {
+                let reset = key == "r";
+                let transform = matches!(
+                    key,
+                    "left" | "right" | "up" | "down" | "pageup" | "pagedown"
+                );
+                if next_mode.is_none() && !escape && !reset && !transform {
                     return;
                 }
                 key_entity
@@ -407,8 +427,37 @@ impl Render for DragonFruit {
                         if escape {
                             this.show_settings = false;
                         }
+                        if reset {
+                            this.translate = [0.0; 3];
+                            this.rotate_z = 0.0;
+                            this.scale = 1.0;
+                        }
                         if let Some(mode) = next_mode {
                             this.mode = mode;
+                        }
+                        if transform {
+                            let step = 1.0;
+                            match this.active_tool {
+                                0 => match key {
+                                    "left" => this.translate[0] -= step,
+                                    "right" => this.translate[0] += step,
+                                    "up" => this.translate[1] += step,
+                                    "down" => this.translate[1] -= step,
+                                    "pageup" => this.translate[2] += step,
+                                    "pagedown" => this.translate[2] -= step,
+                                    _ => {}
+                                },
+                                1 => match key {
+                                    "left" => this.rotate_z -= 5f32.to_radians(),
+                                    "right" => this.rotate_z += 5f32.to_radians(),
+                                    _ => {}
+                                },
+                                _ => match key {
+                                    "up" => this.scale = (this.scale * 1.05).min(10.0),
+                                    "down" => this.scale = (this.scale / 1.05).max(0.1),
+                                    _ => {}
+                                },
+                            }
                         }
                         cx.notify();
                     })
@@ -1143,10 +1192,22 @@ fn support_card(
                     generate_entity
                         .update(cx, |this, cx| {
                             if let Some(mesh) = this.mesh.as_ref() {
+                                let model = glam::Mat4::from_scale_rotation_translation(
+                                    glam::Vec3::splat(this.scale),
+                                    glam::Quat::from_rotation_z(this.rotate_z),
+                                    glam::Vec3::from_array(this.translate),
+                                );
                                 let points = stl::overhang_points(mesh);
                                 let stride = (points.len() / 300).max(1);
-                                *this.supports.borrow_mut() =
-                                    points.into_iter().step_by(stride).collect();
+                                *this.supports.borrow_mut() = points
+                                    .into_iter()
+                                    .step_by(stride)
+                                    .map(|p| {
+                                        model
+                                            .transform_point3(glam::Vec3::from_array(p))
+                                            .to_array()
+                                    })
+                                    .collect();
                             }
                             cx.notify();
                         })
