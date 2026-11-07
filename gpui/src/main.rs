@@ -123,6 +123,7 @@ mod camera;
 mod empty_scene;
 mod fonts;
 mod icons;
+mod log;
 mod notifications;
 mod organic_cut_panel;
 mod overlays;
@@ -369,7 +370,9 @@ impl DragonFruit {
         *self.camera.borrow_mut() = Camera::fit(mesh.center, mesh.radius.max(110.0));
         // `useSlicingManager`: `numLayers = ceil(heightMm / layerHeightMm)`.
         self.num_layers = (mesh.size[2] / LAYER_HEIGHT_MM).ceil().max(0.0) as u32;
-        self.layer = 0.0;
+        // The source opens with the upper thumb at the top and the lower at the
+        // bottom, so the whole model is visible.
+        self.layer = self.num_layers as f32;
         self.lower_layer = 0.0;
         self.selected.set(true);
         self.mesh = Some(mesh);
@@ -1323,6 +1326,7 @@ fn main() {
             }),
             ..Default::default()
         });
+        log::log("gpui: opening window");
         cx.open_window(options, |_, cx| cx.new(DragonFruit::new))
             .expect("a window");
         cx.activate(true);

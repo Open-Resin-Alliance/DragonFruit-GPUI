@@ -159,8 +159,8 @@ const RIGHT_DRAG_THRESHOLD_SQ: f32 = 36.0;
 const MENU_EDGE_MARGIN: f32 = 8.0;
 /// `w-48` in `ContextMenu.tsx`.
 const MENU_WIDTH: f32 = 192.0;
-/// `FloatingPanelItem`'s inline `borderRadius: 12` — the panel's outer shape.
-const CARD_RADIUS: f32 = 12.0;
+/// `Card`'s `rounded-lg`, which reads the app's `--radius-lg` (14px).
+const CARD_RADIUS: f32 = 14.0;
 /// `ui-button !p-2` around a 12px chevron plus its 1px borders.
 const COLLAPSE_TOGGLE: f32 = 30.0;
 /// `h-3 w-3` on the collapse chevron.

@@ -41,11 +41,11 @@ pub const FONT_LG: f32 = 17.0;
 pub const FONT_XL: f32 = 22.0;
 pub const TOPBAR_HEIGHT: f32 = 52.0;
 
-// Tailwind v4 utility radii (globals.css only re-declares colours/fonts,
-// so `rounded-*` keeps the framework defaults).
-pub const ROUNDED_SM: f32 = 4.0;
-pub const ROUNDED_MD: f32 = 6.0;
-pub const ROUNDED_LG: f32 = 8.0;
+// Tailwind v4 utilities read the `--radius-*` theme variables, which the
+// app overrides in `:root` (6/10/14); `xl` keeps the framework default.
+pub const ROUNDED_SM: f32 = 6.0;
+pub const ROUNDED_MD: f32 = 10.0;
+pub const ROUNDED_LG: f32 = 14.0;
 pub const ROUNDED_XL: f32 = 12.0;
 
 pub const LINE_HEIGHT_TIGHT: f32 = 1.2;

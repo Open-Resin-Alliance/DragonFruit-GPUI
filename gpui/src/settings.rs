@@ -1220,6 +1220,13 @@ pub fn settings_modal(
     if !open {
         return div();
     }
+    {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        static LOGGED: AtomicBool = AtomicBool::new(false);
+        if !LOGGED.swap(true, Ordering::Relaxed) {
+            crate::log::log("settings: rendering open");
+        }
+    }
 
     // Snapshot the draft: holding the lock across `content` deadlocks because
     // the select fields lock it again to read `open_select`.

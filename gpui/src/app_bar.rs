@@ -599,6 +599,7 @@ pub fn app_bar(state: AppBarState, entity: WeakEntity<DragonFruit>) -> impl Into
         ToolbarTone::Secondary,
         actions_disabled,
         move |cx| {
+            crate::log::log("appbar: settings click");
             settings_entity
                 .update(cx, |this, cx| {
                     this.show_settings = true;
@@ -669,6 +670,7 @@ pub fn app_bar(state: AppBarState, entity: WeakEntity<DragonFruit>) -> impl Into
                 id = "app-bar-drag",
                 absolute, top_0, left_0, right_0, bottom_0,
                 on_mouse_down = move |_, window, _| {
+                    crate::log::log("appbar: drag layer");
                     start_window_drag(window);
                 },
             ) {}
@@ -988,7 +990,7 @@ fn window_button(
     ui! {
         div(
             w_32, h_32, flex, items_center, justify_center,
-            rounded_6, border,
+            rounded_6, border, cursor_pointer,
             border_color = rgb(mix(tint, BORDER_SUBTLE, 0.45)),
             bg = rgb(mix(tint, SURFACE_1, 1.0 - background_weight)),
             window_control_area = area,
