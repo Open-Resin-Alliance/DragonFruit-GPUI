@@ -209,6 +209,11 @@ pub struct Toast {
 
 struct DragonFruit {
     mesh: Option<Arc<stl::MeshData>>,
+    /// Time of the last frame, for the camera's real delta. The source drives
+    /// every tween from `requestAnimationFrame`'s timestamp, so the port must
+    /// not advance at a fixed step: a 144Hz window would finish a tween 2.4x
+    /// early.
+    last_frame: Option<std::time::Instant>,
     camera: Rc<RefCell<Camera>>,
     viewport: Rc<RefCell<Option<Viewport>>>,
     drag: Rc<Cell<Option<MouseButton>>>,
@@ -296,6 +301,7 @@ impl DragonFruit {
 
         let mut app = Self {
             mesh: None,
+            last_frame: None,
             camera: Rc::new(RefCell::new(Camera::parked(glam::Vec3::new(0.0, 0.0, 110.0)))),
             viewport: Rc::new(RefCell::new(None)),
             drag: Rc::new(Cell::new(None)),
@@ -508,7 +514,14 @@ impl Render for DragonFruit {
             eprintln!("window scale factor: {}", window.scale_factor());
         }
 
-        if self.camera.borrow_mut().step(1.0 / 60.0) {
+        let now = std::time::Instant::now();
+        let dt = self
+            .last_frame
+            .map(|last| now.duration_since(last).as_secs_f32())
+            .unwrap_or(1.0 / 60.0)
+            .clamp(1.0 / 1000.0, 0.1);
+        self.last_frame = Some(now);
+        if self.camera.borrow_mut().step(dt) {
             window.request_animation_frame();
         }
         if self.empty_scene.loading {
