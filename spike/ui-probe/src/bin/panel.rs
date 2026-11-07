@@ -165,7 +165,7 @@ fn panel_header() -> Div {
                 .child("Auto Supports (Beta)"),
         )
         .child(div().flex_1())
-        .child(icon_tile(SETTINGS, TEXT_MUTED, 14., 28.))
+        .child(icon_tile(SETTINGS, TEXT_MUTED, 14., 32.))
 }
 
 fn panel_body() -> Div {
