@@ -1202,6 +1202,20 @@ fn vs_main(@builtin(vertex_index) index: u32) -> @builtin(position) vec4<f32> {
     return vec4<f32>(corners[index], 0.0, 1.0);
 }
 
+fn linear_to_srgb(c: vec3<f32>) -> vec3<f32> {
+    let cutoff = step(c, vec3<f32>(0.0031308));
+    let low = c * 12.92;
+    let high = 1.055 * pow(c, vec3<f32>(1.0 / 2.4)) - 0.055;
+    return mix(high, low, cutoff);
+}
+
+fn srgb_to_linear(c: vec3<f32>) -> vec3<f32> {
+    let cutoff = step(c, vec3<f32>(0.04045));
+    let low = c / 12.92;
+    let high = pow((c + 0.055) / 1.055, vec3<f32>(2.4));
+    return mix(high, low, cutoff);
+}
+
 @fragment
 fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     let uv = frag.xy / uniforms.resolution;
@@ -1209,11 +1223,11 @@ fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     let ao = pow(textureSampleLevel(ao_tex, samp, uv, 0.0).r, 2.0);
     color = color * mix(1.0, ao, 1.0);
 
-    // SceneMoodOverlay: radial + linear pink/purple gradients, screen blend.
+    // SceneMoodOverlay: CSS screen blend happens in sRGB, not linear.
     let radial = length((uv - vec2<f32>(0.5, 0.46)) / vec2<f32>(1.2, 0.95));
     let radial_alpha = smoothstep(0.56, 1.0, radial) * 0.18 * 0.75;
-    let pink = vec3<f32>(1.0, 0.0382, 0.402);
-    let violet = vec3<f32>(0.158, 0.0331, 1.0);
+    let pink = vec3<f32>(1.0, 0.216, 0.667);
+    let violet = vec3<f32>(0.435, 0.2, 1.0);
     var linear_color = pink;
     var linear_alpha = 0.10 * 0.75;
     if (uv.y > 0.4) {
@@ -1226,7 +1240,8 @@ fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
         linear_alpha = mix(0.10 * 0.75, 0.06 * 0.75, k);
     }
     let overlay = pink * radial_alpha + linear_color * linear_alpha;
-    color = vec3<f32>(1.0) - (vec3<f32>(1.0) - color) * (vec3<f32>(1.0) - overlay);
-    return vec4<f32>(color, 1.0);
+    let scene_srgb = linear_to_srgb(color);
+    let blended = vec3<f32>(1.0) - (vec3<f32>(1.0) - scene_srgb) * (vec3<f32>(1.0) - overlay);
+    return vec4<f32>(srgb_to_linear(blended), 1.0);
 }
 "#;
