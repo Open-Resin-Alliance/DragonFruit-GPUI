@@ -38,6 +38,7 @@ const ACCENT: u32 = 0xec2a77;
 enum PanelDock {
     Left,
     Right,
+    Float,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -154,6 +155,9 @@ struct DragonFruit {
     left_width: f32,
     right_width: f32,
     dock_resize: Rc<Cell<Option<(bool, f32, f32)>>>,
+    panel_dock: std::collections::HashMap<&'static str, PanelDock>,
+    floating_pos: std::collections::HashMap<&'static str, (f32, f32)>,
+    panel_menu: Option<&'static str>,
     translate: [f32; 3],
     rotate_z: f32,
     scale: f32,
@@ -201,6 +205,9 @@ impl DragonFruit {
             left_width: 320.0,
             right_width: 320.0,
             dock_resize: Rc::new(Cell::new(None)),
+            panel_dock: std::collections::HashMap::new(),
+            floating_pos: std::collections::HashMap::new(),
+            panel_menu: None,
             translate: [0.0; 3],
             rotate_z: 0.0,
             scale: 1.0,
@@ -596,6 +603,9 @@ impl Render for DragonFruit {
                 self.left_width,
                 self.right_width,
                 self.dock_resize.clone(),
+                &self.panel_dock,
+                &self.floating_pos,
+                self.panel_menu,
             ))
             .child(orientation_cube(camera.clone(), entity.clone()))
             .child(layer_bar(layer, entity.clone(), self.window_width))
@@ -1206,16 +1216,25 @@ fn panel_stack(
     left_width: f32,
     right_width: f32,
     dock_resize: Rc<Cell<Option<(bool, f32, f32)>>>,
+    panel_dock: &std::collections::HashMap<&'static str, PanelDock>,
+    floating_pos: &std::collections::HashMap<&'static str, (f32, f32)>,
+    panel_menu: Option<&'static str>,
 ) -> impl IntoElement {
     let defs = panel_defs(mode);
+    let effective = |def: &PanelDef| panel_dock.get(def.id).copied().unwrap_or(def.dock);
     let left: Vec<PanelDef> = defs
         .iter()
-        .filter(|def| def.dock == PanelDock::Left)
+        .filter(|def| effective(def) == PanelDock::Left)
         .copied()
         .collect();
     let right: Vec<PanelDef> = defs
         .iter()
-        .filter(|def| def.dock == PanelDock::Right)
+        .filter(|def| effective(def) == PanelDock::Right)
+        .copied()
+        .collect();
+    let floating: Vec<PanelDef> = defs
+        .iter()
+        .filter(|def| effective(def) == PanelDock::Float)
         .copied()
         .collect();
     div()
@@ -1263,13 +1282,14 @@ fn panel_stack(
             volume,
             left_width,
             dock_resize.clone(),
+            panel_menu,
         ))
         .child(dock_column(
             right,
             PanelDock::Right,
             entity.clone(),
             collapsed,
-            mesh_name,
+            mesh_name.clone(),
             triangles,
             loading,
             support_count,
@@ -1277,7 +1297,32 @@ fn panel_stack(
             volume,
             right_width,
             dock_resize,
+            panel_menu,
         ))
+        .children(floating.into_iter().enumerate().map(|(index, def)| {
+            let (x, y) = floating_pos
+                .get(def.id)
+                .copied()
+                .unwrap_or((200.0 + index as f32 * 24.0, 120.0 + index as f32 * 24.0));
+            div()
+                .absolute()
+                .left(px(x))
+                .top(px(y))
+                .w(px(320.))
+                .child(panel_card(
+                    def,
+                    entity.clone(),
+                    collapsed.get(def.id).copied().unwrap_or(false),
+                    mesh_name.clone(),
+                    triangles,
+                    loading,
+                    support_count,
+                    size,
+                    volume,
+                    PanelDock::Float,
+                    panel_menu,
+                ))
+        }))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1294,6 +1339,7 @@ fn dock_column(
     volume: f32,
     width: f32,
     dock_resize: Rc<Cell<Option<(bool, f32, f32)>>>,
+    panel_menu: Option<&'static str>,
 ) -> impl IntoElement {
     let mut column = div()
         .absolute()
@@ -1306,6 +1352,7 @@ fn dock_column(
     column = match dock {
         PanelDock::Left => column.left(px(72.)),
         PanelDock::Right => column.right(px(6.)),
+        PanelDock::Float => column,
     };
     let handle = {
         let resize = dock_resize.clone();
@@ -1322,6 +1369,7 @@ fn dock_column(
         handle = match dock {
             PanelDock::Left => handle.right(px(-6.)),
             PanelDock::Right => handle.left(px(-6.)),
+            PanelDock::Float => handle,
         };
         handle
     };
@@ -1337,6 +1385,8 @@ fn dock_column(
             support_count,
             size,
             volume,
+            dock,
+            panel_menu,
         ));
     }
     column
@@ -1353,8 +1403,11 @@ fn panel_card(
     support_count: usize,
     size: [f32; 3],
     volume: f32,
+    dock: PanelDock,
+    panel_menu: Option<&'static str>,
 ) -> impl IntoElement {
     let toggle_entity = entity.clone();
+    let menu_entity = entity.clone();
     let id = def.id;
     let body = match def.kind {
         PanelKind::Models => models_body(mesh_name, triangles, entity.clone(), loading),
@@ -1363,7 +1416,94 @@ fn panel_card(
         PanelKind::Printing => printing_body(),
         PanelKind::Info => info_body(mesh_name, triangles, size, volume),
     };
+    let float_entity = entity.clone();
+    let left_entity = entity.clone();
+    let right_entity = entity.clone();
+    let menu = if panel_menu == Some(id) {
+        div()
+            .absolute()
+            .top(px(36.))
+            .right(px(6.))
+            .w(px(140.))
+            .rounded(px(8.))
+            .border_1()
+            .border_color(rgb(BORDER_SUBTLE))
+            .bg(rgb(SURFACE_1))
+            .p(px(4.))
+            .flex()
+            .flex_col()
+            .gap(px(2.))
+            .child(
+                div()
+                    .id("menu-float")
+                    .h(px(26.))
+                    .px(px(8.))
+                    .flex()
+                    .items_center()
+                    .rounded(px(4.))
+                    .text_size(px(11.))
+                    .text_color(rgb(TEXT_MUTED))
+                    .hover(|style| style.bg(rgb(SURFACE_2)))
+                    .child("Float")
+                    .on_click(move |_, _, cx| {
+                        float_entity
+                            .update(cx, |this, cx| {
+                                this.panel_dock.insert(id, PanelDock::Float);
+                                this.panel_menu = None;
+                                cx.notify();
+                            })
+                            .ok();
+                    }),
+            )
+            .child(
+                div()
+                    .id("menu-dock-left")
+                    .h(px(26.))
+                    .px(px(8.))
+                    .flex()
+                    .items_center()
+                    .rounded(px(4.))
+                    .text_size(px(11.))
+                    .text_color(rgb(TEXT_MUTED))
+                    .hover(|style| style.bg(rgb(SURFACE_2)))
+                    .child("Dock left")
+                    .on_click(move |_, _, cx| {
+                        left_entity
+                            .update(cx, |this, cx| {
+                                this.panel_dock.insert(id, PanelDock::Left);
+                                this.panel_menu = None;
+                                cx.notify();
+                            })
+                            .ok();
+                    }),
+            )
+            .child(
+                div()
+                    .id("menu-dock-right")
+                    .h(px(26.))
+                    .px(px(8.))
+                    .flex()
+                    .items_center()
+                    .rounded(px(4.))
+                    .text_size(px(11.))
+                    .text_color(rgb(TEXT_MUTED))
+                    .hover(|style| style.bg(rgb(SURFACE_2)))
+                    .child("Dock right")
+                    .on_click(move |_, _, cx| {
+                        right_entity
+                            .update(cx, |this, cx| {
+                                this.panel_dock.insert(id, PanelDock::Right);
+                                this.panel_menu = None;
+                                cx.notify();
+                            })
+                            .ok();
+                    }),
+            )
+    } else {
+        div()
+    };
     div()
+        .relative()
         .w_full()
         .rounded(px(8.))
         .border_1()
@@ -1382,27 +1522,65 @@ fn panel_card(
                 .justify_between()
                 .child(
                     div()
+                        .id(format!("panel-title-{id}"))
+                        .flex_1()
                         .text_size(px(14.))
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(rgb(TEXT_STRONG))
-                        .child(def.title),
+                        .child(def.title)
+                        .on_click(move |_, _, cx| {
+                            toggle_entity
+                                .update(cx, |this, cx| {
+                                    let entry = this.collapsed.entry(id).or_insert(false);
+                                    *entry = !*entry;
+                                    cx.notify();
+                                })
+                                .ok();
+                        }),
                 )
-                .child(icon(
-                    if collapsed { "chevron-right" } else { "chevron-down" },
-                    14.,
-                    TEXT_MUTED,
-                ))
-                .on_click(move |_, _, cx| {
-                    toggle_entity
-                        .update(cx, |this, cx| {
-                            let entry = this.collapsed.entry(id).or_insert(false);
-                            *entry = !*entry;
-                            cx.notify();
-                        })
-                        .ok();
-                }),
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(4.))
+                        .child(icon(
+                            if collapsed { "chevron-right" } else { "chevron-down" },
+                            14.,
+                            TEXT_MUTED,
+                        ))
+                        .child(
+                            div()
+                                .id(format!("panel-menu-{id}"))
+                                .w(px(18.))
+                                .h(px(18.))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .rounded(px(4.))
+                                .text_size(px(12.))
+                                .text_color(rgb(TEXT_MUTED))
+                                .child("\u{22EE}")
+                                .on_click(move |_, _, cx| {
+                                    menu_entity
+                                        .update(cx, |this, cx| {
+                                            this.panel_menu =
+                                                if this.panel_menu == Some(id) {
+                                                    None
+                                                } else {
+                                                    Some(id)
+                                                };
+                                            cx.notify();
+                                        })
+                                        .ok();
+                                }),
+                        ),
+                ),
         )
         .when(!collapsed, |this| this.child(body))
+        .child(menu)
+        .when(dock == PanelDock::Float, |this| {
+            this.border_color(rgb(ACCENT))
+        })
 }
 
 fn models_body(
