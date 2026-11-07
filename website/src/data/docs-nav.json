@@ -262,6 +262,14 @@
             {
               "label": "Render Profiler",
               "slug": "dev/render-profiler"
+            },
+            {
+              "label": "GPUI Crate and Module Split",
+              "slug": "dev/gpui-crate-split"
+            },
+            {
+              "label": "GPUI Port Parity",
+              "slug": "dev/gpui-port-parity"
             }
           ]
         },

@@ -1,21 +1,6 @@
 //! Process state owned by `DragonFruit` and shared by every feature crate.
 
-use std::cell::{Cell, RefCell};
-use std::path::{Path, PathBuf};
-use std::rc::Rc;
-use std::sync::Arc;
-use std::time::Duration;
-
-use gpui::{App, Context, FocusHandle, MouseButton};
-
-use crate::camera::Camera;
-use crate::empty_state::{EmptySceneState, ModelStatsCardState};
-use crate::panel_layout::PanelLayout;
-use crate::stl;
-use crate::support_state::{
-    HolePunchState, HollowingState, IslandListState, IslandsPanelState, SupportSettingsState,
-};
-use crate::viewport::Viewport;
+use std::path::PathBuf;
 
 /// `MESH_SHADER_TYPES` order.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]

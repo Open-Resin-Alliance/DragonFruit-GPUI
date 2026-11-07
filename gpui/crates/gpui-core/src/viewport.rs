@@ -2226,13 +2226,6 @@ fn axis_arrows(metrics: &PlateMetrics) -> Vec<[f32; 6]> {
         ([0.0, 0.0, 1.0], 0x21428d, 0x0000ff),
     ];
     let mut out: Vec<[f32; 6]> = Vec::new();
-    macro_rules! push {
-        ($point:expr, $color:expr) => {
-            out.push([
-                $point[0], $point[1], $point[2], $color[0], $color[1], $color[2],
-            ])
-        };
-    }
     for (dir, base_hex, tip_hex) in axes {
         let _base = srgb_linear(base_hex);
         let tip = srgb_linear(tip_hex);

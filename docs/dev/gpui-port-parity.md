@@ -42,6 +42,9 @@ substitute. A module without that block has not been audited.
 |---|---|---|
 | `theme.rs` | `src/app/globals.css` `:root` | generated |
 | `icons.rs` + `assets/icons` | every `lucide-react` import | generated |
+
+The generated SVGs are Lucide's, under the ISC license; the notice and the
+provenance are in `gpui/assets/icons/LICENSE`.
 | `ui::button` | `atoms/Button.tsx` + `.ui-button*` | ported |
 | `ui::icon_button` | `atoms/IconButton.tsx` | ported |
 | `ui::card` / `card_header` | `atoms/Card.tsx` | ported |

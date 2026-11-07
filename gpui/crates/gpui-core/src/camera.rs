@@ -41,7 +41,9 @@ struct Tween {
 const ROTATE_SPEED: f32 = 0.72 * SENSITIVITY;
 const PAN_SPEED: f32 = 0.82 * SENSITIVITY;
 const ZOOM_SPEED: f32 = 1.25 * ZOOM_SENSITIVITY;
-const DAMPING: f32 = 0.15;
+// The preset's `dampingFactor 0.15` is not a constant here: OrbitControls applies
+// it per frame, so the port expresses it as the settle rate below, chosen to sum
+// to the same motion at 60 Hz.
 /// Gesture gain on top of the 'precise' preset.
 const SENSITIVITY: f32 = 0.7;
 const ZOOM_SENSITIVITY: f32 = 0.75;
@@ -231,14 +233,12 @@ impl Camera {
         }
 
         // OrbitControls applies the whole pending delta, then decays it.
-        let mut moving = false;
-        const LIMIT: f32 = std::f32::consts::FRAC_PI_2 - 0.001;
         // Framerate-independent exponential smoothing. While the pointer drags
         // the rate is high (the view tracks the hand); after release it drops
         // to the soft settling rate, which is the visible tail.
         let rate = if self.dragging { 45.0 } else { 14.0 };
         let alpha = 1.0 - (-rate * dt).exp();
-        let mut approach = |value: &mut f32, goal: f32, eps: f32| {
+        let approach = |value: &mut f32, goal: f32, eps: f32| {
             let delta = goal - *value;
             if delta.abs() > eps {
                 *value += delta * alpha;
