@@ -82,6 +82,11 @@ pub(crate) struct DragonFruit {
     pub(crate) last_frame: Option<std::time::Instant>,
     pub(crate) camera: Rc<RefCell<Camera>>,
     pub(crate) viewport: Rc<RefCell<Option<Viewport>>>,
+    /// A live grab: the plate-plane point under the pointer at press time and
+    /// the translation the model had then. A ray/plane hit is angle-correct; a
+    /// per-pixel scale is not — at a low camera angle vertical pointer travel
+    /// covers far less plate distance.
+    pub(crate) grab: Option<(glam::Vec3, [f32; 3])>,
     pub(crate) drag: Rc<Cell<Option<MouseButton>>>,
     pub(crate) last: Rc<Cell<(f32, f32)>>,
     /// Written by `app_bar` (New scene) and `panel_content` (export). The
@@ -170,6 +175,7 @@ impl DragonFruit {
             last_frame: None,
             camera: Rc::new(RefCell::new(Camera::parked(glam::Vec3::new(0.0, 0.0, 110.0)))),
             viewport: Rc::new(RefCell::new(None)),
+            grab: None,
             drag: Rc::new(Cell::new(None)),
             last: Rc::new(Cell::new((0.0, 0.0))),
             status: String::new(),
@@ -398,9 +404,11 @@ impl Render for DragonFruit {
         // `cameraInteractionCycleEnabled = hasModelsOnPlate && ...`: nothing on
         // the plate means the empty scene does not answer the pointer.
         let camera_enabled = Rc::new(Cell::new(self.mesh.is_some()));
-        // Grab mode (`active_tool == 1`, the Move tool): a left drag on the model
-        // slides it across the plate instead of selecting.
-        let grab_mode = self.active_tool == 1;
+        // Grab: a left drag that lands on the model slides it across the plate.
+        // The source moves the model under the pointer in every prepare tool, not
+        // only the Move tool.
+        let grab_mode = self.mesh.is_some();
+        let model_z = self.translate[2];
         let supports = self.supports.clone();
         let model_matrix = glam::Mat4::from_scale_rotation_translation(
             glam::Vec3::splat(self.scale),
@@ -549,9 +557,11 @@ impl Render for DragonFruit {
         })
         .on_mouse_up(MouseButton::Left, {
             let drag = drag.clone();
-            move |_, _, _| {
+            let entity = entity.clone();
+            move |_, _, cx| {
                 if drag.get() == Some(MouseButton::Left) {
                     drag.set(None);
+                    entity.update(cx, |this, _| this.grab = None).ok();
                 }
             }
         })
@@ -589,20 +599,23 @@ impl Render for DragonFruit {
                     let dy = event.position.y.0 - ly;
                     last.set((event.position.x.0, event.position.y.0));
                     if button == MouseButton::Left {
-                        // Screen pixels to plate millimetres: the ortho frustum's
-                        // height at the model is `2 * tan(fov/2) * distance`.
-                        let height = window.viewport_size().height.0.max(1.0);
-                        let (fov, distance) = {
+                        let size = window.viewport_size();
+                        let width = size.width.0.max(1.0);
+                        let height = size.height.0.max(1.0);
+                        let ndc_x = event.position.x.0 / width * 2.0 - 1.0;
+                        let ndc_y = 1.0 - event.position.y.0 / height * 2.0;
+                        let plane_hit = {
                             let camera = camera.borrow();
-                            (camera.fov_y, camera.distance)
+                            plane_hit(&camera, width / height, ndc_x, ndc_y, 0.0)
                         };
-                        let world_per_px = 2.0 * (fov * 0.5).tan() * distance / height;
                         entity
                             .update(cx, |this, cx| {
-                                this.translate[0] += dx * world_per_px;
-                                // Screen +Y is down; the plate's +Y is back.
-                                this.translate[1] -= dy * world_per_px;
-                                cx.notify();
+                                if let (Some(now), Some((origin, base))) = (plane_hit, this.grab) {
+                                    let delta = now - origin;
+                                    this.translate[0] = base[0] + delta.x;
+                                    this.translate[1] = base[1] + delta.y;
+                                    cx.notify();
+                                }
                             })
                             .ok();
                         return;
@@ -663,6 +676,16 @@ impl Render for DragonFruit {
                     // the button, so a grab and an orbit cannot both be live.
                     drag.set(Some(MouseButton::Left));
                     last.set((event.position.x.0, event.position.y.0));
+                    let plane_hit = plane_hit(
+                        &camera.borrow(),
+                        width / height,
+                        ndc_x,
+                        ndc_y,
+                        model_z,
+                    );
+                    entity
+                        .update(cx, |this, _| this.grab = plane_hit.map(|hit| (hit, this.translate)))
+                        .ok();
                     return;
                 }
                 entity
@@ -1283,6 +1306,17 @@ fn srgb_to_linear(channel: u8) -> f32 {
 
 /// `blendTintColor` from `src/features/shaders/mesh/tint.ts`: linear lerp from
 /// the unselected `#a3a3a3` toward the theme selection `#ec2a77` at 0.70.
+
+/// Where the pointer's ray meets the plate plane at `z`.
+fn plane_hit(camera: &Camera, aspect: f32, ndc_x: f32, ndc_y: f32, z: f32) -> Option<glam::Vec3> {
+    let (origin, direction) = camera.ray(aspect, ndc_x, ndc_y);
+    if direction.z.abs() < 1e-6 {
+        return None;
+    }
+    let t = (z - origin.z) / direction.z;
+    (t > 0.0).then(|| origin + direction * t)
+}
+
 fn mesh_color(selected: bool, hovered: bool) -> [f32; 3] {
     // Calibrated against the real app's selected poussin render: the model's
     // material is a saturated pink, not the #a3a3a3 default blended with the

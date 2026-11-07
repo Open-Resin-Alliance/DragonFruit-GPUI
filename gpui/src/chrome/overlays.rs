@@ -597,6 +597,7 @@ pub fn layer_slider(
         .child(thumb_body(thumb_color, upper_badge, 1.0));
 
     // -- rail ----------------------------------------------------------------
+    let hovered_face: Rc<Cell<Option<usize>>> = Rc::new(Cell::new(None));
     let bounds_for_canvas = bounds.clone();
     let rail = div()
         .id("layer-slider-rail")
@@ -1337,10 +1338,12 @@ pub fn view_cube(
     entity: WeakEntity<DragonFruit>,
 ) -> impl IntoElement {
     let bounds: Rc<Cell<Option<Bounds<Pixels>>>> = Rc::new(Cell::new(None));
+    let hovered_face: Rc<Cell<Option<usize>>> = Rc::new(Cell::new(None));
 
     let bounds_for_canvas = bounds.clone();
     let paint_camera = camera.clone();
     let cube_viewport = viewport.clone();
+    let cube_hovered = hovered_face.clone();
 
     div()
         .id("view-cube")
@@ -1377,7 +1380,7 @@ pub fn view_cube(
                     &device,
                     &queue,
                     &camera,
-                    None,
+                    cube_hovered.get(),
                     [0xba as f32 / 255.0, 0xf7 as f32 / 255.0, 0x2e as f32 / 255.0],
                 );
                 drop(camera);
@@ -1394,7 +1397,33 @@ pub fn view_cube(
             .size_full(),
         )
         // Repaint so the hover tint follows the pointer.
-        .on_mouse_move(|_, window, _| window.refresh())
+        // `hover` tints the face under the pointer with the gizmo accent.
+        .on_mouse_move({
+            let bounds = bounds.clone();
+            let camera = camera.clone();
+            let hovered_face = hovered_face.clone();
+            move |event, window, _| {
+                let hit = bounds.get().and_then(|bounds| {
+                    let size = bounds.size.width.0.min(bounds.size.height.0);
+                    let center = [
+                        bounds.origin.x.0 + size * 0.5,
+                        bounds.origin.y.0 + size * 0.5,
+                    ];
+                    let pointer = [event.position.x.0, event.position.y.0];
+                    let camera = camera.borrow();
+                    let view = cube_view(&camera, center);
+                    let faces = project_faces(&view);
+                    match cube_hit(&view, &faces, pointer) {
+                        Some(CubeHit::Face(index)) => Some(index),
+                        _ => None,
+                    }
+                });
+                if hovered_face.get() != hit {
+                    hovered_face.set(hit);
+                    window.refresh();
+                }
+            }
+        })
         .on_click({
             let bounds = bounds.clone();
             let camera = camera.clone();
@@ -1427,11 +1456,7 @@ pub fn view_cube(
                     CubeHit::Corner(index) => rotate_gizmo(CORNER_DIRS[index]),
                 };
                 let (yaw, pitch) = direction_to_yaw_pitch(direction);
-                {
-                    let mut camera = camera.borrow_mut();
-                    camera.yaw = yaw;
-                    camera.pitch = pitch;
-                }
+                camera.borrow_mut().orient_to(yaw, pitch);
                 entity.update(cx, |_, cx| cx.notify()).ok();
             }
         })

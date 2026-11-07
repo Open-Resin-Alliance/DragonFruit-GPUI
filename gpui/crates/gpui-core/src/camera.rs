@@ -85,6 +85,15 @@ impl Camera {
         camera
     }
 
+    /// Aim the camera without a tween: the smoothing goals are what `step`
+    /// eases toward, so writing `yaw`/`pitch` alone is undone on the next frame
+    /// (the view cube snapped back to its old angle for exactly that reason).
+    pub fn orient_to(&mut self, yaw: f32, pitch: f32) {
+        self.goal_yaw = yaw;
+        self.goal_pitch = pitch;
+        self.tween = None;
+    }
+
     pub fn eye(&self) -> Vec3 {
         let cp = self.pitch.cos();
         self.target
