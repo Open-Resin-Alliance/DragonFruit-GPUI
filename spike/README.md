@@ -119,6 +119,10 @@ a tooltip — the controls a printer/material settings panel needs.
 This crate is deliberately separate from `gpui-probe`: the component library
 and `gpui_interop` are published against different, incompatible GPUI lines.
 
+Result on Windows: builds (3m34s cold, dependencies at `opt-level = 2`) and
+renders the panel. The component line is usable; the cost is carrying two GPUI
+trees in one product.
+
 ## Ecosystem note
 
 The GPUI ecosystem is split across incompatible lines. This is the main
