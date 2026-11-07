@@ -127,10 +127,11 @@ pub fn load_stl(path: &Path) -> Result<MeshData> {
 
 /// Centroids of downward-facing triangles above the plate, the points a
 /// support preview drops from.
-pub fn overhang_points(mesh: &MeshData) -> Vec<[f32; 3]> {
+pub fn overhang_points(mesh: &MeshData, angle_degrees: f32) -> Vec<[f32; 3]> {
+    let threshold = -angle_degrees.to_radians().cos();
     let mut points = Vec::new();
     for triangle in mesh.vertices.chunks_exact(3) {
-        if triangle[0].normal[2] > -0.5 {
+        if triangle[0].normal[2] > threshold {
             continue;
         }
         let a = triangle[0].pos;

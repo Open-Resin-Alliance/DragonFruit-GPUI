@@ -93,6 +93,7 @@ struct DragonFruit {
     translate: [f32; 3],
     rotate_z: f32,
     scale: f32,
+    support_angle: f32,
     focus: FocusHandle,
     focused: bool,
     show_printer_menu: bool,
@@ -135,6 +136,7 @@ impl DragonFruit {
             translate: [0.0; 3],
             rotate_z: 0.0,
             scale: 1.0,
+            support_angle: 45.0,
             focus: cx.focus_handle(),
             focused: false,
             show_printer_menu: false,
@@ -521,7 +523,10 @@ impl Render for DragonFruit {
                 this.child(help_modal(entity.clone()))
             })
             .when(self.show_support_settings, |this| {
-                this.child(support_settings_modal(entity.clone()))
+                this.child(support_settings_modal(
+                    entity.clone(),
+                    self.support_angle,
+                ))
             })
     }
 }
@@ -1197,7 +1202,7 @@ fn support_card(
                                     glam::Quat::from_rotation_z(this.rotate_z),
                                     glam::Vec3::from_array(this.translate),
                                 );
-                                let points = stl::overhang_points(mesh);
+                                let points = stl::overhang_points(mesh, this.support_angle);
                                 let stride = (points.len() / 300).max(1);
                                 *this.supports.borrow_mut() = points
                                     .into_iter()
@@ -1559,8 +1564,13 @@ fn settings_modal(
         )
 }
 
-fn support_settings_modal(entity: WeakEntity<DragonFruit>) -> impl IntoElement {
+fn support_settings_modal(
+    entity: WeakEntity<DragonFruit>,
+    angle: f32,
+) -> impl IntoElement {
     let close_entity = entity.clone();
+    let minus_entity = entity.clone();
+    let plus_entity = entity.clone();
     div()
         .absolute()
         .top(px(0.))
@@ -1617,7 +1627,68 @@ fn support_settings_modal(entity: WeakEntity<DragonFruit>) -> impl IntoElement {
                         ),
                 )
                 .child(modal_row("Density", "0.50"))
-                .child(modal_row("Overhang angle", "45°"))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .h(px(32.))
+                        .px(px(10.))
+                        .rounded(px(6.))
+                        .bg(rgb(SURFACE_1))
+                        .text_size(px(11.))
+                        .text_color(rgb(TEXT_MUTED))
+                        .child("Overhang angle")
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(8.))
+                                .child(
+                                    div()
+                                        .id("angle-minus")
+                                        .w(px(22.))
+                                        .h(px(22.))
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .rounded(px(4.))
+                                        .bg(rgb(SURFACE_2))
+                                        .child("\u{2212}")
+                                        .on_click(move |_, _, cx| {
+                                            minus_entity
+                                                .update(cx, |this, cx| {
+                                                    this.support_angle =
+                                                        (this.support_angle - 5.0).max(5.0);
+                                                    cx.notify();
+                                                })
+                                                .ok();
+                                        }),
+                                )
+                                .child(format!("{angle:.0}°"))
+                                .child(
+                                    div()
+                                        .id("angle-plus")
+                                        .w(px(22.))
+                                        .h(px(22.))
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .rounded(px(4.))
+                                        .bg(rgb(SURFACE_2))
+                                        .child("+")
+                                        .on_click(move |_, _, cx| {
+                                            plus_entity
+                                                .update(cx, |this, cx| {
+                                                    this.support_angle =
+                                                        (this.support_angle + 5.0).min(85.0);
+                                                    cx.notify();
+                                                })
+                                                .ok();
+                                        }),
+                                ),
+                        ),
+                )
                 .child(modal_row("Preset", "Default"))
                 .child(modal_row("Stability", "Balanced")),
         )
