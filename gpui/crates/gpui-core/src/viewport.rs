@@ -3078,10 +3078,11 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let n = normalize(in.normal);
     let view_dir = normalize(uniforms.camera_pos - in.world);
     // The headlight is a directional light along the view axis (`ViewHeadlight`
-    // targets `position + viewDir * 100`). Using the uniform keeps the lighting
-    // stable when the ortho dolly carries the camera through the model, where
-    // `camera_pos - world` flips sign per fragment.
-    let head_dir = normalize(-uniforms.headlight_dir);
+    // targets `position + viewDir * 100`); `headlight_dir` is the scene-to-
+    // camera vector, i.e. the surface-to-light direction. Using the uniform
+    // keeps the lighting stable when the ortho dolly carries the camera
+    // through the model, where `camera_pos - world` flips sign per fragment.
+    let head_dir = normalize(uniforms.headlight_dir);
 
     let key_dir = normalize(vec3<f32>(0.0, 0.0, 1.0));
     let fill_dir = normalize(vec3<f32>(0.0, 0.0, -1.0));
@@ -3272,11 +3273,6 @@ fn vs_main(@location(0) position: vec3<f32>, @location(1) normal: vec3<f32>) -> 
 fn fs_main(in: PlateOut) -> @location(0) vec4<f32> {
     let n = normalize(in.normal);
     let view_dir = normalize(uniforms.camera_pos - in.world);
-    // The headlight is a directional light along the view axis (`ViewHeadlight`
-    // targets `position + viewDir * 100`). Using the uniform keeps the lighting
-    // stable when the ortho dolly carries the camera through the model, where
-    // `camera_pos - world` flips sign per fragment.
-    let head_dir = normalize(-uniforms.headlight_dir);
 
     // `meshStandardMaterial` with the defaults: roughness 1, metalness 0, so F0
     // is the dielectric 0.04 and the diffuse term carries the whole albedo.

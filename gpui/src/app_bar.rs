@@ -712,13 +712,16 @@ fn bar_surface() -> Div {
                     linear_color_stop(rgba(0x11121600), 1.0),
                 )),
         )
+        // The accent layers stop where the mask is still 1.0 (86%): below
+        // that the surface fades out, and a constant-alpha accent would leave
+        // a visible edge instead of blending into the scene.
         .child(
             div()
                 .absolute()
                 .top_0()
-                .bottom_0()
                 .left_0()
                 .w(relative(0.45))
+                .h(relative(0.86))
                 .bg(linear_gradient(
                     90.0,
                     linear_color_stop(rgba(accent_left), 0.0),
@@ -729,9 +732,9 @@ fn bar_surface() -> Div {
             div()
                 .absolute()
                 .top_0()
-                .bottom_0()
                 .left(relative(0.45))
                 .right_0()
+                .h(relative(0.86))
                 .bg(linear_gradient(
                     90.0,
                     linear_color_stop(rgba(accent_mid), 0.0),
