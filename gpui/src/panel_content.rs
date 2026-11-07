@@ -222,7 +222,7 @@ fn solid_icon(
 /// `rounded-md border p-2` with the panels' shared inset fill.
 fn section_card() -> Div {
     div()
-        .rounded(px(RADIUS_MD))
+        .rounded(px(ROUNDED_MD))
         .border_1()
         .border_color(rgb(BORDER_SUBTLE))
         .bg(rgb(SURFACE_1))
@@ -677,7 +677,7 @@ pub fn supports_body(count: usize, entity: WeakEntity<DragonFruit>) -> impl Into
     // PORT GAP: no island scanner — Voxel and Minima are 0, Total is the
     // generated support count, and the `…` scanning state never renders.
     let counts = div()
-        .rounded(px(RADIUS_MD))
+        .rounded(px(ROUNDED_MD))
         .border_1()
         .border_color(rgb(BORDER_SUBTLE))
         .bg(rgb(SURFACE_1))
@@ -1149,7 +1149,7 @@ pub fn printing_body(_entity: WeakEntity<DragonFruit>) -> impl IntoElement {
     // `rounded-md border p-2.5 space-y-1`: flat label/value pairs, with `mt-1`
     // on every label after the first.
     let settings = div()
-        .rounded(px(RADIUS_MD))
+        .rounded(px(ROUNDED_MD))
         .border_1()
         .border_color(rgb(BORDER_SUBTLE))
         .bg(rgb(SURFACE_1))
@@ -1168,7 +1168,7 @@ pub fn printing_body(_entity: WeakEntity<DragonFruit>) -> impl IntoElement {
 
     // `rounded-md border p-2.5 space-y-1`.
     let generated = div()
-        .rounded(px(RADIUS_MD))
+        .rounded(px(ROUNDED_MD))
         .border_1()
         .border_color(rgb(BORDER_SUBTLE))
         .bg(rgb(SURFACE_1))

@@ -472,7 +472,7 @@ pub fn toggle_button(
         .flex()
         .items_center()
         .justify_center()
-        .rounded(px(RADIUS_MD))
+        .rounded(px(ROUNDED_MD))
         .border_1()
         .border_color(rgb(border))
         .bg(rgb(background))
@@ -488,7 +488,7 @@ pub fn toggle_button(
 /// section of the Transform, Arrange, Duplicate, Smoothing and Split panels uses.
 pub fn sub_card(border: u32, background: u32) -> Div {
     div()
-        .rounded(px(RADIUS_MD))
+        .rounded(px(ROUNDED_MD))
         .border_1()
         .border_color(rgb(border))
         .bg(rgb(background))

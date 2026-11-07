@@ -733,7 +733,7 @@ pub fn orientation_body(
         };
         body = body.child(
             div()
-                .rounded(px(RADIUS_MD))
+                .rounded(px(ROUNDED_MD))
                 .border_1()
                 .border_color(rgb(mix(ACCENT_SECONDARY, BORDER_SUBTLE, 0.58)))
                 .bg(rgb(mix(ACCENT_SECONDARY, SURFACE_1, 0.08)))

@@ -654,7 +654,7 @@ fn allow_z_rotation(state: &ArrangeState, actions: &ArrangeActions) -> gpui::Sta
     let el = div()
         .id("arrange-allow-z")
         .w_full()
-        .rounded(px(RADIUS_MD))
+        .rounded(px(ROUNDED_MD))
         .border_1()
         .border_color(rgb(border))
         .bg(rgb(background))

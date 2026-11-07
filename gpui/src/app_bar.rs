@@ -660,7 +660,7 @@ pub fn app_bar(state: AppBarState, entity: WeakEntity<DragonFruit>) -> impl Into
             absolute, top_0, left_0, right_0,
             h = px(TOPBAR_HEIGHT),
             flex, items_center, gap_12,
-            px_4, pt_3, pb_9,
+            pl_4, pr_0, pt_3, pb_9,
         ) {
             { bar_surface() }
             // Painted above the surface so every control wins the click; the

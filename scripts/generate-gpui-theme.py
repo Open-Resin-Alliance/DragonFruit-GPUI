@@ -77,6 +77,14 @@ for const, token in {
     if '.' not in literal:
         literal += '.0'
     lines.append(f'pub const {const}: f32 = {literal};')
+lines.append('')
+lines.append('// Tailwind v4 utility radii (globals.css only re-declares colours/fonts,')
+lines.append('// so `rounded-*` keeps the framework defaults).')
+lines.append('pub const ROUNDED_SM: f32 = 4.0;')
+lines.append('pub const ROUNDED_MD: f32 = 6.0;')
+lines.append('pub const ROUNDED_LG: f32 = 8.0;')
+lines.append('pub const ROUNDED_XL: f32 = 12.0;')
+lines.append('')
 lines.append(f'pub const LINE_HEIGHT_TIGHT: f32 = {float(tokens["line-height-tight"]):g};')
 lines.append(f'pub const LINE_HEIGHT_NORMAL: f32 = {float(tokens["line-height-normal"]):g};')
 lines.append('')
