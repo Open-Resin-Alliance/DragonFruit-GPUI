@@ -1,13 +1,11 @@
-//! STL loading: binary and ASCII, welded into an indexed mesh with smooth
-//! vertex normals, baked per-vertex occlusion, and a plate footprint hull.
+//! STL loading: binary and ASCII, flat per-face normals (STL is faceted), and a
+//! plate footprint hull.
 
 use std::cmp::Ordering;
 use std::path::Path;
-use std::time::Instant;
 
 use anyhow::{bail, Context, Result};
 use dragonfruit_mesh_core::mesh::{IndexedMesh, Vec3};
-use dragonfruit_mesh_core::vertex_occlusion::bake_smoothed_vertex_occlusion;
 use glam::Vec3 as GVec3;
 
 #[repr(C)]
@@ -15,12 +13,10 @@ use glam::Vec3 as GVec3;
 pub struct Vertex {
     pub pos: [f32; 3],
     pub normal: [f32; 3],
-    pub ao: f32,
 }
 
 pub struct MeshData {
     pub vertices: Vec<Vertex>,
-    pub indices: Vec<u32>,
     /// Convex hull of the model's XY projection, for the plate outline.
     pub footprint: Vec<[f32; 2]>,
     pub center: GVec3,
@@ -45,31 +41,26 @@ pub fn load_stl(path: &Path) -> Result<MeshData> {
         bail!("{} welded to an empty mesh", path.display());
     }
 
-    let mut normals = vec![Vec3::ZERO; mesh.positions.len()];
+    // Flat normals: three vertices per triangle, each carrying the face normal.
+    let mut vertices = Vec::with_capacity(mesh.triangles.len() * 3);
     for tri in &mesh.triangles {
         let a = mesh.positions[tri[0] as usize];
         let b = mesh.positions[tri[1] as usize];
         let c = mesh.positions[tri[2] as usize];
         let n = b.sub(a).cross(c.sub(a));
-        for &index in tri {
-            let slot = &mut normals[index as usize];
-            *slot = slot.add(n);
+        let length = n.length();
+        let normal = if length > 1e-12 {
+            n.scale(1.0 / length)
+        } else {
+            Vec3::new(0.0, 0.0, 1.0)
+        };
+        for p in [a, b, c] {
+            vertices.push(Vertex {
+                pos: [p.x, p.y, p.z],
+                normal: [normal.x, normal.y, normal.z],
+            });
         }
     }
-    for normal in &mut normals {
-        let length = normal.length();
-        if length > 1e-12 {
-            *normal = normal.scale(1.0 / length);
-        }
-    }
-
-    let ao_started = Instant::now();
-    let ao = bake_smoothed_vertex_occlusion(&mesh, 32, None);
-    eprintln!(
-        "ao: baked {} vertices in {:.0} ms",
-        ao.len(),
-        ao_started.elapsed().as_secs_f64() * 1000.0
-    );
 
     let mut min = Vec3::new(f32::MAX, f32::MAX, f32::MAX);
     let mut max = Vec3::new(f32::MIN, f32::MIN, f32::MIN);
@@ -88,24 +79,10 @@ pub fn load_stl(path: &Path) -> Result<MeshData> {
         radius = radius.max(d);
     }
     let radius = radius.max(0.001);
-
-    let vertices = mesh
-        .positions
-        .iter()
-        .zip(&normals)
-        .enumerate()
-        .map(|(index, (p, n))| Vertex {
-            pos: [p.x, p.y, p.z],
-            normal: [n.x, n.y, n.z],
-            ao: ao.get(index).copied().unwrap_or(1.0),
-        })
-        .collect();
-    let indices = mesh.triangles.iter().flatten().copied().collect();
     let footprint = convex_hull(&mesh.positions);
 
     Ok(MeshData {
         vertices,
-        indices,
         footprint,
         center,
         radius,

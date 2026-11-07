@@ -30,15 +30,18 @@ impl Camera {
                 * self.distance
     }
 
-    pub fn view_proj(&self, aspect: f32) -> Mat4 {
-        let view = Mat4::look_at_rh(self.eye(), self.target, Vec3::Z);
-        let proj = Mat4::perspective_rh(
+    pub fn projection(&self, aspect: f32) -> Mat4 {
+        Mat4::perspective_rh(
             self.fov_y,
             aspect.max(0.0001),
             (self.distance * 0.001).max(0.0001),
             self.distance * 100.0,
-        );
-        proj * view
+        )
+    }
+
+    pub fn view_proj(&self, aspect: f32) -> Mat4 {
+        let view = Mat4::look_at_rh(self.eye(), self.target, Vec3::Z);
+        self.projection(aspect) * view
     }
 
     pub fn orbit(&mut self, dx: f32, dy: f32) {
