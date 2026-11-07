@@ -117,6 +117,7 @@ checksum = "5a15f179cd60c4584b8a8c596927aadc462e27f2ca70c04e0071964a73ba7a75"
 dependencies = [
  "cfg-if",
  "const-random",
+ "getrandom 0.3.4",
  "once_cell",
  "version_check",
  "zerocopy",
@@ -1825,6 +1826,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "75b325c5dbd37f80359721ad39aca5a29fb04c89279657cffdda8736d0c0b9d2"
 
 [[package]]
+name = "dragonfruit-mesh-core"
+version = "0.9.1"
+dependencies = [
+ "ahash",
+ "bytemuck",
+ "rayon",
+ "serde",
+ "smallvec",
+]
+
+[[package]]
 name = "dunce"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2369,6 +2381,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "glam"
+version = "0.30.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "19fc433e8437a212d1b6f1e68c7824af3aed907da60afa994e7f542d18d12aa9"
+
+[[package]]
 name = "glob"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2416,6 +2434,9 @@ dependencies = [
  "anyhow",
  "bite-gp-wgpu",
  "bite-gpui",
+ "bytemuck",
+ "dragonfruit-mesh-core",
+ "glam",
  "gpui_interop",
  "raw-window-handle",
  "wgpu",

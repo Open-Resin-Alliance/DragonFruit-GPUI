@@ -16,6 +16,9 @@ gpui_wgpu = { package = "bite-gp-wgpu", version = "1.25" }
 wgpu = "30.0.1"
 anyhow = "1"
 raw-window-handle = "0.6"
+bytemuck = { version = "1", features = ["derive"] }
+glam = "0.30"
+dragonfruit-mesh-core = { path = "../../rust/dragonfruit-mesh-core" }
 
 [profile.dev]
 opt-level = 1

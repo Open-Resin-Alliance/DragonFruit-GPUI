@@ -16,15 +16,11 @@ use std::rc::Rc;
 
 use anyhow::Result;
 use gpui::{
-    App, Bounds, Context, Corners, DevicePixels, IntoElement, Render, Window, WindowBounds,
-    WindowOptions, div, gpu_canvas, prelude::*, px, rgb, size,
+    App, Bounds, Context, Corners, IntoElement, Render, Window, WindowBounds, WindowOptions, div,
+    gpu_canvas, prelude::*, px, rgb, size,
 };
 use gpui_interop::{WgpuSurface, attach};
-use gpui_wgpu::{ImportedTextureExt as _, WgpuContextSlot, WgpuRenderer, WgpuSurfaceConfig};
-use raw_window_handle::{
-    DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, RawDisplayHandle,
-    RawWindowHandle, WindowHandle,
-};
+use gpui_wgpu::{ImportedTextureExt as _, WgpuRenderer};
 
 const WIDTH: u32 = 640;
 const HEIGHT: u32 = 480;
@@ -32,69 +28,15 @@ const HEIGHT: u32 = 480;
 fn main() {
     gpui::application().run(|cx: &mut App| {
         let bounds = Bounds::centered(None, size(px(960.), px(640.)), cx);
-        let options = WindowOptions {
+        let options = gpui_probe::with_wgpu_renderer(WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             ..Default::default()
-        }
-        .with_renderer_factory(gpui::FnRendererFactory(
-            |target: gpui::RendererTarget<'_>| -> Result<Box<dyn gpui::PlatformRenderer>> {
-                let handles = Handles {
-                    window: target.window_handle,
-                    display: target.display_handle,
-                };
-                let config = WgpuSurfaceConfig {
-                    size: size(
-                        DevicePixels((target.size.width.0 * target.scale_factor).round() as i32),
-                        DevicePixels((target.size.height.0 * target.scale_factor).round() as i32),
-                    ),
-                    transparent: target.transparent,
-                    preferred_present_mode: None,
-                };
-                let slot: WgpuContextSlot = Rc::new(RefCell::new(None));
-                let renderer =
-                    WgpuRenderer::new(slot, &handles, config, None, gpui::GpuPreference::Auto)?;
-                Ok(Box::new(renderer))
-            },
-        ));
+        });
 
         cx.open_window(options, |_, cx| cx.new(|_| ViewportProbe::new()))
             .expect("a window");
         cx.activate(true);
     });
-}
-
-/// The raw handles a renderer factory is handed, in the shape
-/// `WgpuRenderer::new` wants. The window outlives the renderer, so borrowing
-/// them is sound for the renderer's lifetime.
-#[derive(Clone, Copy, Debug)]
-struct Handles {
-    window: Option<RawWindowHandle>,
-    display: Option<RawDisplayHandle>,
-}
-
-// Safety: the handles name process-global native objects that outlive the
-// renderer, the same guarantee `gpui_wgpu`'s own `RawWindowHandles` makes.
-unsafe impl Send for Handles {}
-unsafe impl Sync for Handles {}
-
-impl HasWindowHandle for Handles {
-    fn window_handle(&self) -> Result<WindowHandle<'_>, HandleError> {
-        match self.window {
-            // Safety: the backend keeps the native window alive while the
-            // renderer exists (the contract `RendererFactory` documents).
-            Some(raw) => Ok(unsafe { WindowHandle::borrow_raw(raw) }),
-            None => Err(HandleError::Unavailable),
-        }
-    }
-}
-
-impl HasDisplayHandle for Handles {
-    fn display_handle(&self) -> Result<DisplayHandle<'_>, HandleError> {
-        match self.display {
-            Some(raw) => Ok(unsafe { DisplayHandle::borrow_raw(raw) }),
-            None => Err(HandleError::Unavailable),
-        }
-    }
 }
 
 struct ViewportProbe {
