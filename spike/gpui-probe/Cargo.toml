@@ -1,0 +1,24 @@
+[package]
+name = "gpui-probe"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Probe for the GPUI port feasibility audit.
+#
+# `gpui` is aliased to `bite-gpui` because that is the GPUI line
+# `gpui_interop` is published against (see the crate's README). Zed's
+# upstream `gpui` is a different, incompatible package name.
+[dependencies]
+gpui = { package = "bite-gpui", version = "1.25", default-features = false, features = ["platform"] }
+gpui_interop = { version = "0.2", features = ["gpui", "wgpu"] }
+gpui_wgpu = { package = "bite-gp-wgpu", version = "1.25" }
+wgpu = "30.0.1"
+anyhow = "1"
+raw-window-handle = "0.6"
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2
