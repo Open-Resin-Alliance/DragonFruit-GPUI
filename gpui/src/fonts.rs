@@ -21,12 +21,36 @@ pub fn ensure_geist() {
     let Ok(entries) = std::fs::read_dir(source) else {
         return;
     };
+    // Remove the subset faces an earlier build installed.
+    for stale in [
+        "geist-latin",
+        "geist-latin-ext",
+        "geist-cyrillic",
+        "geist-cyrillic-ext",
+        "geist-vietnamese",
+    ] {
+        if let Some(directory) = std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .map(|path| path.join("Microsoft").join("Windows").join("Fonts"))
+        {
+            let _ = std::fs::remove_file(directory.join(format!("{stale}.ttf")));
+        }
+        unregister_font(stale);
+    }
     let user_fonts = std::env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)
         .map(|path| path.join("Microsoft").join("Windows").join("Fonts"));
     for entry in entries.flatten() {
         let path = entry.path();
         if path.extension().and_then(|ext| ext.to_str()) != Some("ttf") {
+            continue;
+        }
+        // Only the single full-coverage face may be installed. The `next/font`
+        // woff2 files are unicode-range subsets that all declare the same
+        // family/style; registering them together makes DirectWrite pick one
+        // subset for all text, which renders latin as missing glyphs.
+        let stem = path.file_stem().and_then(|name| name.to_str()).unwrap_or("");
+        if !stem.starts_with("Geist") {
             continue;
         }
         // Session registration first: this is what makes the family visible to
@@ -47,9 +71,9 @@ pub fn ensure_geist() {
                 None => continue,
             };
             let destination = directory.join(file);
-            if !destination.exists() {
-                let _ = std::fs::copy(&path, &destination);
-            }
+            // Always overwrite: a previous build may have installed a subset
+            // face under the same name, and the family must be the full font.
+            let _ = std::fs::copy(&path, &destination);
             register_font(&destination);
         }
     }
@@ -68,6 +92,20 @@ pub fn ensure_geist() {
     unsafe {
         SendMessageTimeoutW(0xffff, 0x001d, 0, 0, 0x0002, 1000, std::ptr::null_mut());
     }
+}
+
+#[cfg(windows)]
+fn unregister_font(stem: &str) {
+    use winreg::RegKey;
+    use winreg::enums::HKEY_CURRENT_USER;
+
+    let Ok(key) = RegKey::predef(HKEY_CURRENT_USER).open_subkey_with_flags(
+        r"Software\Microsoft\Windows NT\CurrentVersion\Fonts",
+        winreg::enums::KEY_SET_VALUE,
+    ) else {
+        return;
+    };
+    let _ = key.delete_value(format!("{stem} (TrueType)"));
 }
 
 #[cfg(windows)]
