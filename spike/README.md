@@ -104,6 +104,21 @@ A BGRA path is a known, bounded patch: issue #64926 has a working fork diff of
 +92/−39 across `metal_renderer.rs` and `shaders.metal`. So macOS needs a GPUI
 fork or an upstream change, not a new renderer.
 
+## Probe 6 — UI component library (`ui-probe`)
+
+```sh
+cd spike/ui-probe
+cargo run
+```
+
+A settings-shaped panel on the other GPUI line: `gpui-pre` 0.3.11 +
+`gpui-component` 0.9.0 through `gpui-kit`. Tab bar, text input, checkbox,
+switch, progress, separator, badge, and primary/secondary/danger buttons with
+a tooltip — the controls a printer/material settings panel needs.
+
+This crate is deliberately separate from `gpui-probe`: the component library
+and `gpui_interop` are published against different, incompatible GPUI lines.
+
 ## Ecosystem note
 
 The GPUI ecosystem is split across incompatible lines. This is the main
@@ -127,3 +142,6 @@ seam. A real port must either fork `gpui-pre` to add the seam, port
 - HTML-style labels positioned in 3D beyond the smoke test, the full
   screen-space gizmo, and the 273-component UI port.
 - Accessibility and the 2,504-string i18n catalog.
+- The two GPUI lines in one binary: the UI probe and the viewport probes are
+  separate crates because `gpui-component` and `gpui_interop` do not share a
+  GPUI.

@@ -1,0 +1,17 @@
+[package]
+name = "ui-probe"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# The UI half of the audit. `gpui-kit` is the umbrella for the `gpui-pre`
+# line (Zed snapshots + gpui-component + assets), which is a different GPUI
+# from the `bite-gpui` line the viewport probes use.
+[dependencies]
+gpui-kit = "0.9.0"
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2
