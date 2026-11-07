@@ -46,6 +46,10 @@ struct Targets {
 pub struct Viewport {
     surface: WgpuSurface,
     background: wgpu::RenderPipeline,
+    plate: wgpu::RenderPipeline,
+    plate_vertex_buffer: wgpu::Buffer,
+    plate_index_buffer: wgpu::Buffer,
+    plate_index_count: u32,
     grid: wgpu::RenderPipeline,
     footprint: wgpu::RenderPipeline,
     mesh_pipeline: wgpu::RenderPipeline,
@@ -68,6 +72,10 @@ impl Viewport {
         let mesh_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("viewport mesh"),
             source: wgpu::ShaderSource::Wgsl(MESH_SHADER.into()),
+        });
+        let plate_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("viewport plate"),
+            source: wgpu::ShaderSource::Wgsl(PLATE_SHADER.into()),
         });
         let grid_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("viewport grid"),
@@ -269,6 +277,48 @@ impl Viewport {
             ..Default::default()
         });
 
+        let plate = pipeline(
+            device,
+            &uniform_pipeline_layout,
+            &plate_shader,
+            &[Some(wgpu::VertexBufferLayout {
+                array_stride: std::mem::size_of::<Vertex>() as u64,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &[
+                    wgpu::VertexAttribute {
+                        format: wgpu::VertexFormat::Float32x3,
+                        offset: 0,
+                        shader_location: 0,
+                    },
+                    wgpu::VertexAttribute {
+                        format: wgpu::VertexFormat::Float32x3,
+                        offset: 12,
+                        shader_location: 1,
+                    },
+                ],
+            })],
+            wgpu::PrimitiveTopology::TriangleList,
+            Some(wgpu::Face::Back),
+            true,
+            wgpu::CompareFunction::Less,
+            WgpuSurface::DEFAULT_FORMAT,
+            true,
+            true,
+            SAMPLE_COUNT,
+        );
+
+        let (plate_vertices, plate_indices) = plate_mesh(224.88, 128.88, 3.0, -0.08);
+        let plate_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("viewport plate vertices"),
+            contents: bytemuck::cast_slice(&plate_vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        let plate_index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("viewport plate indices"),
+            contents: bytemuck::cast_slice(&plate_indices),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+
         let targets = Targets::new(
             device,
             1,
@@ -281,6 +331,10 @@ impl Viewport {
         Ok(Self {
             surface,
             background,
+            plate,
+            plate_vertex_buffer,
+            plate_index_buffer,
+            plate_index_count: plate_indices.len() as u32,
             grid,
             footprint,
             mesh_pipeline,
@@ -413,6 +467,10 @@ impl Viewport {
             pass.set_bind_group(0, &self.scene_bind, &[]);
             pass.set_pipeline(&self.background);
             pass.draw(0..3, 0..1);
+            pass.set_pipeline(&self.plate);
+            pass.set_vertex_buffer(0, self.plate_vertex_buffer.slice(..));
+            pass.set_index_buffer(self.plate_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..self.plate_index_count, 0, 0..1);
             pass.set_pipeline(&self.grid);
             pass.draw(0..6, 0..1);
             if let Some(mesh) = &self.mesh {
@@ -589,6 +647,51 @@ impl Targets {
     }
 }
 
+fn plate_mesh(width: f32, depth: f32, thickness: f32, top: f32) -> (Vec<Vertex>, Vec<u32>) {
+    let hx = width * 0.5;
+    let hy = depth * 0.5;
+    let z0 = top;
+    let z1 = top - thickness;
+    let mut vertices = Vec::new();
+    let mut indices = Vec::new();
+    let mut face = |corners: [[f32; 3]; 4], normal: [f32; 3]| {
+        let base = vertices.len() as u32;
+        for corner in corners {
+            vertices.push(Vertex {
+                pos: corner,
+                normal,
+                ao: 1.0,
+            });
+        }
+        indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+    };
+    face(
+        [[-hx, -hy, z0], [hx, -hy, z0], [hx, hy, z0], [-hx, hy, z0]],
+        [0.0, 0.0, 1.0],
+    );
+    face(
+        [[-hx, -hy, z1], [-hx, hy, z1], [hx, hy, z1], [hx, -hy, z1]],
+        [0.0, 0.0, -1.0],
+    );
+    face(
+        [[-hx, -hy, z1], [hx, -hy, z1], [hx, -hy, z0], [-hx, -hy, z0]],
+        [0.0, -1.0, 0.0],
+    );
+    face(
+        [[-hx, hy, z0], [hx, hy, z0], [hx, hy, z1], [-hx, hy, z1]],
+        [0.0, 1.0, 0.0],
+    );
+    face(
+        [[-hx, -hy, z0], [-hx, hy, z0], [-hx, hy, z1], [-hx, -hy, z1]],
+        [-1.0, 0.0, 0.0],
+    );
+    face(
+        [[hx, -hy, z1], [hx, hy, z1], [hx, hy, z0], [hx, -hy, z0]],
+        [1.0, 0.0, 0.0],
+    );
+    (vertices, indices)
+}
+
 fn pipeline(
     device: &wgpu::Device,
     layout: &wgpu::PipelineLayout,
@@ -739,33 +842,25 @@ fn vs_main(
     return out;
 }
 
-fn distribution_ggx(n_dot_h: f32, roughness: f32) -> f32 {
-    let a = roughness * roughness;
-    let a2 = a * a;
-    let d = n_dot_h * n_dot_h * (a2 - 1.0) + 1.0;
-    return a2 / (3.14159265 * d * d);
-}
-
-fn geometry_schlick_ggx(n_dot_v: f32, roughness: f32) -> f32 {
-    let r = roughness + 1.0;
-    let k = (r * r) / 8.0;
-    return n_dot_v / (n_dot_v * (1.0 - k) + k);
-}
-
-fn fresnel_schlick(cos_theta: f32, f0: vec3<f32>) -> vec3<f32> {
-    return f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - cos_theta, 5.0);
-}
-
+// three.js BRDF_GGX: D_GGX * V_GGX_SmithCorrelated * F_Schlick.
 fn specular(n: vec3<f32>, v: vec3<f32>, l: vec3<f32>, roughness: f32, f0: vec3<f32>) -> vec3<f32> {
     let h = normalize(v + l);
     let n_dot_l = max(dot(n, l), 0.0);
     let n_dot_v = max(dot(n, v), 0.0);
     let n_dot_h = max(dot(n, h), 0.0);
     let v_dot_h = max(dot(v, h), 0.0);
-    let d = distribution_ggx(n_dot_h, roughness);
-    let g = geometry_schlick_ggx(n_dot_v, roughness) * geometry_schlick_ggx(n_dot_l, roughness);
-    let f = fresnel_schlick(v_dot_h, f0);
-    return d * g * f / (4.0 * n_dot_v * n_dot_l + 0.0001);
+
+    let alpha = roughness * roughness;
+    let a2 = alpha * alpha;
+    let d = (n_dot_h * a2 - n_dot_h) * n_dot_h + 1.0;
+    let distribution = a2 / (3.14159265 * d * d);
+
+    let gv = n_dot_l * sqrt(n_dot_v * n_dot_v * (1.0 - a2) + a2);
+    let gl = n_dot_v * sqrt(n_dot_l * n_dot_l * (1.0 - a2) + a2);
+    let visibility = 0.5 / max(gv + gl, 0.0001);
+
+    let f = f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - v_dot_h, 5.0);
+    return distribution * visibility * f;
 }
 
 @fragment
@@ -782,19 +877,51 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let ambient = hemi * 0.25;
     let key = vec3<f32>(1.0) * max(dot(n, key_dir), 0.0) * 1.2;
     let fill = vec3<f32>(0.565, 0.655, 1.0) * max(dot(n, fill_dir), 0.0) * 0.168;
-    let head = vec3<f32>(1.0) * max(dot(n, view_dir), 0.0) * 0.9;
+    let head = vec3<f32>(1.0) * max(dot(n, view_dir), 0.0) * 1.0;
     let lighting = (ambient + key + fill + head) / 3.14159265;
 
     let base = uniforms.base_color;
     let f0 = mix(vec3<f32>(0.04), base, 0.02);
     let spec = specular(n, view_dir, key_dir, 0.55, f0) * 1.2 * max(dot(n, key_dir), 0.0)
-        + specular(n, view_dir, view_dir, 0.55, f0) * 0.9 * max(dot(n, view_dir), 0.0);
+        + specular(n, view_dir, view_dir, 0.55, f0) * 1.0 * max(dot(n, view_dir), 0.0);
     let n_dot_l = max(dot(n, key_dir), 0.0);
     let cavity = pow(1.0 - n_dot_l, 1.35);
     let fake_ao = 1.0 - cavity * 0.2;
     let baked = mix(1.0, clamp(in.ao, 0.0, 1.0), 0.85);
     let color = base * lighting * fake_ao * baked + spec;
     return vec4<f32>(color, 1.0);
+}
+"#;
+
+const PLATE_SHADER: &str = r#"
+struct Uniforms {
+    view_proj: mat4x4<f32>,
+    inv_proj: mat4x4<f32>,
+    camera_pos: vec3<f32>,
+    base_color: vec3<f32>,
+    resolution: vec2<f32>,
+};
+@group(0) @binding(0) var<uniform> uniforms: Uniforms;
+
+struct PlateOut {
+    @builtin(position) position: vec4<f32>,
+    @location(0) normal: vec3<f32>,
+};
+
+@vertex
+fn vs_main(@location(0) position: vec3<f32>, @location(1) normal: vec3<f32>) -> PlateOut {
+    var out: PlateOut;
+    out.position = uniforms.view_proj * vec4<f32>(position, 1.0);
+    out.normal = normal;
+    return out;
+}
+
+@fragment
+fn fs_main(in: PlateOut) -> @location(0) vec4<f32> {
+    let n = normalize(in.normal);
+    let key = max(dot(n, normalize(vec3<f32>(0.0, 0.0, 1.0))), 0.0);
+    let plate = vec3<f32>(0.032, 0.040, 0.054);
+    return vec4<f32>(plate * (0.35 + 0.65 * key), 1.0);
 }
 "#;
 
@@ -816,8 +943,8 @@ struct GridOut {
 @vertex
 fn vs_main(@builtin(vertex_index) index: u32) -> GridOut {
     var corners = array<vec2<f32>, 6>(
-        vec2<f32>(-109.0, -61.5), vec2<f32>(109.0, -61.5), vec2<f32>(109.0, 61.5),
-        vec2<f32>(-109.0, -61.5), vec2<f32>(109.0, 61.5), vec2<f32>(-109.0, 61.5),
+        vec2<f32>(-109.44, -61.44), vec2<f32>(109.44, -61.44), vec2<f32>(109.44, 61.44),
+        vec2<f32>(-109.44, -61.44), vec2<f32>(109.44, 61.44), vec2<f32>(-109.44, 61.44),
     );
     var out: GridOut;
     out.position = uniforms.view_proj * vec4<f32>(corners[index], 0.0, 1.0);
@@ -827,7 +954,7 @@ fn vs_main(@builtin(vertex_index) index: u32) -> GridOut {
 
 @fragment
 fn fs_main(in: GridOut) -> @location(0) vec4<f32> {
-    let cell = 218.0 / 15.0;
+    let cell = vec2<f32>(218.88 / 15.0, 122.88 / 15.0);
     let coord = in.world / cell;
     let width = fwidth(coord);
     let grid = abs(fract(coord - 0.5) - 0.5) / width;
