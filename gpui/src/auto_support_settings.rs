@@ -58,10 +58,10 @@ use gpui::{
     rgb, rgba,
 };
 
-use crate::icons::icon;
-use crate::panel_fields::{format_number, with_alpha};
-use crate::theme::*;
-use crate::ui::{
+use gpui_core::icons::icon;
+use gpui_ui::panel_fields::{format_number, with_alpha};
+use gpui_core::theme::*;
+use gpui_ui::ui::{
     IconButtonSize, IconButtonVariant, SelectOption, SelectOptionTone, icon_button, input_box,
     select_dropdown, tooltip,
 };
@@ -1979,12 +1979,12 @@ fn delete_dialog(preset_name: &str, entity: &WeakEntity<DragonFruit>) -> Div {
             .child(delete)
     };
 
-    crate::ui::dialog_modal(
+    gpui_ui::ui::dialog_modal(
         512.0,
         format!("Delete \"{preset_name}\"?"),
         Some("This cannot be undone.".into()),
         None,
-        crate::ui::IconTone::Danger,
+        gpui_ui::ui::IconTone::Danger,
         div()
             .text_size(px(11.0))
             .line_height(relative(1.625))
@@ -2105,12 +2105,12 @@ fn name_dialog(dialog: &NameDialog, entity: &WeakEntity<DragonFruit>) -> Div {
                 .child(SharedString::from(dialog.name.clone())),
         );
 
-    crate::ui::dialog_modal(
+    gpui_ui::ui::dialog_modal(
         512.0,
         title,
         Some(subtitle),
         Some("pen-line"),
-        crate::ui::IconTone::Accent,
+        gpui_ui::ui::IconTone::Accent,
         body,
         actions,
         on_close,

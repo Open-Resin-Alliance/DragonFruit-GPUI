@@ -7,6 +7,7 @@ publish = false
 [dependencies]
 gpui = { package = "bite-gpui", version = "1.25", default-features = false, features = ["platform"] }
 gpui_interop = { version = "0.2", features = ["gpui", "wgpu"] }
+gpui_wgpu = { package = "bite-gp-wgpu", version = "1.25" }
 wgpu = "30.0.1"
 bytemuck = { version = "1", features = ["derive"] }
 glam = "0.30"

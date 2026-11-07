@@ -99,10 +99,10 @@ use gpui::{
     Window, canvas, div, point, prelude::*, px, relative, rgb, rgba,
 };
 
-use crate::icons::icon;
-use crate::panel_fields::with_alpha;
-use crate::theme::*;
-use crate::ui::{
+use gpui_core::icons::icon;
+use gpui_ui::panel_fields::with_alpha;
+use gpui_core::theme::*;
+use gpui_ui::ui::{
     BlockingProgress, ButtonSize, ButtonVariant, IconButtonSize, IconButtonVariant, IconTone,
     SelectOption, blocking_overlay, button, button_disabled, dialog_modal, dialog_modal_full,
     icon_button, select_dropdown, spinner,

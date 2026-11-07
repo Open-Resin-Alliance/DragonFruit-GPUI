@@ -119,16 +119,11 @@
 mod app_bar;
 mod arrange_panels;
 mod auto_support_settings;
-mod camera;
 mod empty_scene;
-mod fonts;
-mod icons;
-mod log;
 mod notifications;
 mod organic_cut_panel;
 mod overlays;
 mod panel_content;
-mod panel_fields;
 mod panels;
 mod plate_widgets;
 mod prepare_stack;
@@ -137,14 +132,9 @@ mod rail;
 mod scene_modals;
 mod settings;
 mod smoothing_panel;
-mod stl;
 mod support_panels;
-mod theme;
 mod tool_panels;
 mod transform_panel;
-mod ui;
-mod viewport;
-mod window;
 
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
@@ -162,7 +152,9 @@ use gpui_interop::attach;
 use gpui_wgpu::{ImportedTextureExt as _, WgpuRenderer};
 use viewport::Viewport;
 
-use crate::theme::*;
+use gpui_core::{camera, fonts, icons, log, stl, viewport, window};
+use gpui_ui::{panel_fields, ui};
+use gpui_core::theme::*;
 
 /// `useSlicingManager`'s uncontrolled default: 50 microns.
 const LAYER_HEIGHT_MM: f32 = 0.05;

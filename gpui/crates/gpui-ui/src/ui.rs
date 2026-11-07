@@ -82,8 +82,8 @@ use gpui::{
 };
 use std::rc::Rc;
 
-use crate::icons::icon;
-use crate::theme::*;
+use gpui_core::icons::icon;
+use gpui_core::theme::*;
 
 /// Tailwind v4's radius scale — what `rounded-*` utilities actually resolve to.
 /// See the module docs for why these are not `theme::RADIUS_*`.

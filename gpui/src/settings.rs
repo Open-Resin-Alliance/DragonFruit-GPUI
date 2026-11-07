@@ -78,9 +78,9 @@ use gpui::{
     linear_color_stop, linear_gradient, prelude::*, px, relative, rgb, rgba,
 };
 
-use crate::icons::icon;
-use crate::theme::*;
-use crate::ui::{
+use gpui_core::icons::icon;
+use gpui_core::theme::*;
+use gpui_ui::ui::{
     IconButtonSize, IconButtonVariant, IconTone, SelectOption, icon_button, icon_button_toned,
     select_dropdown, spinner,
 };
@@ -1224,7 +1224,7 @@ pub fn settings_modal(
         use std::sync::atomic::{AtomicBool, Ordering};
         static LOGGED: AtomicBool = AtomicBool::new(false);
         if !LOGGED.swap(true, Ordering::Relaxed) {
-            crate::log::log("settings: rendering open");
+            gpui_core::log::log("settings: rendering open");
         }
     }
 

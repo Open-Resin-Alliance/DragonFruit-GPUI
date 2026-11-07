@@ -36,8 +36,8 @@ use gpui::{
     Div, Font, FontWeight, IntoElement, SharedString, Window, div, prelude::*, px, rgb, rgba, svg,
 };
 
-use crate::panel_fields::with_alpha;
-use crate::theme::*;
+use gpui_ui::panel_fields::with_alpha;
+use gpui_core::theme::*;
 
 /// The label's `text-[36px] font-bold` in Arial.
 const LABEL_FONT_SIZE: f32 = 36.0;

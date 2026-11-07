@@ -101,9 +101,9 @@ use gpui::{
     px, relative, rgb, rgba,
 };
 
-use crate::icons::icon;
-use crate::theme::*;
-use crate::ui::{ContextMenuEntry, context_menu};
+use gpui_core::icons::icon;
+use gpui_core::theme::*;
+use gpui_ui::ui::{ContextMenuEntry, context_menu};
 use crate::{DragonFruit, Mode};
 
 /// The tile's side, in pixels (`h-[54px]` / `w-[54px]`).

@@ -121,9 +121,9 @@ use gpui::{
 };
 
 use crate::DragonFruit;
-use crate::icons::icon;
-use crate::theme::*;
-use crate::ui::{ContextMenuEntry, card, context_menu};
+use gpui_core::icons::icon;
+use gpui_core::theme::*;
+use gpui_ui::ui::{ContextMenuEntry, card, context_menu};
 
 /// `PANEL_MARGIN` in the source.
 pub const PANEL_MARGIN: f32 = 6.0;

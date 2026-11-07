@@ -117,8 +117,8 @@ use gpui::{
     prelude::*, px, relative, rgb, rgba,
 };
 
-use crate::camera::Camera;
-use crate::theme::*;
+use gpui_core::camera::Camera;
+use gpui_core::theme::*;
 use crate::DragonFruit;
 
 // ---------------------------------------------------------------------------

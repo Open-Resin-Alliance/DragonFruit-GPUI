@@ -58,9 +58,9 @@ use gpui::{
     div, prelude::*, px, relative, rgb, rgba,
 };
 
-use crate::icons::icon;
-use crate::theme::*;
-use crate::ui;
+use gpui_core::icons::icon;
+use gpui_core::theme::*;
+use gpui_ui::ui;
 
 /// `ToastViewport offset="1.25rem"`.
 const TOAST_OFFSET: f32 = 20.0;

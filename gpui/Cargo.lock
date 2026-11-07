@@ -1882,6 +1882,8 @@ dependencies = [
  "dragonfruit-mesh-core",
  "fontdue",
  "glam",
+ "gpui-core",
+ "gpui-ui",
  "gpui_interop",
  "raw-window-handle",
  "resvg 0.45.1",
@@ -2533,6 +2535,7 @@ name = "gpui-core"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "bite-gp-wgpu",
  "bite-gpui",
  "bytemuck",
  "declarative-gpui",

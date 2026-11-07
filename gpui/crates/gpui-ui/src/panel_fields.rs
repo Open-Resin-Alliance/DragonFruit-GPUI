@@ -47,8 +47,8 @@ use gpui::{
     prelude::*, px, rgb, rgba,
 };
 
-use crate::icons::icon;
-use crate::theme::*;
+use gpui_core::icons::icon;
+use gpui_core::theme::*;
 
 /// `#ffffff`, the base of every `color-mix(..., white N%)` in the sources.
 pub const WHITE: u32 = 0xffffff;

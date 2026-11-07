@@ -111,9 +111,9 @@ use gpui::{
     px, relative, rgb, rgba,
 };
 
-use crate::icons::icon;
-use crate::theme::*;
-use crate::ui::{
+use gpui_core::icons::icon;
+use gpui_core::theme::*;
+use gpui_ui::ui::{
     ContextMenuEntry, SettingDensity, SettingSurface, context_menu, setting_row, toggle,
 };
 use crate::{DragonFruit, stl};
@@ -1026,13 +1026,13 @@ pub fn export_body(entity: WeakEntity<DragonFruit>) -> impl IntoElement {
                             let (text, tone) = match stl::export_stl(mesh, transform, &path) {
                                 Ok(()) => (
                                     format!("Saved to: {}", path.display()),
-                                    crate::ui::ToastTone::Success,
+                                    gpui_ui::ui::ToastTone::Success,
                                 ),
                                 Err(error) => {
                                     eprintln!("Export failed: {error:#}");
                                     (
                                         "Export failed. Check console for details.".to_owned(),
-                                        crate::ui::ToastTone::Error,
+                                        gpui_ui::ui::ToastTone::Error,
                                     )
                                 }
                             };

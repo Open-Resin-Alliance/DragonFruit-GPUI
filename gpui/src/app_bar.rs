@@ -91,8 +91,8 @@ use gpui::{
     linear_color_stop, linear_gradient, prelude::*, px, relative, rgb, rgba,
 };
 
-use crate::icons::icon;
-use crate::theme::*;
+use gpui_core::icons::icon;
+use gpui_core::theme::*;
 use crate::{DragonFruit, Mode};
 
 const WHITE: u32 = 0xffffff;
@@ -603,7 +603,7 @@ pub fn app_bar(state: AppBarState, entity: WeakEntity<DragonFruit>) -> impl Into
         ToolbarTone::Secondary,
         actions_disabled,
         move |cx| {
-            crate::log::log("appbar: settings click");
+            gpui_core::log::log("appbar: settings click");
             settings_entity
                 .update(cx, |this, cx| {
                     this.show_settings = true;
@@ -672,7 +672,7 @@ pub fn app_bar(state: AppBarState, entity: WeakEntity<DragonFruit>) -> impl Into
             flex, items_center, gap_12,
             px_4, pt_3, pb_9,
             on_mouse_down = move |_, window, _| {
-                crate::log::log("appbar: drag root");
+                gpui_core::log::log("appbar: drag root");
                 start_window_drag(window);
             },
         ) {

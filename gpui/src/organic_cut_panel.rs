@@ -31,9 +31,9 @@ use std::rc::Rc;
 
 use gpui::{Div, FontWeight, IntoElement, SharedString, div, prelude::*, px, rgb, rgba};
 
-use crate::icons::icon;
-use crate::panel_fields::*;
-use crate::theme::*;
+use gpui_core::icons::icon;
+use gpui_ui::panel_fields::*;
+use gpui_core::theme::*;
 
 /// `OrganicCutMode`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

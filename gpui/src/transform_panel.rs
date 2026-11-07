@@ -9,7 +9,7 @@
 //! # PORT DEVIATIONS
 //!
 //! * GPUI has no text entry in this slice, so every number field carries the two
-//!   12px chevrons from [`crate::panel_fields::stepped_field`]. The source hides
+//!   12px chevrons from [`gpui_ui::panel_fields::stepped_field`]. The source hides
 //!   the stepper (`showStepper={false}`) and types into the field instead; the
 //!   unit moves 12px left to clear the added gutter.
 //! * `max-h-[calc(100vh-180px)]` has no `vh` unit in GPUI: the body is a
@@ -29,7 +29,7 @@
 //!   `.ui-range` track with the accent fill and a knob at the current value;
 //!   dragging is not wired (GPUI has no range element here), matching
 //!   `settings.rs`.
-//! * `Select` (the native `<select>`) is [`crate::panel_fields::select_field`]:
+//! * `Select` (the native `<select>`) is [`gpui_ui::panel_fields::select_field`]:
 //!   same box, an in-app menu instead of the OS menu.
 
 use std::f32::consts::PI;
@@ -37,8 +37,8 @@ use std::rc::Rc;
 
 use gpui::{Div, FontWeight, IntoElement, SharedString, div, prelude::*, px, rgb};
 
-use crate::panel_fields::*;
-use crate::theme::*;
+use gpui_ui::panel_fields::*;
+use gpui_core::theme::*;
 
 /// `SelectionRotationMode` in `src/features/scene/selectionTransform.ts`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

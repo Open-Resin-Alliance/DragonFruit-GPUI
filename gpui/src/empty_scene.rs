@@ -71,10 +71,10 @@ use gpui::{
     prelude::*, px, relative, rgb, rgba,
 };
 
-use crate::icons::icon;
-use crate::panel_fields::with_alpha;
-use crate::theme::*;
-use crate::ui;
+use gpui_core::icons::icon;
+use gpui_ui::panel_fields::with_alpha;
+use gpui_core::theme::*;
+use gpui_ui::ui;
 use crate::DragonFruit;
 
 const WHITE: u32 = 0xffffff;

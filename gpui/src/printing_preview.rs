@@ -75,7 +75,7 @@ use gpui::{
 
 use crate::DragonFruit;
 use crate::overlays;
-use crate::theme::*;
+use gpui_core::theme::*;
 
 /// `gridTemplateColumns: '56px minmax(0, 1fr)'` — the rail column.
 const RAIL_COLUMN_WIDTH: f32 = 56.0;

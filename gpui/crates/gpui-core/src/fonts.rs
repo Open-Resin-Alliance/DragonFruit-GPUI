@@ -17,7 +17,7 @@ pub fn ensure_geist() {
         fn AddFontResourceExW(name: *const u16, fl: u32, res: *mut core::ffi::c_void) -> i32;
     }
 
-    let source = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/fonts"));
+    let source = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts"));
     let Ok(entries) = std::fs::read_dir(source) else {
         return;
     };

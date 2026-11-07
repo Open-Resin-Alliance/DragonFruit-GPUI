@@ -132,10 +132,10 @@ use gpui::{
     Window, div, prelude::*, px, rgb, rgba,
 };
 
-use crate::icons::icon;
-use crate::panel_fields::{FieldAlign, Unit, format_number, value_field_at, with_alpha};
-use crate::theme::*;
-use crate::ui::{
+use gpui_core::icons::icon;
+use gpui_ui::panel_fields::{FieldAlign, Unit, format_number, value_field_at, with_alpha};
+use gpui_core::theme::*;
+use gpui_ui::ui::{
     ButtonSize, ButtonVariant, IconTone, SelectOption, button, dialog_modal, select_dropdown,
     spinner_colored,
 };
