@@ -37,10 +37,11 @@ struct Tween {
 // zoomSpeed 1.25, dampingFactor 0.15.
 const ROTATE_SPEED: f32 = 0.72 * SENSITIVITY;
 const PAN_SPEED: f32 = 0.82 * SENSITIVITY;
-const ZOOM_SPEED: f32 = 1.25 * SENSITIVITY;
+const ZOOM_SPEED: f32 = 1.25 * ZOOM_SENSITIVITY;
 const DAMPING: f32 = 0.15;
-/// Overall gesture gain on top of the 'precise' preset.
-const SENSITIVITY: f32 = 0.65;
+/// Gesture gain on top of the 'precise' preset.
+const SENSITIVITY: f32 = 0.7;
+const ZOOM_SENSITIVITY: f32 = 0.75;
 
 impl Camera {
     pub fn fit(center: Vec3, radius: f32) -> Self {
@@ -181,8 +182,17 @@ impl Camera {
         // touch the frame, and a shallower elevation than the 45° fallback.
         let distance = radius / (self.fov_y * 0.5).tan() * 1.15;
         let yaw = 20f32.to_radians();
-        let dir = Vec3::new(-yaw.sin(), -yaw.cos(), 0.8).normalize();
-        self.begin_tween(center, distance, dir.z.asin(), dir.y.atan2(dir.x), 1.0);
+        let dir = Vec3::new(-yaw.sin(), -yaw.cos(), 0.65).normalize();
+        // `CameraIntroController`'s prepare bias: look slightly below the
+        // centre so the model sits higher in the frame.
+        let bias = (radius * 0.12).clamp(1.5, 10.0);
+        self.begin_tween(
+            center - Vec3::Z * bias,
+            distance,
+            dir.z.asin(),
+            dir.y.atan2(dir.x),
+            1.0,
+        );
     }
 
     /// One frame of OrbitControls-style damping (dampingFactor 0.12). Returns
