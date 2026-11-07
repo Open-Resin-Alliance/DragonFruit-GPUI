@@ -34,13 +34,19 @@ impl Camera {
 
     pub fn projection(&self, aspect: f32) -> Mat4 {
         let aspect = aspect.max(0.0001);
-        let near = (self.distance * 0.001).max(0.0001);
-        let far = self.distance * 100.0;
         if self.orthographic {
+            // `orthoDolly.ts`: the frustum is derived from the dolly radius and
+            // the depth range is symmetric about the camera (`ORTHO_NEAR =
+            // -50000`, `ORTHO_FAR = 50000`). A near plane in front of the
+            // camera clips the model once the dolly radius shrinks, because the
+            // radius *is* the zoom.
             let half_h = self.distance * (self.fov_y * 0.5).tan();
             let half_w = half_h * aspect;
-            Mat4::orthographic_rh(-half_w, half_w, -half_h, half_h, near, far)
+            const DEPTH: f32 = 50000.0;
+            Mat4::orthographic_rh(-half_w, half_w, -half_h, half_h, -DEPTH, DEPTH)
         } else {
+            let near = (self.distance * 0.001).max(0.0001);
+            let far = self.distance * 100.0;
             Mat4::perspective_rh(self.fov_y, aspect, near, far)
         }
     }

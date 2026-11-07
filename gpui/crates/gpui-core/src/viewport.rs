@@ -1878,6 +1878,32 @@ fn srgb_linear(hex: u32) -> [f32; 3] {
     [channel(16), channel(8), channel(0)]
 }
 
+/// Push a triangle with per-vertex colours, flipping the winding (and the
+/// colour order) when its normal faces inward.
+fn push_tri_colors(
+    out: &mut Vec<[f32; 6]>,
+    a: [f32; 3],
+    b: [f32; 3],
+    c: [f32; 3],
+    ca: [f32; 3],
+    cb: [f32; 3],
+    cc: [f32; 3],
+    outward: [f32; 3],
+) {
+    let ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+    let ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+    let n = cross(ab, ac);
+    let dot = n[0] * outward[0] + n[1] * outward[1] + n[2] * outward[2];
+    let (b, c, cb, cc) = if dot < 0.0 {
+        (c, b, cc, cb)
+    } else {
+        (b, c, cb, cc)
+    };
+    for (point, color) in [(a, ca), (b, cb), (c, cc)] {
+        out.push([point[0], point[1], point[2], color[0], color[1], color[2]]);
+    }
+}
+
 /// Push a triangle, flipping the winding when its normal faces inward.
 fn push_tri(
     out: &mut Vec<[f32; 6]>,
@@ -1941,18 +1967,8 @@ fn axis_arrows(metrics: &PlateMetrics) -> Vec<[f32; 6]> {
         };
     }
     for (dir, base_hex, tip_hex) in axes {
-        // three.js samples the CanvasTexture without a colour space, so the
-        // sRGB bytes are treated as linear and re-encoded on output. Feeding
-        // the raw sRGB values as linear reproduces that (brighter) result.
-        let raw = |hex: u32| -> [f32; 3] {
-            [
-                ((hex >> 16) & 0xff) as f32 / 255.0,
-                ((hex >> 8) & 0xff) as f32 / 255.0,
-                (hex & 0xff) as f32 / 255.0,
-            ]
-        };
-        let base = raw(base_hex);
-        let tip = raw(tip_hex);
+        let base = srgb_linear(base_hex);
+        let tip = srgb_linear(tip_hex);
         let helper = if dir[2].abs() > 0.9 {
             [1.0, 0.0, 0.0]
         } else {
@@ -2002,33 +2018,57 @@ fn axis_arrows(metrics: &PlateMetrics) -> Vec<[f32; 6]> {
             let p11 = ring(length, shaft_radius, a1);
             let c0 = shade(0.0, length);
             let c1 = shade(length, length);
-            push!(p00, c0);
-            push!(p10, c1);
-            push!(p11, c1);
-            push!(p00, c0);
-            push!(p11, c1);
-            push!(p01, c0);
+            let radial = |a: f32, b: [f32; 3], c: [f32; 3]| -> [f32; 3] {
+                let center = center_at(a);
+                normalize([
+                    (b[0] + c[0]) * 0.5 - center[0],
+                    (b[1] + c[1]) * 0.5 - center[1],
+                    (b[2] + c[2]) * 0.5 - center[2],
+                ])
+            };
+            let out_radial = radial(0.0, p00, p01);
+            push_tri_colors(&mut out, p00, p10, p11, c0, c1, c1, out_radial);
+            push_tri_colors(&mut out, p00, p11, p01, c0, c1, c0, out_radial);
             // Bottom cap.
-            push!(center_at(0.0), c0);
-            push!(p01, c0);
-            push!(p00, c0);
+            push_tri_colors(
+                &mut out,
+                center_at(0.0),
+                p01,
+                p00,
+                c0,
+                c0,
+                c0,
+                [-dir[0], -dir[1], -dir[2]],
+            );
             // The shaft's top cap is omitted: the cone's base cap sits on the
             // same plane, and two coplanar discs z-fight into a bright rim.
             // Cone: `ConeGeometry(headRadius, headLength, 12)`, base capped.
-            // The winding is verified against the outward radial direction so
-            // backface culling never eats a facet.
             let b0 = ring(length, head_radius, a0);
             let b1 = ring(length, head_radius, a1);
             let cone_base = shade(0.0, head_length);
             let cone_tip = shade(head_length, head_length);
             let center = center_at(length);
-            let radial = normalize([
-                (b0[0] + b1[0]) * 0.5 - center[0],
-                (b0[1] + b1[1]) * 0.5 - center[1],
-                (b0[2] + b1[2]) * 0.5 - center[2],
-            ]);
-            push_tri(&mut out, b0, b1, tip_point, cone_tip, radial);
-            push_tri(&mut out, center, b1, b0, cone_base, [-dir[0], -dir[1], -dir[2]]);
+            let cone_radial = radial(length, b0, b1);
+            push_tri_colors(
+                &mut out,
+                b0,
+                b1,
+                tip_point,
+                cone_base,
+                cone_base,
+                cone_tip,
+                cone_radial,
+            );
+            push_tri_colors(
+                &mut out,
+                center,
+                b1,
+                b0,
+                cone_base,
+                cone_base,
+                cone_base,
+                [-dir[0], -dir[1], -dir[2]],
+            );
         }
     }
     out
