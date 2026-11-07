@@ -362,12 +362,11 @@ impl DragonFruit {
 
     fn set_mesh(&mut self, mesh: stl::MeshData) {
         let mesh = Arc::new(mesh);
-        {
-            let mut camera = Camera::fit(mesh.center, mesh.radius.max(110.0));
-            // The intro animates from the fit pose to the source's framing.
-            camera.focus(mesh.center, mesh.radius.max(1.0));
-            *self.camera.borrow_mut() = camera;
-        }
+        // The intro animates from wherever the camera is (the parked home pose
+        // in a fresh scene) to the model's framing.
+        self.camera
+            .borrow_mut()
+            .focus(mesh.center, mesh.radius.max(1.0));
         // `useSlicingManager`: `numLayers = ceil(heightMm / layerHeightMm)`.
         self.num_layers = (mesh.size[2] / LAYER_HEIGHT_MM).ceil().max(0.0) as u32;
         // The source opens with the upper thumb at the top and the lower at the

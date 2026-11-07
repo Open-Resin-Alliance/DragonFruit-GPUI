@@ -35,10 +35,12 @@ struct Tween {
 
 // `cameraFeelPreset = 'precise'`: rotateSpeed 0.72, panSpeed 0.82,
 // zoomSpeed 1.25, dampingFactor 0.15.
-const ROTATE_SPEED: f32 = 0.72;
-const PAN_SPEED: f32 = 0.82;
-const ZOOM_SPEED: f32 = 1.25;
+const ROTATE_SPEED: f32 = 0.72 * SENSITIVITY;
+const PAN_SPEED: f32 = 0.82 * SENSITIVITY;
+const ZOOM_SPEED: f32 = 1.25 * SENSITIVITY;
 const DAMPING: f32 = 0.15;
+/// Overall gesture gain on top of the 'precise' preset.
+const SENSITIVITY: f32 = 0.65;
 
 impl Camera {
     pub fn fit(center: Vec3, radius: f32) -> Self {
