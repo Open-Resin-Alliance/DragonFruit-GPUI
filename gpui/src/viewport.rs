@@ -444,9 +444,9 @@ impl Viewport {
                     resolve_target: Some(&self.targets.scene_view),
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.043,
-                            g: 0.059,
-                            b: 0.078,
+                            r: 0.0033,
+                            g: 0.0048,
+                            b: 0.0069,
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,
@@ -1049,8 +1049,8 @@ fn vs_main(@builtin(vertex_index) index: u32) -> @builtin(position) vec4<f32> {
 @fragment
 fn fs_main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
     let t = clamp(position.y / uniforms.resolution.y, 0.0, 1.0);
-    let top = vec3<f32>(0.006, 0.008, 0.012);
-    let bottom = vec3<f32>(0.043, 0.059, 0.078);
+    let top = vec3<f32>(0.0015, 0.0022, 0.0033);
+    let bottom = vec3<f32>(0.0033, 0.0048, 0.0069);
     return vec4<f32>(mix(top, bottom, t), 1.0);
 }
 "#;
