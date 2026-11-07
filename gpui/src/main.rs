@@ -118,6 +118,7 @@ impl Render for DragonFruit {
         let status = self.status.clone();
         let triangles = self.mesh.as_ref().map(|mesh| mesh.triangles).unwrap_or(0);
         let loading = self.loading;
+        let orthographic = self.camera.borrow().orthographic;
         let entity = cx.entity().downgrade();
 
         let canvas_camera = camera.clone();
@@ -248,7 +249,7 @@ impl Render for DragonFruit {
             .relative()
             .bg(rgb(BACKGROUND))
             .child(canvas)
-            .child(top_bar(status, triangles, entity, loading))
+            .child(top_bar(status, triangles, entity, loading, camera.clone(), orthographic))
             .child(
                 div()
                     .absolute()
@@ -266,7 +267,31 @@ fn top_bar(
     triangles: usize,
     entity: WeakEntity<DragonFruit>,
     loading: bool,
+    camera: Rc<RefCell<Camera>>,
+    orthographic: bool,
 ) -> impl IntoElement {
+    let toggle_camera = camera.clone();
+    let toggle_entity = entity.clone();
+    let projection = div()
+        .id("projection")
+        .h(px(32.))
+        .px(px(10.))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(6.))
+        .border_1()
+        .border_color(rgb(BORDER_SUBTLE))
+        .bg(rgb(0x1a1b21))
+        .text_size(px(12.))
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(rgb(TEXT_STRONG))
+        .child(if orthographic { "Ortho" } else { "Persp" })
+        .on_click(move |_, _, cx| {
+            let next = !toggle_camera.borrow().orthographic;
+            toggle_camera.borrow_mut().orthographic = next;
+            toggle_entity.update(cx, |_, cx| cx.notify()).ok();
+        });
     let mut button = div()
         .id("open-stl")
         .h(px(32.))
@@ -322,6 +347,7 @@ fn top_bar(
                 .text_color(rgb(TEXT_MUTED))
                 .child(format!("{triangles} tris")),
         )
+        .child(projection)
         .child(button)
 }
 

@@ -8,6 +8,7 @@ pub struct Camera {
     pub distance: f32,
     pub target: Vec3,
     pub fov_y: f32,
+    pub orthographic: bool,
 }
 
 impl Camera {
@@ -20,6 +21,7 @@ impl Camera {
             distance,
             target: center,
             fov_y,
+            orthographic: false,
         }
     }
 
@@ -31,12 +33,16 @@ impl Camera {
     }
 
     pub fn projection(&self, aspect: f32) -> Mat4 {
-        Mat4::perspective_rh(
-            self.fov_y,
-            aspect.max(0.0001),
-            (self.distance * 0.001).max(0.0001),
-            self.distance * 100.0,
-        )
+        let aspect = aspect.max(0.0001);
+        let near = (self.distance * 0.001).max(0.0001);
+        let far = self.distance * 100.0;
+        if self.orthographic {
+            let half_h = self.distance * (self.fov_y * 0.5).tan();
+            let half_w = half_h * aspect;
+            Mat4::orthographic_rh(-half_w, half_w, -half_h, half_h, near, far)
+        } else {
+            Mat4::perspective_rh(self.fov_y, aspect, near, far)
+        }
     }
 
     pub fn view_proj(&self, aspect: f32) -> Mat4 {
