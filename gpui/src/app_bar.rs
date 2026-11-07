@@ -537,7 +537,7 @@ pub fn app_bar(state: AppBarState, entity: WeakEntity<DragonFruit>) -> impl Into
 
     let left = ui! {
         div(
-            flex, flex_1, max_w_430, items_center, gap_10, pr_16, py_6,
+            relative, flex, flex_1, max_w_430, items_center, gap_10, pr_16, py_6,
             when(actions_disabled, opacity_45),
         ) {
             { app_menu_button }
@@ -551,7 +551,7 @@ pub fn app_bar(state: AppBarState, entity: WeakEntity<DragonFruit>) -> impl Into
 
     // ── Centre: the four workflow steps ─────────────────────────────────────
     let steps = ui! {
-        div(flex, min_w_0, flex_1, justify_center, px_8) {
+        div(relative, flex, min_w_0, flex_1, justify_center, px_8) {
             div(relative, w_full, when(actions_disabled, opacity_45)) {
                 div(flex, items_center, justify_center, gap_8) {
                     { step_button(Mode::Prepare, mode, false, actions_disabled, hide_badges, entity.clone()) }
@@ -610,7 +610,7 @@ pub fn app_bar(state: AppBarState, entity: WeakEntity<DragonFruit>) -> impl Into
     );
 
     let right = ui! {
-        div(flex, flex_1, max_w_430, items_center, justify_end, gap_8, pr_3) {
+        div(relative, flex, flex_1, max_w_430, items_center, justify_end, gap_8, pr_3) {
             div(flex, items_center, gap_8, when(actions_disabled, opacity_45)) {
                 { view_mode }
                 { overhang_button }
