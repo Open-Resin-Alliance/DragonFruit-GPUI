@@ -87,7 +87,7 @@ use std::path::PathBuf;
 
 use declarative_gpui::ui;
 use gpui::{
-    App, BoxShadow, Div, FontWeight, IntoElement, WeakEntity, WindowControlArea, div, img,
+    App, BoxShadow, Div, FontWeight, IntoElement, MouseButton, WeakEntity, WindowControlArea, div, img,
     linear_color_stop, linear_gradient, prelude::*, px, relative, rgb, rgba,
 };
 
@@ -539,6 +539,7 @@ pub fn app_bar(state: AppBarState, entity: WeakEntity<DragonFruit>) -> impl Into
         div(
             relative, flex, flex_1, max_w_430, items_center, gap_10, pr_16, py_6,
             when(actions_disabled, opacity_45),
+            on_mouse_down = move |_, _, cx| cx.stop_propagation(),
         ) {
             { app_menu_button }
             // `h-6 w-px mx-0.5 shrink-0`, `color-mix(border-subtle,
@@ -551,7 +552,10 @@ pub fn app_bar(state: AppBarState, entity: WeakEntity<DragonFruit>) -> impl Into
 
     // ── Centre: the four workflow steps ─────────────────────────────────────
     let steps = ui! {
-        div(relative, flex, min_w_0, flex_1, justify_center, px_8) {
+        div(
+            relative, flex, min_w_0, flex_1, justify_center, px_8,
+            on_mouse_down = move |_, _, cx| cx.stop_propagation(),
+        ) {
             div(relative, w_full, when(actions_disabled, opacity_45)) {
                 div(flex, items_center, justify_center, gap_8) {
                     { step_button(Mode::Prepare, mode, false, actions_disabled, hide_badges, entity.clone()) }
@@ -610,7 +614,10 @@ pub fn app_bar(state: AppBarState, entity: WeakEntity<DragonFruit>) -> impl Into
     );
 
     let right = ui! {
-        div(relative, flex, flex_1, max_w_430, items_center, justify_end, gap_8, pr_3) {
+        div(
+            relative, flex, flex_1, max_w_430, items_center, justify_end, gap_8, pr_3,
+            on_mouse_down = move |_, _, cx| cx.stop_propagation(),
+        ) {
             div(flex, items_center, gap_8, when(actions_disabled, opacity_45)) {
                 { view_mode }
                 { overhang_button }
@@ -662,18 +669,12 @@ pub fn app_bar(state: AppBarState, entity: WeakEntity<DragonFruit>) -> impl Into
             h = px(TOPBAR_HEIGHT),
             flex, items_center, gap_12,
             px_4, pt_3, pb_9,
+            on_mouse_down = move |_, window, _| {
+                crate::log::log("appbar: drag");
+                start_window_drag(window);
+            },
         ) {
             { bar_surface() }
-            // Painted above the surface so every control wins the click; the
-            // gaps between controls drag the window.
-            div(
-                id = "app-bar-drag",
-                absolute, top_0, left_0, right_0, bottom_0,
-                on_mouse_down = move |_, window, _| {
-                    crate::log::log("appbar: drag layer");
-                    start_window_drag(window);
-                },
-            ) {}
             { left }
             { steps }
             { right }
@@ -1259,6 +1260,7 @@ fn view_type_menu(value: MeshShaderType, entity: WeakEntity<DragonFruit>) -> imp
 fn menu_surface(width: f32) -> Div {
     div()
         .absolute()
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
         .w(px(width))
         .rounded(px(RADIUS_LG))
         .border_1()

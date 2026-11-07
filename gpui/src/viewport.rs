@@ -1935,8 +1935,11 @@ fn axis_arrows(metrics: &PlateMetrics) -> Vec<[f32; 6]> {
                 origin[2] + dir[2] * t + (u[2] * cos + v[2] * sin) * radius,
             ]
         };
-        let shade = |t: f32| -> [f32; 3] {
-            let k = (t / total).clamp(0.0, 1.0);
+        // The source maps the same gradient texture over each geometry: the
+        // shaft runs dark→light over its own length, and the cone restarts the
+        // gradient at its base, so the cone is not a light blob.
+        let shade = |t: f32, span: f32| -> [f32; 3] {
+            let k = (t / span).clamp(0.0, 1.0);
             [
                 base[0] + (tip[0] - base[0]) * k,
                 base[1] + (tip[1] - base[1]) * k,
@@ -1964,8 +1967,8 @@ fn axis_arrows(metrics: &PlateMetrics) -> Vec<[f32; 6]> {
             let p01 = ring(0.0, shaft_radius, a1);
             let p10 = ring(length, shaft_radius, a0);
             let p11 = ring(length, shaft_radius, a1);
-            let c0 = shade(0.0);
-            let c1 = shade(length);
+            let c0 = shade(0.0, length);
+            let c1 = shade(length, length);
             push(p00, c0);
             push(p10, c1);
             push(p11, c1);
@@ -1983,12 +1986,13 @@ fn axis_arrows(metrics: &PlateMetrics) -> Vec<[f32; 6]> {
             // Cone: `ConeGeometry(headRadius, headLength, 12)`, base capped.
             let b0 = ring(length, head_radius, a0);
             let b1 = ring(length, head_radius, a1);
-            push(b0, c1);
-            push(b1, c1);
-            push(tip_point, shade(total));
-            push(center_at(length), c1);
-            push(b1, c1);
-            push(b0, c1);
+            let cone_base = shade(0.0, head_length);
+            push(b0, cone_base);
+            push(b1, cone_base);
+            push(tip_point, shade(head_length, head_length));
+            push(center_at(length), cone_base);
+            push(b1, cone_base);
+            push(b0, cone_base);
         }
     }
     out
