@@ -1735,6 +1735,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be1e0bca6c3637f992fc1cc7cbc52a78c1ef6db076dbf1059c4323d6a2048376"
 
 [[package]]
+name = "declarative-gpui"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1923aedc7148cc4c62a26dfd658df77ade1d7b8721cbe5e460360c2020c518b3"
+dependencies = [
+ "declarative-gpui-core",
+ "proc-macro2",
+]
+
+[[package]]
+name = "declarative-gpui-core"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e742b53d84f22dc3f4cc62b4f94a3e7a78e475dec1756cd2c4b57ff70bf51a35"
+dependencies = [
+ "prettyplease",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "deranged"
 version = "0.5.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1856,6 +1878,7 @@ dependencies = [
  "bite-gp-wgpu",
  "bite-gpui",
  "bytemuck",
+ "declarative-gpui",
  "dragonfruit-mesh-core",
  "fontdue",
  "glam",

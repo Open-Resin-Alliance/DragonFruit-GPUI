@@ -1,7 +1,14 @@
 //! DragonFruit's GPUI frontend, first slice: a 3D viewport with STL loading.
 
+mod app_bar;
 mod camera;
+mod icons;
+mod overlays;
+mod panels;
+mod rail;
 mod stl;
+mod theme;
+mod ui;
 mod viewport;
 mod window;
 
@@ -503,6 +510,8 @@ impl Render for DragonFruit {
         div()
             .size_full()
             .relative()
+            .font_family("Geist")
+            .text_size(px(14.))
             .bg(rgb(BACKGROUND))
             .track_focus(&self.focus)
             .on_mouse_move({
@@ -2533,7 +2542,35 @@ fn rasterize_logo() -> Option<PathBuf> {
     Some(path)
 }
 
+#[cfg(windows)]
+fn register_fonts() {
+    use std::os::windows::ffi::OsStrExt;
+    unsafe extern "system" {
+        fn AddFontResourceExW(name: *const u16, fl: u32, res: *mut core::ffi::c_void) -> i32;
+    }
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/fonts");
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if entry.path().extension().and_then(|ext| ext.to_str()) != Some("ttf") {
+            continue;
+        }
+        let wide: Vec<u16> = entry
+            .path()
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+        // FR_PRIVATE: visible to this process only.
+        unsafe {
+            AddFontResourceExW(wide.as_ptr(), 0x10, std::ptr::null_mut());
+        }
+    }
+}
+
 fn main() {
+    register_fonts();
     gpui::application().run(|cx: &mut App| {
         let bounds = Bounds::centered(None, size(px(1280.), px(800.)), cx);
         let options = window::with_wgpu_renderer(WindowOptions {

@@ -21,6 +21,7 @@ rfd = "0.15"
 dragonfruit-mesh-core = { path = "../rust/dragonfruit-mesh-core" }
 resvg = "0.45"
 fontdue = "0.9"
+declarative-gpui = "0.3"
 
 [profile.dev]
 opt-level = 1
