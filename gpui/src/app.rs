@@ -684,7 +684,11 @@ impl Render for DragonFruit {
                         model_z,
                     );
                     entity
-                        .update(cx, |this, _| this.grab = plane_hit.map(|hit| (hit, this.translate)))
+                        .update(cx, |this, cx| {
+                            this.selected.set(true);
+                            this.grab = plane_hit.map(|hit| (hit, this.translate));
+                            cx.notify();
+                        })
                         .ok();
                     return;
                 }
