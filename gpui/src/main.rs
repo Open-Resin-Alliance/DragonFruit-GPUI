@@ -213,7 +213,8 @@ impl Render for DragonFruit {
             let drag = drag.clone();
             let last = last.clone();
             let camera = camera.clone();
-            move |event, window, _| {
+            let entity = entity.clone();
+            move |event, _window, cx| {
                 if let Some(button) = drag.get() {
                     let (lx, ly) = last.get();
                     let dx = event.position.x.0 - lx;
@@ -225,19 +226,20 @@ impl Render for DragonFruit {
                         MouseButton::Right => camera.pan(dx, dy),
                         _ => {}
                     }
-                    window.request_animation_frame();
+                    entity.update(cx, |_, cx| cx.notify()).ok();
                 }
             }
         })
         .on_scroll_wheel({
             let camera = camera.clone();
-            move |event, window, _| {
+            let entity = entity.clone();
+            move |event, _window, cx| {
                 let delta = match event.delta {
                     ScrollDelta::Lines(point) => point.y,
                     ScrollDelta::Pixels(point) => point.y.0 / 40.0,
                 };
                 camera.borrow_mut().zoom(delta);
-                window.request_animation_frame();
+                entity.update(cx, |_, cx| cx.notify()).ok();
             }
         });
 

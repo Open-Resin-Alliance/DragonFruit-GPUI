@@ -82,7 +82,12 @@ pub fn load_stl(path: &Path) -> Result<MeshData> {
         (min.y + max.y) * 0.5,
         (min.z + max.z) * 0.5,
     );
-    let radius = ((max.sub(min)).length() * 0.5).max(0.001);
+    let mut radius: f32 = 0.0;
+    for p in &mesh.positions {
+        let d = GVec3::new(p.x - center.x, p.y - center.y, p.z - center.z).length();
+        radius = radius.max(d);
+    }
+    let radius = radius.max(0.001);
 
     let vertices = mesh
         .positions
