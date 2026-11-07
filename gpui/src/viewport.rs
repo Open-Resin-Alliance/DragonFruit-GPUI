@@ -576,12 +576,13 @@ impl Viewport {
             label: Some("viewport linear sampler"),
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
             ..Default::default()
         });
+        let mip = MipGenerator::new(device);
 
         let (front_w, front_h, front_data) = front_texture();
-        let front_tex = create_texture(device, queue, "front decal", front_w, front_h, &front_data);
+        let front_tex = mip.create(device, queue, "front decal", front_w, front_h, &front_data);
         let front_view = front_tex.create_view(&wgpu::TextureViewDescriptor::default());
         let front_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("viewport front decal"),
@@ -598,7 +599,7 @@ impl Viewport {
             ],
         });
         let (logo_w, logo_h, logo_data) = logo_texture();
-        let logo_tex = create_texture(device, queue, "logo decal", logo_w, logo_h, &logo_data);
+        let logo_tex = mip.create(device, queue, "logo decal", logo_w, logo_h, &logo_data);
         let logo_view = logo_tex.create_view(&wgpu::TextureViewDescriptor::default());
         let logo_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("viewport logo decal"),
@@ -893,7 +894,7 @@ impl Viewport {
         });
         let label_bind = |letter: &str, color: u32| {
             let (w, h, data) = axis_label_texture(letter, color);
-            let texture = create_texture(device, queue, letter, w, h, &data);
+            let texture = mip.create(device, queue, letter, w, h, &data);
             let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
             device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some(letter),
@@ -2244,48 +2245,188 @@ fn plate_mesh(metrics: &PlateMetrics) -> (Vec<Vertex>, Vec<u32>) {
     (vertices, indices)
 }
 
-fn create_texture(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    label: &str,
-    width: u32,
-    height: u32,
-    data: &[u8],
-) -> wgpu::Texture {
-    let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some(label),
-        size: wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8UnormSrgb,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-        view_formats: &[],
-    });
-    queue.write_texture(
-        wgpu::TexelCopyTextureInfo {
-            texture: &texture,
-            mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            aspect: wgpu::TextureAspect::All,
-        },
-        data,
-        wgpu::TexelCopyBufferLayout {
-            offset: 0,
-            bytes_per_row: Some(width * 4),
-            rows_per_image: Some(height),
-        },
-        wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        },
-    );
-    texture
+/// Generates the mip chain for the decal textures. The source's
+/// `CanvasTexture`s use `LinearMipmapLinearFilter`; without mips the 1772px
+/// wordmark sampled onto a 42mm quad aliases badly.
+struct MipGenerator {
+    pipeline: wgpu::RenderPipeline,
+    layout: wgpu::BindGroupLayout,
+    sampler: wgpu::Sampler,
+}
+
+impl MipGenerator {
+    fn new(device: &wgpu::Device) -> Self {
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("viewport mip"),
+            source: wgpu::ShaderSource::Wgsl(MIP_SHADER.into()),
+        });
+        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("viewport mip"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("viewport mip"),
+            bind_group_layouts: &[Some(&layout)],
+            immediate_size: 0,
+        });
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("viewport mip"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                buffers: &[],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("viewport mip sampler"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
+            ..Default::default()
+        });
+        Self {
+            pipeline,
+            layout,
+            sampler,
+        }
+    }
+
+    fn create(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        label: &str,
+        width: u32,
+        height: u32,
+        data: &[u8],
+    ) -> wgpu::Texture {
+        let levels = 32 - width.max(height).leading_zeros();
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some(label),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: levels,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_DST
+                | wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            data,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(width * 4),
+                rows_per_image: Some(height),
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+        if levels > 1 {
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("viewport mips"),
+            });
+            for level in 1..levels {
+                let source = texture.create_view(&wgpu::TextureViewDescriptor {
+                    base_mip_level: level - 1,
+                    mip_level_count: Some(1),
+                    ..Default::default()
+                });
+                let destination = texture.create_view(&wgpu::TextureViewDescriptor {
+                    base_mip_level: level,
+                    mip_level_count: Some(1),
+                    ..Default::default()
+                });
+                let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("viewport mip"),
+                    layout: &self.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: wgpu::BindingResource::TextureView(&source),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::Sampler(&self.sampler),
+                        },
+                    ],
+                });
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("viewport mip pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &destination,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+                pass.set_pipeline(&self.pipeline);
+                pass.set_bind_group(0, &bind, &[]);
+                pass.draw(0..3, 0..1);
+            }
+            queue.submit(Some(encoder.finish()));
+        }
+        texture
+    }
 }
 
 fn front_texture() -> (u32, u32, Vec<u8>) {
@@ -2650,6 +2791,35 @@ fn vs_main(@location(0) center: vec3<f32>, @location(1) uv: vec2<f32>) -> Sprite
 
 @fragment
 fn fs_main(in: SpriteOut) -> @location(0) vec4<f32> {
+    return textureSample(tex, samp, in.uv);
+}
+"#;
+
+const MIP_SHADER: &str = r#"
+@group(0) @binding(0) var tex: texture_2d<f32>;
+@group(0) @binding(1) var samp: sampler;
+
+struct MipOut {
+    @builtin(position) position: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+};
+
+@vertex
+fn vs_main(@builtin(vertex_index) index: u32) -> MipOut {
+    var positions = array<vec2<f32>, 3>(
+        vec2<f32>(-1.0, -1.0),
+        vec2<f32>(3.0, -1.0),
+        vec2<f32>(-1.0, 3.0),
+    );
+    let p = positions[index];
+    var out: MipOut;
+    out.position = vec4<f32>(p, 0.0, 1.0);
+    out.uv = vec2<f32>((p.x + 1.0) * 0.5, (1.0 - p.y) * 0.5);
+    return out;
+}
+
+@fragment
+fn fs_main(in: MipOut) -> @location(0) vec4<f32> {
     return textureSample(tex, samp, in.uv);
 }
 "#;
