@@ -99,6 +99,7 @@ fn layer_rail() -> Div {
                 .rounded(px(4.))
                 .bg(rgb(ACCENT))
                 .text_size(px(10.))
+                .line_height(px(14.5))
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(rgb(0xffffff))
                 .child("960"),
@@ -150,16 +151,17 @@ fn panel_header() -> Div {
         .flex()
         .items_center()
         .gap(px(10.))
-        .child(icon_tile(CHEVRON_DOWN, ACCENT, 12., 28.))
+        .child(icon_tile(CHEVRON_DOWN, ACCENT, 12., 30.))
         .child(
             div()
-                .text_size(px(13.))
+                .text_size(px(14.))
+                .line_height(px(16.8))
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(rgb(TEXT_STRONG))
                 .child("Auto Supports (Beta)"),
         )
         .child(div().flex_1())
-        .child(icon_tile(SETTINGS, TEXT_MUTED, 14., 26.))
+        .child(icon_tile(SETTINGS, TEXT_MUTED, 14., 28.))
 }
 
 fn panel_body() -> Div {
@@ -185,7 +187,8 @@ fn run_button() -> Div {
         .border_1()
         .border_color(rgb(ACCENT))
         .bg(rgb(RUN_FILL))
-        .text_size(px(11.))
+        .text_size(px(14.))
+        .line_height(px(14.))
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(rgb(ACCENT))
         .child("Generate Supports")
@@ -211,10 +214,10 @@ fn count_cell(label: &str, value: &str, accent: bool) -> Div {
         .flex()
         .flex_col()
         .items_center()
-        .gap(px(2.))
         .child(
             div()
                 .text_size(px(10.))
+                .line_height(px(14.5))
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(rgb(TEXT_MUTED))
                 .child(label.to_owned()),
@@ -222,6 +225,7 @@ fn count_cell(label: &str, value: &str, accent: bool) -> Div {
         .child(
             div()
                 .text_size(px(13.))
+                .line_height(px(18.85))
                 .font_weight(FontWeight::BOLD)
                 .text_color(if accent { rgb(ACCENT) } else { rgb(TEXT_STRONG) })
                 .child(value.to_owned()),
@@ -253,7 +257,8 @@ fn preset_select() -> Div {
                 .w_full()
                 .pr(px(26.))
                 .text_center()
-                .text_size(px(12.))
+                .text_size(px(13.))
+                .line_height(px(13.))
                 .text_color(rgb(TEXT_STRONG))
                 .child("Medium"),
         )
@@ -261,7 +266,7 @@ fn preset_select() -> Div {
             div()
                 .absolute()
                 .right(px(12.))
-                .child(icon(CHEVRON_DOWN, TEXT_MUTED, 12.)),
+                .child(icon(CHEVRON_DOWN, TEXT_MUTED, 14.)),
         )
 }
 
@@ -276,7 +281,8 @@ fn auto_lift_button() -> Div {
         .border_1()
         .border_color(rgb(BORDER_SUBTLE))
         .bg(rgb(SURFACE_1))
-        .text_size(px(11.))
+        .text_size(px(14.))
+        .line_height(px(14.))
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(rgb(TEXT_STRONG))
         .child("Auto-Lift OFF")
