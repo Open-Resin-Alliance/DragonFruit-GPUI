@@ -18,6 +18,9 @@ pub struct Camera {
     goal_target: Vec3,
     /// Home / focus tween: (start pose, end pose, elapsed seconds, duration).
     tween: Option<Tween>,
+    /// True while a pointer drag is in progress: the camera then tracks the
+    /// pointer almost immediately, and only the release keeps the soft tail.
+    dragging: bool,
 }
 
 struct Tween {
@@ -59,6 +62,7 @@ impl Camera {
             goal_distance: distance,
             goal_target: center,
             tween: None,
+            dragging: false,
         }
     }
 
@@ -116,6 +120,10 @@ impl Camera {
     }
 
     /// OrbitControls: `2π * rotateSpeed / clientHeight` radians per pixel.
+    pub fn set_dragging(&mut self, dragging: bool) {
+        self.dragging = dragging;
+    }
+
     pub fn orbit(&mut self, dx: f32, dy: f32, viewport_height: f32) {
         let factor = std::f32::consts::TAU * ROTATE_SPEED / viewport_height.max(1.0);
         self.goal_yaw -= dx * factor;
@@ -220,9 +228,11 @@ impl Camera {
         // OrbitControls applies the whole pending delta, then decays it.
         let mut moving = false;
         const LIMIT: f32 = std::f32::consts::FRAC_PI_2 - 0.001;
-        // Framerate-independent exponential smoothing: ~90% of the distance is
-        // covered in 160ms.
-        let alpha = 1.0 - (-14.0 * dt).exp();
+        // Framerate-independent exponential smoothing. While the pointer drags
+        // the rate is high (the view tracks the hand); after release it drops
+        // to the soft settling rate, which is the visible tail.
+        let rate = if self.dragging { 45.0 } else { 14.0 };
+        let alpha = 1.0 - (-rate * dt).exp();
         let mut approach = |value: &mut f32, goal: f32, eps: f32| {
             let delta = goal - *value;
             if delta.abs() > eps {

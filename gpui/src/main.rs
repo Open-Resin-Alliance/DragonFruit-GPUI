@@ -638,8 +638,10 @@ impl Render for DragonFruit {
         .on_mouse_down(MouseButton::Right, {
             let drag = drag.clone();
             let last = last.clone();
+            let camera = camera.clone();
             move |event, _, _| {
                 drag.set(Some(MouseButton::Right));
+                camera.borrow_mut().set_dragging(true);
                 last.set((event.position.x.0, event.position.y.0));
             }
         })
@@ -653,17 +655,21 @@ impl Render for DragonFruit {
         })
         .on_mouse_up(MouseButton::Right, {
             let drag = drag.clone();
+            let camera = camera.clone();
             move |_, _, _| {
                 if drag.get() == Some(MouseButton::Right) {
                     drag.set(None);
+                    camera.borrow_mut().set_dragging(false);
                 }
             }
         })
         .on_mouse_up(MouseButton::Middle, {
             let drag = drag.clone();
+            let camera = camera.clone();
             move |_, _, _| {
                 if drag.get() == Some(MouseButton::Middle) {
                     drag.set(None);
+                    camera.borrow_mut().set_dragging(false);
                 }
             }
         })
