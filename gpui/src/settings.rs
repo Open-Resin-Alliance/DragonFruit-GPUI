@@ -604,6 +604,7 @@ pub enum SliceSatRender {
     Wireframe,
 }
 
+#[derive(Clone)]
 pub struct View3dState {
     pub enabled: bool,
     pub width_mm: f32,
@@ -648,6 +649,7 @@ pub enum PlateOrdering {
     Dynamic,
 }
 
+#[derive(Clone)]
 pub struct MultiPlateState {
     pub follow_landed_plate: bool,
     pub plate_ordering: PlateOrdering,
@@ -672,6 +674,7 @@ pub enum PivotMode {
     CameraRay,
 }
 
+#[derive(Clone)]
 pub struct SpaceMouseState {
     pub enabled: bool,
     pub pivot_mode: PivotMode,
@@ -719,6 +722,7 @@ pub struct HotkeyBinding {
     pub modifier: Option<String>,
 }
 
+#[derive(Clone)]
 pub struct HotkeyState {
     /// `(category, action)` of the row whose recording overlay is open.
     pub recording: Option<(&'static str, &'static str)>,
@@ -762,6 +766,7 @@ impl HotkeyState {
 
 // ── Plugins (`PluginsSettingsTab.tsx`) ───────────────────────────────────
 
+#[derive(Clone)]
 pub struct PluginsState {
     pub repo_url: String,
     pub allowance_dialog_open: bool,
@@ -810,6 +815,7 @@ const BUILTIN_PLUGINS: [BuiltinPlugin; 1] = [BuiltinPlugin {
 
 // ── Experiments (`experimentsRegistry.ts`) ───────────────────────────────
 
+#[derive(Clone)]
 pub struct ExperimentsState {
     /// Module-level `disclaimerSeenThisLaunch`; only "I understand" sets it.
     pub disclaimer_seen: bool,
@@ -833,6 +839,7 @@ impl Default for ExperimentsState {
 
 // ── Scene Autosave (`sceneAutosavePreferences.ts`) ───────────────────────
 
+#[derive(Clone)]
 pub struct AutosaveState {
     pub enabled: bool,
     pub recovery_prompt_enabled: bool,
@@ -855,6 +862,7 @@ impl Default for AutosaveState {
 
 // ── Backups (`LocalBackupsSettingsTab.tsx`) ──────────────────────────────
 
+#[derive(Clone)]
 pub struct BackupsState {
     pub selected_directory: String,
     pub auto_sync_enabled: bool,
@@ -879,6 +887,7 @@ impl Default for BackupsState {
 
 // ── UVTools (`uvToolsPreferences.ts`) ────────────────────────────────────
 
+#[derive(Clone)]
 pub struct UvToolsState {
     pub enabled: bool,
     pub custom_path: String,
@@ -901,6 +910,7 @@ impl Default for UvToolsState {
 
 // ── Logging (`LoggingSettingsTab.tsx`) ───────────────────────────────────
 
+#[derive(Clone)]
 pub struct LoggingState {
     pub level: &'static str,
     pub viewer_filter: &'static str,
@@ -931,6 +941,7 @@ pub enum UpdateChannel {
     Dev,
 }
 
+#[derive(Clone)]
 pub struct UpdatesState {
     pub channel: UpdateChannel,
     pub pending_channel: UpdateChannel,
@@ -949,6 +960,7 @@ impl Default for UpdatesState {
 
 // ── About (`SettingsModal.tsx`) ──────────────────────────────────────────
 
+#[derive(Clone)]
 pub struct AboutState {
     pub copied: bool,
 }
@@ -961,6 +973,7 @@ impl Default for AboutState {
 
 /// The modal's draft. Mirrors the `draft*` state in `SettingsModal`; `Apply`
 /// hands it to the parent once the parent owns the fields.
+#[derive(Clone)]
 pub struct SettingsState {
     pub language: usize,
     pub ui_scale: f32,
@@ -1208,11 +1221,15 @@ pub fn settings_modal(
         return div();
     }
 
-    let guard = state().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    let state: &SettingsState = &guard;
+    // Snapshot the draft: holding the lock across `content` deadlocks because
+    // the select fields lock it again to read `open_select`.
+    let snapshot = state()
+        .lock()
+        .map(|guard| guard.clone())
+        .unwrap_or_default();
     let tab = SettingsTab::from_index(tab);
 
-    let (body, overlay) = content(tab, state, entity.clone());
+    let (body, overlay) = content(tab, &snapshot, entity.clone());
 
     let backdrop_entity = entity.clone();
     let card = div()
@@ -1258,7 +1275,7 @@ pub fn settings_modal(
     if let Some(overlay) = overlay {
         layer = layer.child(overlay);
     }
-    if state.show_restore_confirm {
+    if snapshot.show_restore_confirm {
         layer = layer.child(restore_defaults_dialog(entity));
     }
     layer
