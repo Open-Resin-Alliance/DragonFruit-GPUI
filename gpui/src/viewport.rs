@@ -31,6 +31,13 @@ struct OverlayUniform {
     _pad: [f32; 3],
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct ModelUniform {
+    matrix: [[f32; 4]; 4],
+    clip: [f32; 4],
+}
+
 struct GpuMesh {
     vertex_buffer: wgpu::Buffer,
     vertex_count: u32,
@@ -309,7 +316,7 @@ impl Viewport {
             label: Some("viewport model"),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
@@ -326,7 +333,7 @@ impl Viewport {
             });
         let model_uniform = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("viewport model"),
-            size: 64,
+            size: 80,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -723,6 +730,7 @@ impl Viewport {
         supports: &[[f32; 3]],
         layers: ViewLayers,
         model: glam::Mat4,
+        clip_z: f32,
         gizmo: Option<[f32; 3]>,
         camera: &Camera,
         base_color: [f32; 3],
@@ -792,7 +800,10 @@ impl Viewport {
         queue.write_buffer(
             &self.model_uniform,
             0,
-            bytemuck::cast_slice(&model.to_cols_array_2d()),
+            bytemuck::bytes_of(&ModelUniform {
+                matrix: model.to_cols_array_2d(),
+                clip: [clip_z, 0.0, 0.0, 0.0],
+            }),
         );
         match gizmo {
             Some(origin) if origin != self.gizmo_origin => {
@@ -1597,6 +1608,7 @@ struct Uniforms {
 
 struct Model {
     matrix: mat4x4<f32>,
+    clip: vec4<f32>,
 };
 @group(1) @binding(0) var<uniform> model: Model;
 
@@ -1645,6 +1657,9 @@ fn specular(n: vec3<f32>, v: vec3<f32>, l: vec3<f32>, roughness: f32, f0: vec3<f
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
+    if (in.world.z > model.clip.x) {
+        discard;
+    }
     let n = normalize(in.normal);
     let view_dir = normalize(uniforms.camera_pos - in.world);
 

@@ -203,6 +203,16 @@ impl Render for DragonFruit {
             glam::Quat::from_rotation_z(self.rotate_z),
             glam::Vec3::from_array(self.translate),
         );
+        let clip_z = if self.mode == Mode::Printing {
+            self.mesh
+                .as_ref()
+                .map(|mesh| {
+                    mesh.center.z - mesh.size[2] * 0.5 + self.layer * mesh.size[2]
+                })
+                .unwrap_or(f32::INFINITY)
+        } else {
+            f32::INFINITY
+        };
         let gizmo = if self.active_tool < 3 {
             self.mesh.as_ref().map(|mesh| {
                 model_matrix
@@ -268,6 +278,7 @@ impl Render for DragonFruit {
                 &supports.borrow(),
                 show_layers,
                 model_matrix,
+                clip_z,
                 gizmo,
                 &canvas_camera.borrow(),
                 base_color,
