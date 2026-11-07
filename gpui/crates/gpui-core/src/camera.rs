@@ -118,12 +118,14 @@ impl Camera {
     /// OrbitControls: `2π * rotateSpeed / clientHeight` radians per pixel.
     pub fn orbit(&mut self, dx: f32, dy: f32, viewport_height: f32) {
         let factor = std::f32::consts::TAU * ROTATE_SPEED / viewport_height.max(1.0);
-        self.pending_yaw -= dx * factor;
+        // Apply the event's delta immediately: the camera must track the
+        // pointer at the event rate, not the render rate.
+        self.yaw -= dx * factor;
         // OrbitControls leaves the polar range at its default 0..π, so a
         // straight top-down view is reachable; only the look-at singularity
         // (forward parallel to up) is excluded.
         const LIMIT: f32 = std::f32::consts::FRAC_PI_2 - 0.001;
-        self.pending_pitch += dy * factor;
+        self.pitch = (self.pitch + dy * factor).clamp(-LIMIT, LIMIT);
     }
 
     /// OrbitControls' screen-space pan: `panSpeed * (2 * distance *
@@ -134,13 +136,14 @@ impl Camera {
         let up = right.cross(forward).normalize();
         let scale = PAN_SPEED * 2.0 * self.distance * (self.fov_y * 0.5).tan()
             / viewport_height.max(1.0);
-        self.pending_pan += right * (-dx * scale) + up * (dy * scale);
+        self.target += right * (-dx * scale) + up * (dy * scale);
     }
 
     pub fn zoom(&mut self, delta: f32) {
         // OrbitControls' wheel scale: `0.95^zoomSpeed` per wheel event, one
         // step regardless of the event's magnitude.
-        self.pending_zoom += delta.signum() * ZOOM_SPEED;
+        self.distance = (self.distance * 0.95f32.powf(delta.signum() * ZOOM_SPEED))
+            .clamp(0.01, 1.0e6);
     }
 
     /// `CameraHomeResetController`: the home pose is the orbit target plus
