@@ -26,6 +26,10 @@ pub struct MeshData {
     pub radius: f32,
     pub triangles: usize,
     pub name: String,
+    /// Bounding-box size in millimetres.
+    pub size: [f32; 3],
+    /// Signed volume in cubic millimetres.
+    pub volume: f32,
 }
 
 pub fn load_stl(path: &Path) -> Result<MeshData> {
@@ -98,12 +102,22 @@ pub fn load_stl(path: &Path) -> Result<MeshData> {
     let radius = radius.max(0.001);
     let footprint = convex_hull(&mesh.positions);
 
+    let mut volume = 0.0f64;
+    for tri in &mesh.triangles {
+        let a = mesh.positions[tri[0] as usize];
+        let b = mesh.positions[tri[1] as usize];
+        let c = mesh.positions[tri[2] as usize];
+        volume += a.dot(b.cross(c)) as f64 / 6.0;
+    }
+
     Ok(MeshData {
         vertices,
         footprint,
         center,
         radius,
         triangles: mesh.triangles.len(),
+        size: [max.x - min.x, max.y - min.y, max.z - min.z],
+        volume: volume.abs() as f32,
         name: path
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())

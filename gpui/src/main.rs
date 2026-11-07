@@ -90,6 +90,7 @@ struct DragonFruit {
     focused: bool,
     show_printer_menu: bool,
     show_help: bool,
+    show_support_settings: bool,
     active_tool: usize,
     window_width: f32,
 }
@@ -122,6 +123,7 @@ impl DragonFruit {
             focused: false,
             show_printer_menu: false,
             show_help: false,
+            show_support_settings: false,
             active_tool: 0,
             window_width: 0.0,
         };
@@ -325,6 +327,11 @@ impl Render for DragonFruit {
         let mode = self.mode;
         let show_settings = self.show_settings;
         let layer = self.layer;
+        let (size, volume) = self
+            .mesh
+            .as_ref()
+            .map(|mesh| (mesh.size, mesh.volume))
+            .unwrap_or(([0.0; 3], 0.0));
 
         self.window_width = window.viewport_size().width.0;
         if !self.focused {
@@ -384,13 +391,16 @@ impl Render for DragonFruit {
                 mode,
             ))
             .child(orientation_cube(camera.clone(), entity.clone()))
-            .child(info_card(mesh_name, triangles))
+            .child(info_card(mesh_name, triangles, size, volume))
             .child(layer_bar(layer, entity.clone(), self.window_width))
             .when(show_settings, |this| {
                 this.child(settings_modal(entity.clone()))
             })
             .when(self.show_help, |this| {
                 this.child(help_modal(entity.clone()))
+            })
+            .when(self.show_support_settings, |this| {
+                this.child(support_settings_modal(entity.clone()))
             })
     }
 }
@@ -841,7 +851,7 @@ fn left_panel(
                 .child(add_button),
         )
         .child(match mode {
-            Mode::Prepare | Mode::Support => support_card(),
+            Mode::Prepare | Mode::Support => support_card(entity.clone()),
             Mode::Export => export_card(),
             Mode::Printing => printing_card(),
         })
@@ -849,6 +859,7 @@ fn left_panel(
 
 fn card_shell(title: &'static str) -> gpui::Div {
     div()
+        .relative()
         .flex()
         .flex_col()
         .gap(px(8.))
@@ -866,8 +877,34 @@ fn card_shell(title: &'static str) -> gpui::Div {
         )
 }
 
-fn support_card() -> gpui::Div {
-    card_shell("Auto Supports (Beta)")
+fn support_card(entity: WeakEntity<DragonFruit>) -> gpui::Div {
+    let gear_entity = entity.clone();
+    let mut card = card_shell("Auto Supports (Beta)");
+    card = card.child(
+        div()
+            .id("support-settings")
+            .absolute()
+            .top(px(6.))
+            .right(px(6.))
+            .w(px(20.))
+            .h(px(20.))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(4.))
+            .text_size(px(11.))
+            .text_color(rgb(TEXT_MUTED))
+            .child("\u{2699}")
+            .on_click(move |_, _, cx| {
+                gear_entity
+                    .update(cx, |this, cx| {
+                        this.show_support_settings = true;
+                        cx.notify();
+                    })
+                    .ok();
+            }),
+    );
+    card
         .child(
             div()
                 .flex()
@@ -1006,7 +1043,9 @@ fn orientation_cube(
         )
 }
 
-fn info_card(mesh_name: String, triangles: usize) -> impl IntoElement {
+fn info_card(mesh_name: String, triangles: usize, size: [f32; 3], volume: f32) -> impl IntoElement {
+    let dimensions = format!("{:.1} × {:.1} × {:.1} mm", size[0], size[1], size[2]);
+    let volume = format!("{:.1} cm³", volume / 1000.0);
     div()
         .absolute()
         .bottom(px(64.))
@@ -1027,8 +1066,8 @@ fn info_card(mesh_name: String, triangles: usize) -> impl IntoElement {
                 .text_color(rgb(TEXT_STRONG))
                 .child(mesh_name),
         )
-        .child(info_row("Dimensions", "—"))
-        .child(info_row("Volume", "—"))
+        .child(info_row("Dimensions", &dimensions))
+        .child(info_row("Volume", &volume))
         .child(info_row("Triangles", &format!("{triangles}")))
 }
 
@@ -1221,6 +1260,70 @@ fn settings_modal(entity: WeakEntity<DragonFruit>) -> impl IntoElement {
                         .child(modal_row("Accent", "#ec2a77"))
                         .child(modal_row("Build plate", "Rectangle")),
                 ),
+        )
+}
+
+fn support_settings_modal(entity: WeakEntity<DragonFruit>) -> impl IntoElement {
+    let close_entity = entity.clone();
+    div()
+        .absolute()
+        .top(px(0.))
+        .left(px(0.))
+        .size_full()
+        .bg(rgba(0x000000b3))
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(
+            div()
+                .w(px(460.))
+                .rounded(px(12.))
+                .border_1()
+                .border_color(rgb(BORDER_SUBTLE))
+                .bg(rgb(SURFACE_0))
+                .p(px(16.))
+                .flex()
+                .flex_col()
+                .gap(px(10.))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .child(
+                            div()
+                                .text_size(px(15.))
+                                .font_weight(FontWeight::BOLD)
+                                .text_color(rgb(TEXT_STRONG))
+                                .child("Auto Supports (Beta) Settings"),
+                        )
+                        .child(
+                            div()
+                                .id("support-settings-close")
+                                .w(px(26.))
+                                .h(px(26.))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .rounded(px(6.))
+                                .bg(rgb(SURFACE_1))
+                                .text_size(px(13.))
+                                .text_color(rgb(TEXT_MUTED))
+                                .child("\u{00D7}")
+                                .on_click(move |_, _, cx| {
+                                    close_entity
+                                        .update(cx, |this, cx| {
+                                            this.show_support_settings = false;
+                                            cx.notify();
+                                        })
+                                        .ok();
+                                }),
+                        ),
+                )
+                .child(modal_row("Density", "0.50"))
+                .child(modal_row("Overhang angle", "45°"))
+                .child(modal_row("Preset", "Default"))
+                .child(modal_row("Stability", "Balanced")),
         )
 }
 
