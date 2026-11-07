@@ -270,6 +270,10 @@
             {
               "label": "GPUI Port Parity",
               "slug": "dev/gpui-port-parity"
+            },
+            {
+              "label": "GPUI Widgets",
+              "slug": "dev/gpui-widgets"
             }
           ]
         },
