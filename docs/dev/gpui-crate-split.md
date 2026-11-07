@@ -1,84 +1,68 @@
-# GPUI crate split
+# GPUI crate and module split
 
-The port starts as one binary crate. That makes every edit rebuild the whole
-12k-line frontend and blocks any future hot-reload. The target is a workspace
-of small crates, one per GUI system, so editing a panel rebuilds that panel and
-the final link only.
+The port is a workspace with two library crates and one binary. Everything the
+GUI shares goes in a crate; everything that composes the window into a tree
+stays in the binary, grouped by area.
 
-## Dependency graph
+## Layout
 
 ```
-gpui-app (bin)          window, render composition, main
-├── gpui-app-bar
-├── gpui-rail
-├── gpui-panels
-├── gpui-panel-content
-├── gpui-overlays
-├── gpui-settings
-└── gpui-ui             atoms
-    └── gpui-core       theme, icons, camera, stl, viewport, state
+gpui/                       the binary: window bootstrap + the render tree
+├── src/main.rs             module declarations, App, main()
+├── src/app.rs              DragonFruit: state, actions, `Render`
+├── src/chrome/             app_bar, rail, overlays        (the window frame)
+├── src/panels/             list, content, empty_scene      (the panel column)
+├── src/features/           settings, scene_modals, support_panels, tool_panels,
+│                           transform_panel, arrange_panels, smoothing_panel,
+│                           organic_cut_panel, auto_support_settings, printing_preview
+├── src/widgets/            plate_widgets, prepare_stack, notifications
+└── crates/
+    ├── gpui-core/          theme, icons, fonts, camera, stl, viewport, cube,
+    │                       window, log, state, support_state, empty_state,
+    │                       panel_layout
+    └── gpui-ui/            the widget library: ui (buttons, cards, controls,
+                            feedback), panel_fields
 ```
 
-- `gpui-core` owns `DragonFruit`, `Mode`, `PanelLayout` (state only), the
-  camera, the STL loader, the wgpu viewport, the generated theme and the icon
-  set, plus `assets/icons` and `assets/fonts`.
-- `gpui-ui` owns the atoms. It depends on `gpui-core` for tokens and icons.
-- Each feature crate owns exactly one module's renderer and depends on
-  `gpui-core` + `gpui-ui`. Feature crates never depend on each other.
-- `gpui-app` is the only crate that implements `Render for DragonFruit` and
-  composes the tree.
+`gpui-core` owns the generated theme (`theme.rs`, emitted by
+`scripts/generate-gpui-theme.py`), the icon set and every value the port has
+pinned against the React sources. `gpui-ui` owns presentation only: it depends
+on `gpui-core` for tokens and never on the binary.
 
-Module map:
+## Why the feature modules are not crates
 
-| Crate | Modules |
-|---|---|
-| `gpui-core` | `theme`, `icons`, `camera`, `stl`, `viewport`, `window`, `fonts`, state (`DragonFruit`, `Mode`, `PanelLayout`) |
-| `gpui-ui` | `ui`, `panel_fields` |
-| `gpui-app-bar` | `app_bar`, `view_type` |
-| `gpui-rail` | `rail` |
-| `gpui-panels` | `panels` |
-| `gpui-panel-content` | `panel_content`, `support_panels`, `prepare_stack`, `transform_panel`, `arrange_panels`, `smoothing_panel`, `organic_cut_panel` |
-| `gpui-overlays` | `overlays`, `plate_widgets` |
-| `gpui-settings` | `settings` |
-| `gpui-app` | `main` |
+`Render` is gpui's trait, so only the crate that defines `DragonFruit` can
+implement it — and that impl composes every feature. A feature crate would have
+to name `DragonFruit` to take a `WeakEntity<DragonFruit>`, which makes the
+dependency cyclic the moment the binary calls it.
 
-## What shipped
+The escape hatch is a wrapper entity: move `DragonFruit` into a `gpui-app`
+crate and have the binary mount a `Root` that owns it, then features depend on
+`gpui-app` for the type and the app depends on the features for the tree
+fragments. Nothing in the current tree needs that, and the directory split
+gives the same editing isolation for now.
 
-`gpui-core` (theme, icons, camera, STL, wgpu viewport, window, fonts, logger,
-plus the feature state types: `support_state`, `empty_state`, `panel_layout`,
-`state`) and `gpui-ui` (atoms, field widgets) are separate crates. The binary
-keeps `DragonFruit` and every feature module.
+## One widget, one implementation
 
-**`DragonFruit` cannot move to `gpui-core`**: `Render` is gpui's trait, so the
-orphan rule only lets the crate that defines `DragonFruit` implement it — and
-that impl composes every feature crate. A wrapper entity (`Root`) would be the
-way to split the features; until then the binary owns the render tree.
+The React tree re-implements the same card header, section title, toggle and
+modal shell across dozens of components; the port must not inherit that.
 
-## Rules that keep the graph acyclic
+- **A shared element is defined once, in `gpui-ui`.** If two modules need a card
+  header, a labelled number row, a segmented control or a dialog shell, the
+  widget lives in `gpui-ui` and the modules call it. Copying the recipe into a
+  feature module is the bug, not the shortcut.
+- **Feature modules own composition, not chrome.** A feature decides *what* is
+  in a panel; `gpui-ui` decides how a panel and its controls look.
+- **Values come from `gpui-core`.** Radii are `theme::ROUNDED_*`, cards are
+  `panel_layout::CARD_RADIUS`, spacing and colours are the same constants the
+  React sources use. A literal that duplicates a token is a defect.
+- **A module file that outgrows its area becomes a directory**, with one
+  submodule per view plus one module for the chrome they share.
 
-- **State lives in `gpui-core`.** A feature that needs a new field on
-  `DragonFruit` adds it there. A feature that needs its own render state keeps
-  it in the feature crate (thread-locals are acceptable for view-only state,
-  as the rail's layout already does).
-- **Content is passed in, not imported.** `gpui-panels` renders panel shells;
-  the app passes `AnyElement` bodies built by `gpui-panel-content`.
-- **No feature crate names another feature crate.**
+## Incremental builds
 
-## Migration steps
-
-1. Create the workspace at `gpui/Cargo.toml` with `members = ["crates/*"]` and
-   keep the binary package at the root.
-2. Move `theme.rs`, `icons.rs`, `camera.rs`, `stl.rs`, `viewport.rs`,
-   `window.rs` and the `DragonFruit`/`Mode`/`PanelLayout` definitions into
-   `crates/gpui-core`; move `assets/` with them.
-3. Move `ui.rs` into `crates/gpui-ui`.
-4. Move each feature module into its own crate; replace `crate::` paths with
-   `gpui_core::` / `gpui_ui::`.
-5. Point `main.rs` at the crates; delete the old modules.
-6. Verify with `cargo check` and a smoke run.
-
-## Incremental-build target
-
-After the split, editing `gpui-panel-content` should rebuild only that crate
-plus the binary. The viewport (wgpu) and the theme stay untouched, which is
-where most of the current rebuild time goes.
+`gpui-core`'s viewport and theme are the slowest part of a rebuild. Editing a
+panel touches `gpui/src/features/**` and the binary alone; editing a widget
+touches `gpui-ui` and the binary. Run `cargo check` from `gpui/`; use
+`CARGO_TARGET_DIR=target-check` for builds so a running app's lock on
+`target/debug` does not block them.

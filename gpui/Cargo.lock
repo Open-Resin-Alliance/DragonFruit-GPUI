@@ -2521,16 +2521,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "gpui-app-bar"
-version = "0.0.0"
-dependencies = [
- "bite-gpui",
- "declarative-gpui",
- "gpui-core",
- "gpui-ui",
-]
-
-[[package]]
 name = "gpui-core"
 version = "0.0.0"
 dependencies = [
@@ -2548,66 +2538,6 @@ dependencies = [
  "rfd",
  "wgpu",
  "winreg 0.55.0",
-]
-
-[[package]]
-name = "gpui-overlays"
-version = "0.0.0"
-dependencies = [
- "bite-gpui",
- "declarative-gpui",
- "gpui-core",
- "gpui-ui",
-]
-
-[[package]]
-name = "gpui-panel-content"
-version = "0.0.0"
-dependencies = [
- "bite-gpui",
- "declarative-gpui",
- "gpui-core",
- "gpui-ui",
-]
-
-[[package]]
-name = "gpui-panels"
-version = "0.0.0"
-dependencies = [
- "bite-gpui",
- "declarative-gpui",
- "gpui-core",
- "gpui-ui",
-]
-
-[[package]]
-name = "gpui-rail"
-version = "0.0.0"
-dependencies = [
- "bite-gpui",
- "declarative-gpui",
- "gpui-core",
- "gpui-ui",
-]
-
-[[package]]
-name = "gpui-settings"
-version = "0.0.0"
-dependencies = [
- "bite-gpui",
- "declarative-gpui",
- "gpui-core",
- "gpui-ui",
-]
-
-[[package]]
-name = "gpui-support-panels"
-version = "0.0.0"
-dependencies = [
- "bite-gpui",
- "declarative-gpui",
- "gpui-core",
- "gpui-ui",
 ]
 
 [[package]]
