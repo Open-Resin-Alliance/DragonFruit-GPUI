@@ -669,7 +669,7 @@ pub fn app_bar(state: AppBarState, entity: WeakEntity<DragonFruit>) -> impl Into
                 id = "app-bar-drag",
                 absolute, top_0, left_0, right_0, bottom_0,
                 on_mouse_down = move |_, window, _| {
-                    window.start_window_move();
+                    start_window_drag(window);
                 },
             ) {}
             { left }
@@ -1640,4 +1640,33 @@ fn printer_menu(
                 .border_color(rgb(BORDER_SUBTLE))
                 .child(show_manager),
         )
+}
+
+/// Starts the native window move. GPUI's `start_window_move` is a no-op on
+/// Windows, so this sends the title-bar drag message the OS understands.
+#[cfg(windows)]
+fn start_window_drag(window: &gpui::Window) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+    let Ok(handle) = raw_window_handle::HasWindowHandle::window_handle(window) else {
+        return;
+    };
+    let RawWindowHandle::Win32(win32) = handle.as_raw() else {
+        return;
+    };
+    unsafe extern "system" {
+        fn ReleaseCapture() -> i32;
+        fn SendMessageW(hwnd: isize, msg: u32, wparam: usize, lparam: isize) -> isize;
+    }
+    const WM_NCLBUTTONDOWN: u32 = 0x00A1;
+    const HTCAPTION: usize = 2;
+    unsafe {
+        ReleaseCapture();
+        SendMessageW(win32.hwnd.get(), WM_NCLBUTTONDOWN, HTCAPTION, 0);
+    }
+}
+
+#[cfg(not(windows))]
+fn start_window_drag(window: &gpui::Window) {
+    window.start_window_move();
 }
