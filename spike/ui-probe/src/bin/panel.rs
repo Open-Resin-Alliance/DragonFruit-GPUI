@@ -41,14 +41,16 @@ impl Render for PanelProbe {
         }
         div()
             .size_full()
+            .font_family("Geist")
             .bg(rgb(BACKGROUND))
+            .p(px(14.))
             .flex()
             .items_center()
             .justify_center()
             .child(
                 div()
                     .flex()
-                    .items_start()
+                    .items_center()
                     .gap(px(8.))
                     .child(auto_support_panel())
                     .child(layer_rail()),
@@ -60,7 +62,7 @@ impl Render for PanelProbe {
 fn layer_rail() -> Div {
     div()
         .w(px(40.))
-        .h(px(300.))
+        .h(px(200.))
         .bg(rgb(SURFACE_0))
         .border_1()
         .border_color(rgb(BORDER_SUBTLE))
@@ -82,7 +84,7 @@ fn layer_rail() -> Div {
                         .bottom(px(0.))
                         .left(px(0.))
                         .w_full()
-                        .h(px(210.))
+                        .h(px(140.))
                         .bg(rgb(ACCENT))
                         .rounded(px(3.)),
                 ),
@@ -90,7 +92,7 @@ fn layer_rail() -> Div {
         .child(
             div()
                 .absolute()
-                .top(px(58.))
+                .top(px(52.))
                 .left(px(5.))
                 .px(px(4.))
                 .py(px(2.))
@@ -238,21 +240,29 @@ fn preset_select() -> Div {
     div()
         .flex_1()
         .h(px(32.))
-        .px(px(10.))
+        .relative()
         .flex()
         .items_center()
-        .justify_between()
+        .justify_center()
         .rounded(px(6.))
         .border_1()
         .border_color(rgb(BORDER_SUBTLE))
         .bg(rgb(SURFACE_1))
         .child(
             div()
-                .text_size(px(13.))
+                .w_full()
+                .pr(px(26.))
+                .text_center()
+                .text_size(px(12.))
                 .text_color(rgb(TEXT_STRONG))
                 .child("Medium"),
         )
-        .child(icon(CHEVRON_DOWN, TEXT_MUTED, 12.))
+        .child(
+            div()
+                .absolute()
+                .right(px(12.))
+                .child(icon(CHEVRON_DOWN, TEXT_MUTED, 12.)),
+        )
 }
 
 fn auto_lift_button() -> Div {
@@ -274,9 +284,14 @@ fn auto_lift_button() -> Div {
 
 fn main() {
     gpui_kit::application().run(|cx| {
+        let font: &'static [u8] = include_bytes!("../../assets/Geist[wght].ttf");
+        cx.text_system()
+            .add_fonts(vec![std::borrow::Cow::Borrowed(font)])
+            .expect("Geist font");
         gpui_kit::init(cx);
         let options = WindowOptions {
-            window_bounds: Some(WindowBounds::centered(size(px(460.), px(520.)), cx)),
+            window_bounds: Some(WindowBounds::centered(size(px(397.), px(247.)), cx)),
+            window_decorations: Some(WindowDecorations::Client),
             ..Default::default()
         };
         gpui_kit::open_window(options, cx, |_, cx| {
