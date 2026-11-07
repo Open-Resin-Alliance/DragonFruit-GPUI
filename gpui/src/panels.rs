@@ -251,6 +251,9 @@ pub struct PanelDef {
     pub title: SharedString,
     pub kind: PanelKind,
     pub dock: PanelDock,
+    /// `CardHeader`'s `right` slot: the panel's own header action (the Models
+    /// plus button, the Auto Supports gear).
+    pub header_right: Option<AnyElement>,
     /// Body rendered by the parent. `None` renders the header only.
     pub content: Option<AnyElement>,
     /// `useFloatingPanelCollapse(defaultExpanded)` at the call site.
@@ -268,6 +271,7 @@ impl PanelDef {
             title: title.into(),
             kind,
             dock: PanelDock::Right,
+            header_right: None,
             content: None,
             collapsed: false,
             auto_collapse: true,
@@ -277,6 +281,12 @@ impl PanelDef {
     /// The dock a panel starts in before the user moves it.
     pub fn dock(mut self, dock: PanelDock) -> Self {
         self.dock = dock;
+        self
+    }
+
+    /// `CardHeader`'s `right` slot.
+    pub fn header_right(mut self, content: impl IntoElement) -> Self {
+        self.header_right = Some(content.into_any_element());
         self
     }
 
@@ -955,6 +965,7 @@ fn panel_card(
         id,
         title,
         content,
+        header_right,
         ..
     } = def;
 
@@ -1015,7 +1026,19 @@ fn panel_card(
                         .text_color(rgb(TEXT_STRONG))
                         .child(title),
                 ),
-        );
+        )
+        .when_some(header_right, |this, right| {
+            this.child(
+                div()
+                    .absolute()
+                    .right(px(10.0))
+                    .top(px(0.0))
+                    .bottom(px(0.0))
+                    .flex()
+                    .items_center()
+                    .child(right),
+            )
+        });
 
     // `Card`: `ui-panel rounded-lg shadow-lg border` on `--border-subtle`.
     let mut card_element = card()

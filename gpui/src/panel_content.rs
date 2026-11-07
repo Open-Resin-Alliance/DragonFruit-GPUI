@@ -253,18 +253,6 @@ pub fn models_body(
     selected: bool,
     entity: WeakEntity<DragonFruit>,
 ) -> impl IntoElement {
-    let add_entity = entity.clone();
-
-    // `IconButton` in the header's right slot: solid, `size="sm"` (`h-8 w-8`),
-    // `!text-[var(--text-muted)] hover:!bg-[var(--surface-2)]`, plus at 3.5.
-    let add_button = hint(
-        "models-add-tip",
-        solid_icon("models-add", "plus", 14., 32.).on_click(move |_, _, cx| {
-            add_entity.update(cx, |this, cx| this.open_stl(cx)).ok();
-        }),
-        "Add models to the plate",
-    );
-
     // `text-xs text-center py-2 italic`, muted.
     let empty = || {
         div()
@@ -296,8 +284,19 @@ pub fn models_body(
         .flex()
         .flex_col()
         .gap(px(8.))
-        .child(div().flex().justify_end().child(add_button))
         .child(list)
+}
+
+/// `CardHeader`'s right slot: the Models panel's add button.
+pub fn models_add_button(entity: WeakEntity<DragonFruit>) -> impl IntoElement {
+    let add_entity = entity;
+    hint(
+        "models-add-tip",
+        solid_icon("models-add", "plus", 14., 32.).on_click(move |_, _, cx| {
+            add_entity.update(cx, |this, cx| this.open_stl(cx)).ok();
+        }),
+        "Add models to the plate",
+    )
 }
 
 /// One model's row, as `renderModelRow` builds it for an ungrouped model.

@@ -946,6 +946,7 @@ impl Render for DragonFruit {
                     defs.push(
                         panels::PanelDef::new("models", "Models", panels::PanelKind::Models)
                             .dock(panels::PanelDock::Left)
+                            .header_right(panel_content::models_add_button(entity.clone()))
                             .content(panel_content::models_body(
                                 mesh_name.clone(),
                                 triangles,

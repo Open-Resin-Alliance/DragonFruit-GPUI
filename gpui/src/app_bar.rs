@@ -675,10 +675,10 @@ pub fn app_bar(state: AppBarState, entity: WeakEntity<DragonFruit>) -> impl Into
             { left }
             { steps }
             { right }
-            { app_menu }
-            { printer_menu }
         }
     }
+    .when(show_app_menu, |this| this.child(app_menu))
+    .when(show_printer_menu, |this| this.child(printer_menu))
 }
 
 /// `.ui-topbar::before`: the two background gradients.
