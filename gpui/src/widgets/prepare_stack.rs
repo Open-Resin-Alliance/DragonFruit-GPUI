@@ -7,7 +7,7 @@
 //!
 //! The card shell, its collapse chevron and its drag handle belong to
 //! `panels.rs`, so a panel here is a body plus the id and title the shell needs
-//! for its [`crate::panels::PanelDef`]. `PanelKind` in `panels.rs` has no variant
+//! for its [`crate::panels::list::PanelDef`]. `PanelKind` in `panels.rs` has no variant
 //! for these tools yet; the shell will need one per id below before it can mount
 //! them (recorded here rather than edited there).
 //!
@@ -25,18 +25,18 @@
 //!   `model_count > 0`; `transformMgr.transformMode` becomes [`TransformMode`].
 //! * The Transform panel's multi-selection wiring (which callback a field calls
 //!   when several models are selected) is the caller's: it builds
-//!   [`crate::transform_panel::TransformActions`] from either path, exactly as
+//!   [`crate::features::transform_panel::TransformActions`] from either path, exactly as
 //!   `PreparePanelStack` chooses between `transformMgr` and the selection
 //!   handlers.
 
 use gpui::{AnyElement, IntoElement, div, prelude::*, px};
 
-use crate::arrange_panels::{
+use crate::features::arrange_panels::{
     ArrangeActions, ArrangeState, DuplicateActions, DuplicateState, arrange_body, duplicate_body,
 };
-use crate::organic_cut_panel::{OrganicCutActions, OrganicCutView, organic_cut_body};
-use crate::smoothing_panel::{SmoothingActions, SmoothingState, smoothing_body};
-use crate::transform_panel::{
+use crate::features::organic_cut_panel::{OrganicCutActions, OrganicCutView, organic_cut_body};
+use crate::features::smoothing_panel::{SmoothingActions, SmoothingState, smoothing_body};
+use crate::features::transform_panel::{
     OrientationActions, OrientationState, TransformActions, TransformState, orientation_body,
     transform_body,
 };
@@ -64,7 +64,7 @@ pub enum PreparePanelId {
 }
 
 impl PreparePanelId {
-    /// The panel's stable id, for [`crate::panels::PanelDef::new`].
+    /// The panel's stable id, for [`crate::panels::list::PanelDef::new`].
     pub fn id(self) -> &'static str {
         match self {
             PreparePanelId::Models => "prepare-models",
@@ -233,7 +233,7 @@ impl PrepareStack {
 /// a shell that docks panels individually should call [`PrepareStackState::visible_panels`]
 /// and [`PrepareStack::body`] instead.
 pub fn prepare_stack(stack: &mut PrepareStack) -> impl IntoElement {
-    let mut column = div().flex().flex_col().gap(px(crate::panels::PANEL_GAP));
+    let mut column = div().flex().flex_col().gap(px(crate::panels::list::PANEL_GAP));
     for panel in stack.state.visible_panels() {
         if let Some(body) = stack.body(panel) {
             column = column.child(body);

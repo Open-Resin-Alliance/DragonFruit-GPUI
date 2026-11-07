@@ -116,25 +116,13 @@
 //!   opaque.
 //! * CSS transitions, keyframes and backdrop blur have no GPUI equivalent.
 
-mod app_bar;
-mod arrange_panels;
-mod auto_support_settings;
-mod empty_scene;
-mod notifications;
-mod organic_cut_panel;
-mod overlays;
-mod panel_content;
+mod chrome;
+mod features;
 mod panels;
-mod plate_widgets;
-mod prepare_stack;
-mod printing_preview;
-mod rail;
-mod scene_modals;
-mod settings;
-mod smoothing_panel;
-mod support_panels;
-mod tool_panels;
-mod transform_panel;
+mod widgets;
+
+use chrome::{app_bar, overlays, rail};
+use panels::empty_scene;
 
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
@@ -994,7 +982,7 @@ impl Render for DragonFruit {
             })
             .child(canvas)
             .when(!has_models, |this| {
-                this.child(empty_scene::empty_scene_state(
+                this.child(panels::empty_scene::empty_scene_state(
                     self.empty_scene.clone(),
                     entity.clone(),
                 ))
@@ -1005,14 +993,14 @@ impl Render for DragonFruit {
                         .absolute()
                         .bottom(px(4.))
                         .left(px(4.))
-                        .child(empty_scene::model_stats_card(
+                        .child(panels::empty_scene::model_stats_card(
                             self.stats.clone(),
                             entity.clone(),
                         )),
                 )
             })
             .when(mode == Mode::Printing && has_models, |this| {
-                this.child(printing_preview::printing_preview(
+                this.child(features::printing_preview::printing_preview(
                     self.printing_preview.clone(),
                     entity.clone(),
                 ))
@@ -1032,10 +1020,10 @@ impl Render for DragonFruit {
                 // Export and Printing do not.
                 if has_models && matches!(mode, Mode::Prepare | Mode::Support) {
                     defs.push(
-                        panels::PanelDef::new("models", "Models", panels::PanelKind::Models)
-                            .dock(panels::PanelDock::Left)
-                            .header_right(panel_content::models_add_button(entity.clone()))
-                            .content(panel_content::models_body(
+                        panels::list::PanelDef::new("models", "Models", panels::list::PanelKind::Models)
+                            .dock(panels::list::PanelDock::Left)
+                            .header_right(panels::content::models_add_button(entity.clone()))
+                            .content(panels::content::models_body(
                                 mesh_name.clone(),
                                 triangles,
                                 self.selected.get(),
@@ -1046,44 +1034,44 @@ impl Render for DragonFruit {
                 match mode {
                     Mode::Prepare => {
                         if has_models {
-                            let meta: Option<(&'static str, &'static str, panels::PanelKind)> =
+                            let meta: Option<(&'static str, &'static str, panels::list::PanelKind)> =
                                 match self.active_tool {
                                     1 => Some((
                                         "prepare-transform",
                                         "Transform",
-                                        panels::PanelKind::Transform,
+                                        panels::list::PanelKind::Transform,
                                     )),
                                     4 => Some((
                                         "prepare-duplicate",
                                         "Duplicate",
-                                        panels::PanelKind::Duplicate,
+                                        panels::list::PanelKind::Duplicate,
                                     )),
                                     5 => Some((
                                         "prepare-arrange",
                                         "Arrange",
-                                        panels::PanelKind::Arrange,
+                                        panels::list::PanelKind::Arrange,
                                     )),
                                     6 => Some((
                                         "prepare-split",
                                         "Organic Cut",
-                                        panels::PanelKind::OrganicCut,
+                                        panels::list::PanelKind::OrganicCut,
                                     )),
                                     7 => Some((
                                         "prepare-smooth",
                                         "Smoothing",
-                                        panels::PanelKind::Smoothing,
+                                        panels::list::PanelKind::Smoothing,
                                     )),
                                     _ => None,
                                 };
                             if let Some((id, title, kind)) = meta {
-                                if let Some(body) = tool_panels::tool_panel(
+                                if let Some(body) = features::tool_panels::tool_panel(
                                     self.active_tool,
                                     mode,
                                     entity.clone(),
                                 ) {
                                     defs.push(
-                                        panels::PanelDef::new(id, title, kind)
-                                            .dock(panels::PanelDock::Right)
+                                        panels::list::PanelDef::new(id, title, kind)
+                                            .dock(panels::list::PanelDock::Right)
                                             .content(body),
                                     );
                                 }
@@ -1092,41 +1080,41 @@ impl Render for DragonFruit {
                     }
                     Mode::Support => {
                         // `SupportPanelStack`: the rail tool selects the panel.
-                        let meta: Option<(&'static str, &'static str, panels::PanelKind)> =
+                        let meta: Option<(&'static str, &'static str, panels::list::PanelKind)> =
                             match self.active_tool {
                                 0 => Some((
                                     "support-islands",
                                     "Islands",
-                                    panels::PanelKind::Supports,
+                                    panels::list::PanelKind::Supports,
                                 )),
                                 1 => Some((
                                     "support-settings",
                                     "Support Settings",
-                                    panels::PanelKind::Supports,
+                                    panels::list::PanelKind::Supports,
                                 )),
                                 2 => Some((
                                     "support-auto",
                                     "Auto Supports (Beta)",
-                                    panels::PanelKind::Supports,
+                                    panels::list::PanelKind::Supports,
                                 )),
                                 3 => Some((
                                     "support-hollowing",
                                     "Hollowing",
-                                    panels::PanelKind::Supports,
+                                    panels::list::PanelKind::Supports,
                                 )),
                                 _ => None,
                             };
                         if let Some((id, title, kind)) = meta {
                             let body = if self.active_tool == 3 {
                                 Some(
-                                    support_panels::hollowing_body(
+                                    features::support_panels::hollowing_body(
                                         &self.hollowing,
                                         entity.clone(),
                                     )
                                     .into_any_element(),
                                 )
                             } else {
-                                tool_panels::tool_panel(
+                                features::tool_panels::tool_panel(
                                     self.active_tool,
                                     mode,
                                     entity.clone(),
@@ -1134,33 +1122,33 @@ impl Render for DragonFruit {
                             };
                             if let Some(body) = body {
                                 defs.push(
-                                    panels::PanelDef::new(id, title, kind)
-                                        .dock(panels::PanelDock::Right)
+                                    panels::list::PanelDef::new(id, title, kind)
+                                        .dock(panels::list::PanelDock::Right)
                                         .content(body),
                                 );
                             }
                         }
                     }
                     Mode::Export => defs.push(
-                        panels::PanelDef::new(
+                        panels::list::PanelDef::new(
                             "export-main",
                             "Export",
-                            panels::PanelKind::Export,
+                            panels::list::PanelKind::Export,
                         )
-                        .dock(panels::PanelDock::Left)
-                        .content(panel_content::export_body(entity.clone())),
+                        .dock(panels::list::PanelDock::Left)
+                        .content(panels::content::export_body(entity.clone())),
                     ),
                     Mode::Printing => defs.push(
-                        panels::PanelDef::new(
+                        panels::list::PanelDef::new(
                             "printing",
                             "Printing",
-                            panels::PanelKind::Printing,
+                            panels::list::PanelKind::Printing,
                         )
-                        .dock(panels::PanelDock::Right)
-                        .content(panel_content::printing_body(entity.clone())),
+                        .dock(panels::list::PanelDock::Right)
+                        .content(panels::content::printing_body(entity.clone())),
                     ),
                 }
-                panels::panel_stack(&self.layout, defs, entity.clone())
+                panels::list::panel_stack(&self.layout, defs, entity.clone())
             })
             // The Z-up gizmo sits 72px from the right edge, 22px from the
             // bottom (its 120px widget is centred on the cube).
@@ -1239,12 +1227,12 @@ impl Render for DragonFruit {
                 },
                 entity.clone(),
             ))
-            .child(settings::settings_modal(
+            .child(features::settings::settings_modal(
                 show_settings,
                 self.settings_tab,
                 entity.clone(),
             ))
-            .child(auto_support_settings::auto_support_settings(
+            .child(features::auto_support_settings::auto_support_settings(
                 self.show_support_settings,
                 entity.clone(),
             ))

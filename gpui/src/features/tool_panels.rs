@@ -50,7 +50,7 @@
 //! |-------|-----------|-------|
 //! | 0 | Islands | [`islands_body`] |
 //! | 1 | Manual | [`support_settings_body`] (`SupportSidebar`) |
-//! | 2 | Automatic | [`crate::panel_content::supports_body`] (`Auto Support (Beta)`) |
+//! | 2 | Automatic | [`crate::panels::content::supports_body`] (`Auto Support (Beta)`) |
 //!
 //! Export and Printing have no tool rail, matching the React call site, and
 //! return `None`.
@@ -77,13 +77,13 @@
 //! * **Auto Orientation.** `PreparePanelStack` mounts `AutoRotationPanel` under
 //!   the Transform panel only while the experiment is enabled
 //!   (`orientationPanel !== null`). The port has no experiment flag, so
-//!   [`crate::transform_panel::orientation_body`] is not stacked here; the caller
+//!   [`crate::features::transform_panel::orientation_body`] is not stacked here; the caller
 //!   can mount it itself when it grows the flag.
 //! * **Hollowing / Hole Punch.** The rail models Hollowing as a transform-mode
 //!   toggle (`rail.rs`'s `hollowing`), not as a Support panel index, and
 //!   `tool_panel` has no flag for it. The caller mounts
-//!   [`crate::support_panels::hollowing_body`] and
-//!   [`crate::support_panels::hole_punch_body`] when the rail's Hollowing tile is
+//!   [`crate::features::support_panels::hollowing_body`] and
+//!   [`crate::features::support_panels::hole_punch_body`] when the rail's Hollowing tile is
 //!   lit; they are not reachable through this function's `tool` argument.
 //! * **No engines.** Arrange, Duplicate, Organic Cut, Smoothing, Islands,
 //!   Hollowing and Hole Punch have no scene services in this port: their Apply /
@@ -105,7 +105,7 @@
 //!   settings store. The body's own module note records the missing sections and
 //!   preset actions.
 //! * **Islands scan dialog.** `islands_body`'s gear opens
-//!   `IslandsModel::settings_open`; [`crate::support_panels::island_scan_settings_dialog`]
+//!   `IslandsModel::settings_open`; [`crate::features::support_panels::island_scan_settings_dialog`]
 //!   is a window-level dialog and is not mounted here (the shell owns dialogs).
 //! * **Panel shells.** The bodies are returned without a card: `panels.rs` owns
 //!   the card, its header, collapse chevron and drag handle, so the caller wraps
@@ -116,15 +116,15 @@ use std::rc::Rc;
 
 use gpui::{AnyElement, App, IntoElement, MouseButton, WeakEntity, div, prelude::*};
 
-use crate::arrange_panels::{
+use crate::features::arrange_panels::{
     ArrangeActions, ArrangeState, DuplicateActions, DuplicateState, arrange_body, duplicate_body,
 };
-use crate::organic_cut_panel::{LoopSummary, OrganicCutActions, OrganicCutView, organic_cut_body};
-use crate::panel_content;
-use crate::smoothing_panel::{SmoothingActions, SmoothingState, smoothing_body};
-use crate::support_panels::{islands_body, support_settings_body};
+use crate::features::organic_cut_panel::{LoopSummary, OrganicCutActions, OrganicCutView, organic_cut_body};
+use crate::panels::content;
+use crate::features::smoothing_panel::{SmoothingActions, SmoothingState, smoothing_body};
+use crate::features::support_panels::{islands_body, support_settings_body};
 use gpui_core::support_state::{IslandsPanelState, SupportSettingsState};
-use crate::transform_panel::{TransformActions, TransformState, transform_body};
+use crate::features::transform_panel::{TransformActions, TransformState, transform_body};
 use crate::{DragonFruit, Mode};
 
 /// `DEFAULT_LIFT_DISTANCE_MM` in `src/features/transform/liftDefaults.ts`.
@@ -147,7 +147,7 @@ struct PanelStore {
     organic: OrganicCutView,
     islands: IslandsPanelState,
     support_settings: SupportSettingsState,
-    /// `scene.supports.length`, for `panel_content::supports_body`.
+    /// `scene.supports.length`, for `crate::panels::content::supports_body`.
     support_count: usize,
     /// `scene.geom !== null`.
     has_mesh: bool,
@@ -296,7 +296,7 @@ fn support_panel(tool: usize, entity: WeakEntity<DragonFruit>) -> Option<AnyElem
             let count = with_store(|store| store.support_count);
             (
                 "tool-panel-support-auto",
-                panel_content::supports_body(count, entity.clone()).into_any_element(),
+                crate::panels::content::supports_body(count, entity.clone()).into_any_element(),
             )
         }
         _ => return None,

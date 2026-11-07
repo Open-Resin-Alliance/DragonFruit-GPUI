@@ -75,7 +75,7 @@ use gpui::{
 
 use crate::DragonFruit;
 pub use gpui_core::state::PrintingPreviewState;
-use crate::overlays;
+use crate::chrome::overlays;
 use gpui_core::theme::*;
 
 /// `gridTemplateColumns: '56px minmax(0, 1fr)'` — the rail column.
