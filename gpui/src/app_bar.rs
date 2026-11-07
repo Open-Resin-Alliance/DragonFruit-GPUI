@@ -626,6 +626,7 @@ pub fn app_bar(state: AppBarState, entity: WeakEntity<DragonFruit>) -> impl Into
             // `ml-1 flex items-center gap-1`.
             div(ml_4, flex, items_center, gap_4) {
                 { window_button(
+                    "caption-min",
                     WindowControlArea::Min,
                     0xf4bf4f,
                     "minimize-2",
@@ -633,13 +634,14 @@ pub fn app_bar(state: AppBarState, entity: WeakEntity<DragonFruit>) -> impl Into
                     0.86,
                 ) }
                 { window_button(
+                    "caption-max",
                     WindowControlArea::Max,
                     0x40c463,
                     if maximized { "square" } else { "maximize-2" },
                     TintColor::Mix16,
                     0.86,
                 ) }
-                { window_button(WindowControlArea::Close, 0xff6b6b, "x", TintColor::Mix18, 0.88) }
+                { window_button("caption-close", WindowControlArea::Close, 0xff6b6b, "x", TintColor::Mix18, 0.88) }
             }
         }
     };
@@ -670,7 +672,7 @@ pub fn app_bar(state: AppBarState, entity: WeakEntity<DragonFruit>) -> impl Into
             flex, items_center, gap_12,
             px_4, pt_3, pb_9,
             on_mouse_down = move |_, window, _| {
-                crate::log::log("appbar: drag");
+                crate::log::log("appbar: drag root");
                 start_window_drag(window);
             },
         ) {
@@ -693,10 +695,6 @@ fn bar_surface() -> Div {
     // `linear-gradient(to bottom, color-mix(surface-0, transparent 6%) 0%,
     // color-mix(surface-0, transparent 10%) 50%, color-mix(surface-0,
     // transparent 24%) 100%)`.
-    let surface_top = 0x111216f0; // 6% transparent
-    let surface_mid = 0x111216e6; // 10% transparent
-    let surface_bottom = 0x111216c2; // 24% transparent
-
     // `linear-gradient(90deg, color-mix(topbar-accent, transparent 93%) 0%,
     // color-mix(topbar-accent, transparent 97%) 45%, color-mix(topbar-accent,
     // transparent 94%) 100%)`.
@@ -704,38 +702,79 @@ fn bar_surface() -> Div {
     let accent_mid = 0xec2a7708; // 97% transparent
     let accent_right = 0xec2a770f; // 94% transparent
 
-    let half = TOPBAR_HEIGHT / 2.0;
-
     div()
         .absolute()
         .top_0()
         .left_0()
         .right_0()
         .bottom_0()
+        // The surface gradient with the `::before` mask baked into its alpha:
+        // the source fades the whole frosted panel out over the last 14% of the
+        // bar (mask 1.0 → 0.52 @92% → 0.12 @97% → 0). GPUI gradients take two
+        // stops, so the ramp is five stacked segments.
         .child(
             div()
                 .absolute()
                 .top_0()
                 .left_0()
                 .right_0()
-                .h(px(half))
+                .h(relative(0.50))
                 .bg(linear_gradient(
                     180.0,
-                    linear_color_stop(rgba(surface_top), 0.0),
-                    linear_color_stop(rgba(surface_mid), 1.0),
+                    linear_color_stop(rgba(0x111216f0), 0.0),
+                    linear_color_stop(rgba(0x111216e6), 1.0),
                 )),
         )
         .child(
             div()
                 .absolute()
-                .top(px(half))
+                .top(relative(0.50))
+                .left_0()
+                .right_0()
+                .h(relative(0.36))
+                .bg(linear_gradient(
+                    180.0,
+                    linear_color_stop(rgba(0x111216e6), 0.0),
+                    linear_color_stop(rgba(0x111216cc), 1.0),
+                )),
+        )
+        .child(
+            div()
+                .absolute()
+                .top(relative(0.86))
+                .left_0()
+                .right_0()
+                .h(relative(0.06))
+                .bg(linear_gradient(
+                    180.0,
+                    linear_color_stop(rgba(0x111216cc), 0.0),
+                    linear_color_stop(rgba(0x11121668), 1.0),
+                )),
+        )
+        .child(
+            div()
+                .absolute()
+                .top(relative(0.92))
+                .left_0()
+                .right_0()
+                .h(relative(0.05))
+                .bg(linear_gradient(
+                    180.0,
+                    linear_color_stop(rgba(0x11121668), 0.0),
+                    linear_color_stop(rgba(0x11121617), 1.0),
+                )),
+        )
+        .child(
+            div()
+                .absolute()
+                .top(relative(0.97))
                 .left_0()
                 .right_0()
                 .bottom_0()
                 .bg(linear_gradient(
                     180.0,
-                    linear_color_stop(rgba(surface_mid), 0.0),
-                    linear_color_stop(rgba(surface_bottom), 1.0),
+                    linear_color_stop(rgba(0x11121617), 0.0),
+                    linear_color_stop(rgba(0x11121600), 1.0),
                 )),
         )
         .child(
@@ -974,6 +1013,7 @@ enum TintColor {
 /// `background_weight` is the `surface-1` share of `color-mix(tint,
 /// surface-1 N%)` — 86% for minimize/maximize, 88% for close.
 fn window_button(
+    id: &'static str,
     area: WindowControlArea,
     tint: u32,
     icon_name: &'static str,
@@ -990,6 +1030,7 @@ fn window_button(
 
     ui! {
         div(
+            id = id,
             w_32, h_32, flex, items_center, justify_center,
             rounded_6, border, cursor_pointer,
             border_color = rgb(mix(tint, BORDER_SUBTLE, 0.45)),
