@@ -398,6 +398,9 @@ impl Render for DragonFruit {
         // `cameraInteractionCycleEnabled = hasModelsOnPlate && ...`: nothing on
         // the plate means the empty scene does not answer the pointer.
         let camera_enabled = Rc::new(Cell::new(self.mesh.is_some()));
+        // Grab mode (`active_tool == 1`, the Move tool): a left drag on the model
+        // slides it across the plate instead of selecting.
+        let grab_mode = self.active_tool == 1;
         let supports = self.supports.clone();
         let model_matrix = glam::Mat4::from_scale_rotation_translation(
             glam::Vec3::splat(self.scale),
@@ -544,6 +547,14 @@ impl Render for DragonFruit {
                 last.set((event.position.x.0, event.position.y.0));
             }
         })
+        .on_mouse_up(MouseButton::Left, {
+            let drag = drag.clone();
+            move |_, _, _| {
+                if drag.get() == Some(MouseButton::Left) {
+                    drag.set(None);
+                }
+            }
+        })
         .on_mouse_up(MouseButton::Right, {
             let drag = drag.clone();
             let camera = camera.clone();
@@ -577,6 +588,25 @@ impl Render for DragonFruit {
                     let dx = event.position.x.0 - lx;
                     let dy = event.position.y.0 - ly;
                     last.set((event.position.x.0, event.position.y.0));
+                    if button == MouseButton::Left {
+                        // Screen pixels to plate millimetres: the ortho frustum's
+                        // height at the model is `2 * tan(fov/2) * distance`.
+                        let height = window.viewport_size().height.0.max(1.0);
+                        let (fov, distance) = {
+                            let camera = camera.borrow();
+                            (camera.fov_y, camera.distance)
+                        };
+                        let world_per_px = 2.0 * (fov * 0.5).tan() * distance / height;
+                        entity
+                            .update(cx, |this, cx| {
+                                this.translate[0] += dx * world_per_px;
+                                // Screen +Y is down; the plate's +Y is back.
+                                this.translate[1] -= dy * world_per_px;
+                                cx.notify();
+                            })
+                            .ok();
+                        return;
+                    }
                     let mut camera = camera.borrow_mut();
                     match button {
                         MouseButton::Right => {
@@ -628,6 +658,13 @@ impl Render for DragonFruit {
                 let origin = inverse.transform_point3(origin);
                 let direction = inverse.transform_vector3(direction);
                 let hit = stl::raycast(mesh, origin, direction);
+                if grab_mode && hit {
+                    // Same drag cell as the camera: the move handler branches on
+                    // the button, so a grab and an orbit cannot both be live.
+                    drag.set(Some(MouseButton::Left));
+                    last.set((event.position.x.0, event.position.y.0));
+                    return;
+                }
                 entity
                     .update(cx, |this, cx| {
                         this.selected.set(hit);

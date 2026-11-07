@@ -18,7 +18,8 @@ const STROKE: (u8, u8, u8) = (0xba, 0xf7, 0x2e);
 pub const FACE_SIZE: u32 = 256;
 const SCALE: f32 = FACE_SIZE as f32 / 128.0;
 const LABEL_MAX_WIDTH: f32 = 112.0 * SCALE;
-const LABEL_FONT: f32 = 20.0 * SCALE;
+/// `font="600 24px Inter, ..."` in `SceneCanvas.tsx`.
+const LABEL_FONT: f32 = 24.0 * SCALE;
 
 /// `defaultFaces`, in `ZUpGizmoViewcube`'s box order.
 pub const LABELS: [&str; 6] = ["FRONT", "BACK", "RIGHT", "LEFT", "TOP", "BOTTOM"];
@@ -280,6 +281,37 @@ mod tests {
                 label_up.y > 0.0 && label_right.x > 0.0,
                 "face {face} label is misoriented: up {label_up:?} right {label_right:?}"
             );
+        }
+    }
+
+
+    #[test]
+    fn each_label_is_centred_on_its_face() {
+        let (w, _, data) = atlas();
+        for face in 0..6 {
+            let ox = (face as u32 % 3) * FACE_SIZE;
+            let oy = (face as u32 / 3) * FACE_SIZE;
+            let (mut min_x, mut min_y, mut max_x, mut max_y) = (u32::MAX, u32::MAX, 0, 0);
+            for y in 3..FACE_SIZE - 3 {
+                for x in 3..FACE_SIZE - 3 {
+                    let i = (((oy + y) * w + ox + x) * 4) as usize;
+                    // The label is the only ink: the fill and the border are
+                    // excluded by the 3px inset and the colour test.
+                    let is_ink = data[i] > 0x80 && data[i + 1] > 0x80 && data[i + 2] > 0x80;
+                    if is_ink {
+                        min_x = min_x.min(x);
+                        min_y = min_y.min(y);
+                        max_x = max_x.max(x);
+                        max_y = max_y.max(y);
+                    }
+                }
+            }
+            assert!(min_x != u32::MAX, "face {face} has no label");
+            let cx = (min_x as f32 + max_x as f32) * 0.5;
+            let cy = (min_y as f32 + max_y as f32) * 0.5;
+            let centre = FACE_SIZE as f32 * 0.5;
+            assert!((cx - centre).abs() < 3.0, "face {face} x {cx} vs {centre}");
+            assert!((cy - centre).abs() < 3.0, "face {face} y {cy} vs {centre}");
         }
     }
 
