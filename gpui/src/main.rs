@@ -1093,15 +1093,29 @@ impl Render for DragonFruit {
                         .top(px(TOPBAR_HEIGHT + 6.0))
                         .bottom(px(6.0))
                         .w(px(48.))
-                        .child(overlays::layer_slider(
-                            layer,
-                            Some(self.lower_layer),
-                            self.cross_section,
-                            0.0,
-                            self.num_layers as f32,
-                            1.0,
-                            entity.clone(),
-                        )),
+                        .child(
+                            ui::card()
+                                .size_full()
+                                .flex()
+                                .flex_col()
+                                .child(
+                                    div()
+                                        .py(px(4.0))
+                                        .flex_1()
+                                        .min_h(px(0.0))
+                                        .flex()
+                                        .flex_col()
+                                        .child(overlays::layer_slider(
+                                            layer,
+                                            Some(self.lower_layer),
+                                            self.cross_section,
+                                            0.0,
+                                            self.num_layers as f32,
+                                            1.0,
+                                            entity.clone(),
+                                        )),
+                                ),
+                        ),
                 )
             })
             .child(app_bar::app_bar(
