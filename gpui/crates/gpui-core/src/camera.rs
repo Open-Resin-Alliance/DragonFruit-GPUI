@@ -177,9 +177,11 @@ impl Camera {
     /// vertical FOV distance, from the source's `(-sin20°, -cos20°, 1)` view.
     pub fn focus(&mut self, center: Vec3, radius: f32) {
         let radius = radius.max(0.001);
-        let distance = radius / (self.fov_y * 0.5).tan() * 1.05;
+        // A little more margin than the source's 1.05 so the model does not
+        // touch the frame, and a shallower elevation than the 45° fallback.
+        let distance = radius / (self.fov_y * 0.5).tan() * 1.15;
         let yaw = 20f32.to_radians();
-        let dir = Vec3::new(-yaw.sin(), -yaw.cos(), 1.0).normalize();
+        let dir = Vec3::new(-yaw.sin(), -yaw.cos(), 0.8).normalize();
         self.begin_tween(center, distance, dir.z.asin(), dir.y.atan2(dir.x), 1.0);
     }
 

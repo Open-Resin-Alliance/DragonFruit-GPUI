@@ -381,6 +381,13 @@ impl DragonFruit {
     /// load; the source's blocking import overlay is not ported.
     fn load_path(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         self.loading = true;
+        // The empty scene's blocking-import card: label plus the file name.
+        self.empty_scene.loading = true;
+        self.empty_scene.loading_label = Some("Importing your file…".into());
+        self.empty_scene.loading_detail = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(|name| name.to_owned().into());
         cx.notify();
         cx.spawn(async move |this, cx| {
             let result = cx
@@ -393,6 +400,9 @@ impl DragonFruit {
                     Err(error) => eprintln!("{error:#}"),
                 }
                 this.loading = false;
+                this.empty_scene.loading = false;
+                this.empty_scene.loading_label = None;
+                this.empty_scene.loading_detail = None;
                 cx.notify();
             })
             .ok();
@@ -499,6 +509,9 @@ impl Render for DragonFruit {
         }
 
         if self.camera.borrow_mut().step(1.0 / 60.0) {
+            window.request_animation_frame();
+        }
+        if self.empty_scene.loading {
             window.request_animation_frame();
         }
         let mesh = self.mesh.clone();

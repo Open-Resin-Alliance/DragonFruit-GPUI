@@ -359,7 +359,14 @@ pub fn empty_scene_state(
 
     // ── Loading / onboarding / actions ──────────────────────────────────────
     let content = if loading {
-        loading_card(loading_label, loading_detail)
+        let phase = {
+            use std::sync::OnceLock;
+            use std::time::Instant;
+            static START: OnceLock<Instant> = OnceLock::new();
+            let start = START.get_or_init(Instant::now);
+            (start.elapsed().as_secs_f32() * 0.8) % 1.0
+        };
+        loading_card(loading_label, loading_detail, phase)
     } else if show_first_time_onboarding {
         onboarding_card()
     } else {
@@ -412,6 +419,7 @@ pub fn empty_scene_state(
 fn loading_card(
     label: Option<SharedString>,
     detail: Option<SharedString>,
+    phase: f32,
 ) -> Div {
     div()
         .w_full()
@@ -443,7 +451,12 @@ fn loading_card(
         .child(
             div()
                 .mt(px(12.0))
-                .child(ui::progress_bar(0.0, ui::ProgressSize::Sm, true)),
+                .child(ui::progress_bar_phase(
+                    0.0,
+                    ui::ProgressSize::Sm,
+                    true,
+                    phase,
+                )),
         )
 }
 

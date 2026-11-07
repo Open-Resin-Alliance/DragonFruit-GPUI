@@ -1780,6 +1780,11 @@ pub enum ProgressSize {
 /// `linear-gradient(90deg, var(--accent), #ff79c6)`. Indeterminate renders the
 /// 32% sweeping indicator statically (GPUI has no keyframes).
 pub fn progress_bar(value: f32, size: ProgressSize, indeterminate: bool) -> Div {
+    progress_bar_phase(value, size, indeterminate, 0.0)
+}
+
+/// `progress_bar` with an explicit indeterminate phase (0..1).
+pub fn progress_bar_phase(value: f32, size: ProgressSize, indeterminate: bool, phase: f32) -> Div {
     let height = match size {
         ProgressSize::Xs => 6.0,
         ProgressSize::Sm => 8.0,
@@ -1801,10 +1806,12 @@ pub fn progress_bar(value: f32, size: ProgressSize, indeterminate: bool) -> Div 
         .rounded_full()
         .bg(rgb(mix(SURFACE_2, BLACK, 0.80)));
     if indeterminate {
+        // The caller passes the travelling phase (0..1); the fill is 32% wide
+        // and sweeps the remaining 68%.
         track = track.child(
             div()
                 .absolute()
-                .left(px(0.0))
+                .left(relative(phase * 0.68))
                 .top(px(0.0))
                 .bottom(px(0.0))
                 .w(relative(0.32))
