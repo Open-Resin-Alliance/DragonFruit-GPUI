@@ -362,7 +362,12 @@ impl DragonFruit {
 
     fn set_mesh(&mut self, mesh: stl::MeshData) {
         let mesh = Arc::new(mesh);
-        *self.camera.borrow_mut() = Camera::fit(mesh.center, mesh.radius.max(110.0));
+        {
+            let mut camera = Camera::fit(mesh.center, mesh.radius.max(110.0));
+            // The intro animates from the fit pose to the source's framing.
+            camera.focus(mesh.center, mesh.radius.max(1.0));
+            *self.camera.borrow_mut() = camera;
+        }
         // `useSlicingManager`: `numLayers = ceil(heightMm / layerHeightMm)`.
         self.num_layers = (mesh.size[2] / LAYER_HEIGHT_MM).ceil().max(0.0) as u32;
         // The source opens with the upper thumb at the top and the lower at the
@@ -490,6 +495,9 @@ impl Render for DragonFruit {
             eprintln!("window scale factor: {}", window.scale_factor());
         }
 
+        if self.camera.borrow_mut().step() {
+            window.request_animation_frame();
+        }
         let mesh = self.mesh.clone();
         let click_mesh = self.mesh.clone();
         let supports = self.supports.clone();
@@ -861,12 +869,16 @@ impl Render for DragonFruit {
                         if key == "f" && !primary && !alt && !repeat {
                             if let Some(mesh) = &this.mesh {
                                 let mut camera = this.camera.borrow_mut();
-                                camera.target = mesh.center;
-                                camera.distance = mesh.radius.max(110.0)
-                                    / (camera.fov_y * 0.5).tan()
-                                    * 1.15;
+                                camera.focus(mesh.center, mesh.radius.max(1.0));
                                 changed = true;
                             }
+                        }
+
+                        // The home button / `Home`: `CameraHomeResetController`.
+                        if key == "home" && !primary && !alt && !repeat {
+                            let mut camera = this.camera.borrow_mut();
+                            camera.home(glam::Vec3::new(0.0, 0.0, 110.0));
+                            changed = true;
                         }
 
                         // `usePrepareTransformHotkeys`: canvas tools only in
