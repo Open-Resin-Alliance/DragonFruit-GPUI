@@ -91,17 +91,21 @@ impl Camera {
         self.goal_pitch = (self.goal_pitch + dy * 0.008 * ROTATE_SPEED).clamp(-LIMIT, LIMIT);
     }
 
-    pub fn pan(&mut self, dx: f32, dy: f32) {
+    /// OrbitControls' screen-space pan: `panSpeed * (2 * distance *
+    /// tan(fov/2)) / viewportHeight` world units per pixel.
+    pub fn pan(&mut self, dx: f32, dy: f32, viewport_height: f32) {
         let forward = (self.goal_target - self.eye()).normalize();
         let right = forward.cross(Vec3::Z).normalize();
         let up = right.cross(forward).normalize();
-        let scale = self.goal_distance * 0.0016 * PAN_SPEED;
+        let scale = PAN_SPEED * 2.0 * self.goal_distance * (self.fov_y * 0.5).tan()
+            / viewport_height.max(1.0);
         self.goal_target += right * (-dx * scale) + up * (dy * scale);
     }
 
     pub fn zoom(&mut self, delta: f32) {
-        self.goal_distance =
-            (self.goal_distance * (1.0 - delta * 0.1 * ZOOM_SPEED)).clamp(0.01, 1.0e6);
+        // OrbitControls' wheel scale: `0.95^zoomSpeed` per wheel step.
+        self.goal_distance = (self.goal_distance * 0.95f32.powf(delta * ZOOM_SPEED))
+            .clamp(0.01, 1.0e6);
     }
 
     /// `CameraHomeResetController`: the home pose is the orbit target plus

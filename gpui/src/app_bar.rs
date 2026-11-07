@@ -604,7 +604,9 @@ pub fn app_bar(state: AppBarState, entity: WeakEntity<DragonFruit>) -> impl Into
             absolute, top_0, left_0, right_0,
             h = px(TOPBAR_HEIGHT),
             flex, items_center, gap_12,
-            h = px(42.),
+            // 36px controls + 12px top and bottom, matching the right inset
+            // (`pr_3`) beside the close button.
+            h = px(60.),
             px_4, pt_3, pb_3,
             on_mouse_down = move |_, window, _| {
                 gpui_core::log::log("appbar: drag root");

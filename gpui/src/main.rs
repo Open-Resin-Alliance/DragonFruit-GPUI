@@ -667,7 +667,9 @@ impl Render for DragonFruit {
                     let mut camera = camera.borrow_mut();
                     match button {
                         MouseButton::Right => camera.orbit(dx, dy),
-                        MouseButton::Middle => camera.pan(dx, dy),
+                        MouseButton::Middle => {
+                            camera.pan(dx, dy, window.viewport_size().height.0.max(1.0))
+                        }
                         _ => {}
                     }
                     entity.update(cx, |_, cx| cx.notify()).ok();
