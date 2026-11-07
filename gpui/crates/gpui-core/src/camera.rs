@@ -23,6 +23,18 @@ pub struct Camera {
     dragging: bool,
 }
 
+/// The representation of `to` closest to `from`, so a 359° → 1° turn takes the
+/// two-degree path instead of spinning the long way round.
+fn nearest_angle(from: f32, to: f32) -> f32 {
+    let mut delta = (to - from) % std::f32::consts::TAU;
+    if delta > std::f32::consts::PI {
+        delta -= std::f32::consts::TAU;
+    } else if delta < -std::f32::consts::PI {
+        delta += std::f32::consts::TAU;
+    }
+    from + delta
+}
+
 struct Tween {
     start_yaw: f32,
     start_pitch: f32,
@@ -89,9 +101,12 @@ impl Camera {
     /// eases toward, so writing `yaw`/`pitch` alone is undone on the next frame
     /// (the view cube snapped back to its old angle for exactly that reason).
     pub fn orient_to(&mut self, yaw: f32, pitch: f32) {
-        self.goal_yaw = yaw;
-        self.goal_pitch = pitch;
-        self.tween = None;
+        // A tween, not the smoothing goals: goals ease *out* only (fast first
+        // frame, long tail), which is why the cube jumped and then crawled. The
+        // source's `tweenCamera` runs 400ms with a smootherstep, the same curve
+        // `step` applies to a tween.
+        let yaw = nearest_angle(self.yaw, yaw);
+        self.begin_tween(self.target, self.distance, pitch, yaw, 0.4);
     }
 
     pub fn eye(&self) -> Vec3 {
