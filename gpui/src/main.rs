@@ -150,6 +150,10 @@ struct DragonFruit {
     show_grid: bool,
     show_plate: bool,
     show_box: bool,
+    overhang_view: bool,
+    left_width: f32,
+    right_width: f32,
+    dock_resize: Rc<Cell<Option<(bool, f32, f32)>>>,
     translate: [f32; 3],
     rotate_z: f32,
     scale: f32,
@@ -193,6 +197,10 @@ impl DragonFruit {
             show_grid: true,
             show_plate: true,
             show_box: true,
+            overhang_view: false,
+            left_width: 320.0,
+            right_width: 320.0,
+            dock_resize: Rc::new(Cell::new(None)),
             translate: [0.0; 3],
             rotate_z: 0.0,
             scale: 1.0,
@@ -488,6 +496,32 @@ impl Render for DragonFruit {
             .relative()
             .bg(rgb(BACKGROUND))
             .track_focus(&self.focus)
+            .on_mouse_move({
+                let dock_resize = self.dock_resize.clone();
+                let entity = entity.clone();
+                move |event, _, cx| {
+                    let Some((is_left, start_x, start_width)) = dock_resize.get() else {
+                        return;
+                    };
+                    let delta = event.position.x.0 - start_x;
+                    let width = (start_width + if is_left { delta } else { -delta })
+                        .clamp(200.0, 520.0);
+                    entity
+                        .update(cx, |this, cx| {
+                            if is_left {
+                                this.left_width = width;
+                            } else {
+                                this.right_width = width;
+                            }
+                            cx.notify();
+                        })
+                        .ok();
+                }
+            })
+            .on_mouse_up(MouseButton::Left, {
+                let dock_resize = self.dock_resize.clone();
+                move |_, _, _| dock_resize.set(None)
+            })
             .on_key_down(move |event, _window, cx| {
                 let key = event.keystroke.key.as_str();
                 let next_mode = match key {
@@ -559,6 +593,9 @@ impl Render for DragonFruit {
                 self.supports.borrow().len(),
                 size,
                 volume,
+                self.left_width,
+                self.right_width,
+                self.dock_resize.clone(),
             ))
             .child(orientation_cube(camera.clone(), entity.clone()))
             .child(layer_bar(layer, entity.clone(), self.window_width))
@@ -590,6 +627,7 @@ impl Render for DragonFruit {
                 show_settings,
                 self.show_printer_menu,
                 self.show_app_menu,
+                self.overhang_view,
             ))
             .when(show_settings, |this| {
                 this.child(settings_modal(
@@ -733,6 +771,7 @@ fn top_bar(
     show_settings: bool,
     show_printer_menu: bool,
     show_app_menu: bool,
+    overhang_view: bool,
 ) -> impl IntoElement {
     let logo_entity = entity.clone();
     let logo = div()
@@ -836,6 +875,7 @@ fn top_bar(
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(rgb(TEXT_MUTED))
         .child(if orthographic { "Ortho" } else { "Persp" })
+        .child(icon("chevron-down", 12., TEXT_MUTED))
         .on_click(move |_, _, cx| {
             let next = !toggle_camera.borrow().orthographic;
             toggle_camera.borrow_mut().orthographic = next;
@@ -863,6 +903,31 @@ fn top_bar(
                 })
                 .ok();
         });
+    let overhang_entity = entity.clone();
+    let overhang = div()
+        .id("overhang")
+        .w(px(32.))
+        .h(px(32.))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(6.))
+        .border_1()
+        .border_color(rgb(if overhang_view { ACCENT } else { BORDER_SUBTLE }))
+        .bg(rgb(if overhang_view { mix(ACCENT, SURFACE_0, 0.16) } else { SURFACE_1 }))
+        .child(icon(
+            "alert-diamond",
+            16.,
+            if overhang_view { ACCENT } else { TEXT_MUTED },
+        ))
+        .on_click(move |_, _, cx| {
+            overhang_entity
+                .update(cx, |this, cx| {
+                    this.overhang_view = !this.overhang_view;
+                    cx.notify();
+                })
+                .ok();
+        });
     let help_entity = entity.clone();
     let help = div()
         .id("help")
@@ -886,29 +951,6 @@ fn top_bar(
                 })
                 .ok();
         });
-    let mut open_button = div()
-        .id("open-stl")
-        .h(px(32.))
-        .px(px(12.))
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded(px(6.))
-        .bg(rgb(if loading { 0x8a1745 } else { PRIMARY }))
-        .text_size(px(12.))
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(rgb(ACCENT_CONTRAST))
-        .child(if loading { "Loading…" } else { "Open STL" })
-        .hover(|style| style.bg(rgb(PRIMARY_HOVER)));
-    if !loading {
-        let open_entity = entity.clone();
-        open_button = open_button.on_click(move |_, _, cx| {
-            open_entity
-                .update(cx, |this, cx| this.open_stl(cx))
-                .ok();
-        });
-    }
-
     let left = div()
         .flex()
         .items_center()
@@ -946,9 +988,9 @@ fn top_bar(
         .gap(px(8.))
         .pr(px(3.))
         .child(projection)
+        .child(overhang)
         .child(settings)
         .child(help)
-        .child(open_button)
         .child(
             div()
                 .ml(px(4.))
@@ -1161,6 +1203,9 @@ fn panel_stack(
     support_count: usize,
     size: [f32; 3],
     volume: f32,
+    left_width: f32,
+    right_width: f32,
+    dock_resize: Rc<Cell<Option<(bool, f32, f32)>>>,
 ) -> impl IntoElement {
     let defs = panel_defs(mode);
     let left: Vec<PanelDef> = defs
@@ -1179,6 +1224,32 @@ fn panel_stack(
         .bottom(px(6.))
         .left(px(0.))
         .right(px(0.))
+        .on_mouse_move({
+            let dock_resize = dock_resize.clone();
+            let entity = entity.clone();
+            move |event, _, cx| {
+                let Some((is_left, start_x, start_width)) = dock_resize.get() else {
+                    return;
+                };
+                let delta = event.position.x.0 - start_x;
+                let width =
+                    (start_width + if is_left { delta } else { -delta }).clamp(200.0, 520.0);
+                entity
+                    .update(cx, |this, cx| {
+                        if is_left {
+                            this.left_width = width;
+                        } else {
+                            this.right_width = width;
+                        }
+                        cx.notify();
+                    })
+                    .ok();
+            }
+        })
+        .on_mouse_up(MouseButton::Left, {
+            let up_resize = dock_resize.clone();
+            move |_, _, _| up_resize.set(None)
+        })
         .child(dock_column(
             left,
             PanelDock::Left,
@@ -1190,6 +1261,8 @@ fn panel_stack(
             support_count,
             size,
             volume,
+            left_width,
+            dock_resize.clone(),
         ))
         .child(dock_column(
             right,
@@ -1202,6 +1275,8 @@ fn panel_stack(
             support_count,
             size,
             volume,
+            right_width,
+            dock_resize,
         ))
 }
 
@@ -1217,12 +1292,14 @@ fn dock_column(
     support_count: usize,
     size: [f32; 3],
     volume: f32,
+    width: f32,
+    dock_resize: Rc<Cell<Option<(bool, f32, f32)>>>,
 ) -> impl IntoElement {
     let mut column = div()
         .absolute()
         .top(px(0.))
         .bottom(px(0.))
-        .w(px(320.))
+        .w(px(width))
         .flex()
         .flex_col()
         .gap(px(6.));
@@ -1230,6 +1307,25 @@ fn dock_column(
         PanelDock::Left => column.left(px(72.)),
         PanelDock::Right => column.right(px(6.)),
     };
+    let handle = {
+        let resize = dock_resize.clone();
+        let start_width = width;
+        let is_left = dock == PanelDock::Left;
+        let mut handle = div()
+            .absolute()
+            .top(px(0.))
+            .bottom(px(0.))
+            .w(px(6.))
+            .on_mouse_down(MouseButton::Left, move |event, _, _| {
+                resize.set(Some((is_left, event.position.x.0, start_width)));
+            });
+        handle = match dock {
+            PanelDock::Left => handle.right(px(-6.)),
+            PanelDock::Right => handle.left(px(-6.)),
+        };
+        handle
+    };
+    column = column.child(handle);
     for def in defs {
         column = column.child(panel_card(
             def,
@@ -1618,8 +1714,8 @@ fn orientation_cube(
     };
     div()
         .absolute()
-        .top(px(64.))
-        .right(px(12.))
+        .bottom(px(82.))
+        .right(px(132.))
         .w(px(104.))
         .rounded(px(10.))
         .border_1()
