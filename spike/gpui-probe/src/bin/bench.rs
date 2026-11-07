@@ -21,11 +21,9 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use bytemuck::{Pod, Zeroable};
-use dragonfruit_mesh_core::{
-    bvh::Bvh,
-    mesh::{IndexedMesh, Vec3},
-};
+use dragonfruit_mesh_core::{bvh::Bvh, mesh::Vec3};
 use glam::{Mat4, Vec3 as GVec3};
+use gpui_probe::{Vertex, sphere};
 use gpui::{
     App, Bounds, Context, Corners, IntoElement, Render, Window, WindowBounds, WindowOptions, div,
     gpu_canvas, prelude::*, px, rgb, size,
@@ -156,13 +154,6 @@ impl Render for BenchProbe {
                     ),
             )
     }
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, Pod, Zeroable)]
-struct Vertex {
-    pos: [f32; 3],
-    normal: [f32; 3],
 }
 
 #[repr(C)]
@@ -501,50 +492,6 @@ impl BenchState {
         }
         Ok(())
     }
-}
-
-/// A UV sphere. Normals are the positions: it is a unit sphere.
-fn sphere(rings: u32, segments: u32) -> (Vec<Vertex>, Vec<u32>, IndexedMesh) {
-    let row = segments + 1;
-    let mut vertices = Vec::with_capacity(((rings + 1) * row) as usize);
-    let mut positions = Vec::with_capacity(vertices.capacity());
-    for r in 0..=rings {
-        let phi = std::f32::consts::PI * (r as f32 / rings as f32);
-        let (sp, cp) = phi.sin_cos();
-        for s in 0..=segments {
-            let theta = std::f32::consts::TAU * (s as f32 / segments as f32);
-            let (st, ct) = theta.sin_cos();
-            let p = [sp * ct, cp, sp * st];
-            vertices.push(Vertex { pos: p, normal: p });
-            positions.push(Vec3::new(p[0], p[1], p[2]));
-        }
-    }
-
-    let mut indices = Vec::with_capacity((2 * rings * segments) as usize * 3);
-    let mut triangles = Vec::with_capacity((2 * rings * segments) as usize);
-    for r in 0..rings {
-        for s in 0..segments {
-            let a = r * row + s;
-            let b = a + row;
-            if r != 0 {
-                indices.extend_from_slice(&[a, b, a + 1]);
-                triangles.push([a, b, a + 1]);
-            }
-            if r != rings - 1 {
-                indices.extend_from_slice(&[a + 1, b, b + 1]);
-                triangles.push([a + 1, b, b + 1]);
-            }
-        }
-    }
-
-    (
-        vertices,
-        indices,
-        IndexedMesh {
-            positions,
-            triangles,
-        },
-    )
 }
 
 const MESH_SHADER: &str = r#"

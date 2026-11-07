@@ -58,6 +58,29 @@ Caveats: one draw call, static mesh, procedural sphere. A real scene has
 several models, instanced supports, overlays and a stencil pass, so treat this
 as the ceiling, not the product number.
 
+## Probe 4 — scene (models, instancing, stencil cap)
+
+```sh
+cargo run --bin scene
+```
+
+Four models × 720k triangles (2.88M total) from one vertex/index buffer with
+per-instance matrices, 20,000 instanced support cylinders, and the
+cross-section implemented the way the app does it: two stencil passes over the
+clipped models, then a cap quad where the stencil is non-zero.
+
+Measured on this Windows box (dev profile), 2026-11-07:
+
+| Metric | Result |
+| --- | --- |
+| Setup (mesh + buffers + pipelines) | 50 ms |
+| 240 frames, GPU-waited | mean 1.83 ms (**547 fps**), p50 1.69 ms, p95 3.27 ms |
+| Readback | cap 76,792 px · model 154,767 px · supports 30,161 px |
+
+The readback is the correctness check: a frame time says nothing about whether
+the cap drew, so the probe renders into a `COPY_SRC` texture and counts the
+pixels each layer should have produced.
+
 ## Ecosystem note
 
 The GPUI ecosystem is split across incompatible lines. This is the main
@@ -78,6 +101,6 @@ seam. A real port must either fork `gpui-pre` to add the seam, port
 
 - macOS: no zero-copy path exists today; needs a GPUI Metal fork or upstream
   `paint_surface` work.
-- Multi-model scenes, instanced supports, stencil cross-sections, HTML-style
-  labels, and the 273-component UI port.
+- HTML-style labels positioned in 3D, the screen-space transform gizmo, and the
+  273-component UI port.
 - Accessibility and the 2,504-string i18n catalog.
