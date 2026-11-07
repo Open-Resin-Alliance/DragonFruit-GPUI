@@ -1289,28 +1289,51 @@ fn cube_hit(view: &CubeView, faces: &[FaceProjection], pointer: [f32; 2]) -> Opt
 
 /// `ZUpGizmoHelper`'s quarter-turn arrows: four triangles around the cube, each
 /// turning the camera 90° about the axis it points along.
-const QUARTER: f32 = 14.0;
+const QUARTER_W: f32 = 22.0;
+const QUARTER_H: f32 = 13.0;
+/// `ARROW_FADE_FULL_DEGREES` / `ARROW_FADE_ZERO_DEGREES`.
+const ARROW_FADE_FULL_COS: f32 = 0.99452;
+const ARROW_FADE_ZERO_COS: f32 = 0.93969;
+
+/// How visible the quarter-turn arrows are: `ZUpGizmoHelper` fades them with how
+/// face-on the view is, traces them fully opaque within 6° of a face and gone by
+/// 20°.
+fn arrow_fade(camera: &Camera) -> f32 {
+    let forward = (camera.target - camera.eye()).normalize_or_zero();
+    let face_on = forward.x.abs().max(forward.y.abs()).max(forward.z.abs());
+    let raw = ((face_on - ARROW_FADE_ZERO_COS) / (ARROW_FADE_FULL_COS - ARROW_FADE_ZERO_COS))
+        .clamp(0.0, 1.0);
+    if raw <= 0.02 {
+        0.0
+    } else if raw >= 0.98 {
+        1.0
+    } else {
+        raw * raw * (3.0 - 2.0 * raw)
+    }
+}
 
 fn quarter_arrow(
     id: &'static str,
     icon_name: &'static str,
     dx: f32,
     dy: f32,
+    fade: f32,
     camera: Rc<std::cell::RefCell<Camera>>,
     entity: WeakEntity<DragonFruit>,
 ) -> impl IntoElement {
     div()
         .id(id)
         .absolute()
-        .left(px(CUBE_WIDGET * 0.5 - QUARTER * 0.5 + dx))
-        .top(px(CUBE_WIDGET * 0.5 - QUARTER * 0.5 + dy))
-        .w(px(QUARTER))
-        .h(px(QUARTER))
+        .left(px(CUBE_WIDGET * 0.5 - QUARTER_W * 0.5 + dx))
+        .top(px(CUBE_WIDGET * 0.5 - QUARTER_H * 0.5 + dy))
+        .w(px(QUARTER_W))
+        .h(px(QUARTER_H))
         .flex()
         .items_center()
         .justify_center()
         .cursor_pointer()
-        .hover(|style| style.opacity(0.75))
+        .opacity(fade * 0.9)
+        .hover(|style| style.opacity(fade))
         .on_click(move |_, _, cx| {
             let (yaw, pitch) = {
                 let camera = camera.borrow();
@@ -1332,7 +1355,7 @@ fn quarter_arrow(
             camera.borrow_mut().orient_to(yaw, pitch);
             entity.update(cx, |_, cx| cx.notify()).ok();
         })
-        .child(icons::icon(icon_name, QUARTER, ACCENT_SECONDARY))
+        .child(icons::icon(icon_name, QUARTER_H, ACCENT_SECONDARY))
 }
 
 pub fn home_button(
@@ -1413,33 +1436,37 @@ pub fn view_cube(
         )
         .child(quarter_arrow(
             "cube-turn-up",
-            "quarter-up",
+            "quarter-down",
             0.0,
             -CUBE_WIDGET * 0.5 + 2.0,
+            arrow_fade(&camera.borrow()),
             camera.clone(),
             entity.clone(),
         ))
         .child(quarter_arrow(
             "cube-turn-down",
-            "quarter-down",
+            "quarter-up",
             0.0,
             CUBE_WIDGET * 0.5 - 2.0,
+            arrow_fade(&camera.borrow()),
             camera.clone(),
             entity.clone(),
         ))
         .child(quarter_arrow(
             "cube-turn-left",
-            "quarter-left",
+            "quarter-right",
             -CUBE_WIDGET * 0.5 + 2.0,
             0.0,
+            arrow_fade(&camera.borrow()),
             camera.clone(),
             entity.clone(),
         ))
         .child(quarter_arrow(
             "cube-turn-right",
-            "quarter-right",
+            "quarter-left",
             CUBE_WIDGET * 0.5 - 2.0,
             0.0,
+            arrow_fade(&camera.borrow()),
             camera.clone(),
             entity.clone(),
         ))
