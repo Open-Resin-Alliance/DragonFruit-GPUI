@@ -818,11 +818,11 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let ground = vec3<f32>(0.243, 0.255, 0.361);
     let hemi = mix(ground, sky, n.z * 0.5 + 0.5);
 
-    let ambient = hemi * 0.28 + vec3<f32>(0.25) * 0.15;
+    let ambient = hemi * 0.28 + vec3<f32>(0.25) * 0.10;
     let key = vec3<f32>(1.0) * max(dot(n, key_dir), 0.0) * 1.12;
     let fill = vec3<f32>(0.565, 0.655, 1.0) * max(dot(n, fill_dir), 0.0) * 0.168;
-    let head = vec3<f32>(1.0) * max(dot(n, view_dir), 0.0) * 0.4;
-    let lighting = (ambient + key + fill + head) / 3.14159265;
+    let head = vec3<f32>(1.0) * max(dot(n, view_dir), 0.0) * 1.0;
+    let lighting = (ambient + key + fill + head) * 0.55;
 
     let base = uniforms.base_color;
     let half = normalize(key_dir + view_dir);
