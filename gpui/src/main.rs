@@ -516,6 +516,9 @@ impl Render for DragonFruit {
         }
         let mesh = self.mesh.clone();
         let click_mesh = self.mesh.clone();
+        // `cameraInteractionCycleEnabled = hasModelsOnPlate && ...`: nothing on
+        // the plate means the empty scene does not answer the pointer.
+        let camera_enabled = Rc::new(Cell::new(self.mesh.is_some()));
         let supports = self.supports.clone();
         let model_matrix = glam::Mat4::from_scale_rotation_translation(
             glam::Vec3::splat(self.scale),
@@ -640,7 +643,11 @@ impl Render for DragonFruit {
             let drag = drag.clone();
             let last = last.clone();
             let camera = camera.clone();
+            let camera_enabled = camera_enabled.clone();
             move |event, _, _| {
+                if !camera_enabled.get() {
+                    return;
+                }
                 drag.set(Some(MouseButton::Right));
                 camera.borrow_mut().set_dragging(true);
                 last.set((event.position.x.0, event.position.y.0));
@@ -649,7 +656,11 @@ impl Render for DragonFruit {
         .on_mouse_down(MouseButton::Middle, {
             let drag = drag.clone();
             let last = last.clone();
+            let camera_enabled = camera_enabled.clone();
             move |event, _, _| {
+                if !camera_enabled.get() {
+                    return;
+                }
                 drag.set(Some(MouseButton::Middle));
                 last.set((event.position.x.0, event.position.y.0));
             }
@@ -749,7 +760,11 @@ impl Render for DragonFruit {
         .on_scroll_wheel({
             let camera = camera.clone();
             let entity = entity.clone();
+            let camera_enabled = camera_enabled.clone();
             move |event, _window, cx| {
+                if !camera_enabled.get() {
+                    return;
+                }
                 let delta = match event.delta {
                     ScrollDelta::Lines(point) => point.y,
                     ScrollDelta::Pixels(point) => point.y.0 / 40.0,
@@ -1150,8 +1165,11 @@ impl Render for DragonFruit {
             .child(
                 div()
                     .absolute()
-                    .bottom(px(20.))
-                    .right(px(196.))
+                    // `HOME_OFFSET 0.93` along the bottom-right diagonal of the
+                    // 120pt gizmo: the chip's centre lands 39.5pt from the
+                    // widget's centre, so its box sits 6.5pt inside the corner.
+                    .bottom(px(22.0 + 6.5))
+                    .right(px(72.0 + 6.5))
                     .child(overlays::home_button(camera.clone(), entity.clone())),
             )
             // `CrossSliderPanel` wrapper: hidden in printing (the source's

@@ -117,6 +117,7 @@ use gpui::{
 };
 
 use gpui_core::camera::Camera;
+use gpui_core::icons;
 use gpui_core::theme::*;
 use gpui_core::viewport::Viewport;
 use gpui_interop::attach;
@@ -1290,38 +1291,40 @@ pub fn home_button(
 ) -> impl IntoElement {
     div()
         .id("view-cube-home")
-        .w(px(24.0))
-        .h(px(24.0))
-        .rounded(px(6.0))
+        .w(px(HOME_SIZE))
+        .h(px(HOME_SIZE))
+        // `roundRect(..., 16)` on a 64px canvas drawn at 28px: 7px on screen.
+        .rounded(px(7.0))
         .border_1()
-        .border_color(rgb(BORDER_SUBTLE))
-        .bg(rgb(SURFACE_1))
+        .border_color(rgb(HOME_BORDER))
+        .bg(rgb(HOME_CHIP))
         .flex()
         .items_center()
         .justify_center()
         .cursor_pointer()
-        .hover(|style| style.bg(rgb(SURFACE_2)))
+        .hover(|style| style.bg(rgb(HOME_CHIP_HOVER)))
         .on_click(move |_, _, cx| {
             camera
                 .borrow_mut()
                 .home(glam::Vec3::new(0.0, 0.0, 110.0));
             entity.update(cx, |_, cx| cx.notify()).ok();
         })
-        .child(
-            div()
-                .child(
-                    // A filled house: roof plus body.
-                    gpui::svg()
-                        .external_path(format!(
-                            "{}/../../assets/icons/house.svg",
-                            env!("CARGO_MANIFEST_DIR")
-                        ))
-                        .w(px(14.0))
-                        .h(px(14.0))
-                        .text_color(rgb(TEXT_STRONG)),
-                ),
-        )
+        // lucide's house, the icon the rest of the UI uses. `icons::icon`
+        // resolves it from the core crate's assets; a hand-built
+        // `external_path` here pointed at the repo root instead.
+        .child(icons::icon("house", 22.0, HOME_GLYPH))
 }
+
+/// `HOME_SIZE` from `ZUpGizmoHelper`: `0.47` of the cube's 60-unit scale.
+const HOME_SIZE: f32 = 28.0;
+/// `gizmoColors.chip`.
+const HOME_CHIP: u32 = 0x20242c;
+/// A hover step above the chip surface.
+const HOME_CHIP_HOVER: u32 = 0x2a2f39;
+/// `gizmoColors.chipBorder`.
+const HOME_BORDER: u32 = 0x3a3f4b;
+/// The glyph is painted in `accentColor`.
+const HOME_GLYPH: u32 = 0xbaf72e;
 
 /// The Z-up orientation cube from `ZUpGizmoViewcube.tsx`, projected and painted
 /// with GPUI paths.

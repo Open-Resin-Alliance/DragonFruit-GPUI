@@ -83,8 +83,12 @@ use crate::camera::Camera;
 use crate::stl::{MeshData, Vertex};
 
 const SAMPLE_COUNT: u32 = 4;
-/// The gizmo widget is 120pt; this is its target in device pixels.
-const CUBE_TARGET_SIZE: u32 = 192;
+/// The gizmo widget is 120pt; the target is oversampled so the 1px atlas
+/// stroke survives the downscale to the widget.
+const CUBE_TARGET_SIZE: u32 = 240;
+/// MSAA for the cube: the face labels and the 1px borders alias badly at this
+/// size without it.
+const CUBE_SAMPLE_COUNT: u32 = 4;
 
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -134,6 +138,8 @@ fn vs_main(in: VsIn) -> VsOut {
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let texel = textureSample(face_atlas, face_sampler, in.uv);
+    // Opaque: the source's `opacity={0.75}` bleeds 25% of the scene through the
+    // faces, which reads as washed out against GPUI's lighter gizmo backdrop.
     return vec4<f32>(texel.rgb * u.tint.rgb, texel.a);
 }
 "#;
@@ -238,6 +244,8 @@ pub struct Viewport {
     cube_vertex_buffer: wgpu::Buffer,
     cube_target: wgpu::Texture,
     cube_target_view: wgpu::TextureView,
+    cube_msaa: wgpu::Texture,
+    cube_msaa_view: wgpu::TextureView,
     cube_texture_bind: wgpu::BindGroup,
     decal: wgpu::RenderPipeline,
     decal_buffer: wgpu::Buffer,
@@ -743,39 +751,9 @@ impl Viewport {
             })
         });
         let (atlas_w, atlas_h, atlas_data) = crate::cube::atlas();
-        let atlas = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("viewport cube atlas"),
-            size: wgpu::Extent3d {
-                width: atlas_w,
-                height: atlas_h,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
-        queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &atlas,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            &atlas_data,
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(atlas_w * 4),
-                rows_per_image: Some(atlas_h),
-            },
-            wgpu::Extent3d {
-                width: atlas_w,
-                height: atlas_h,
-                depth_or_array_layers: 1,
-            },
-        );
+        // Mipmapped: at ~40 device pixels per face a 1px atlas stroke is
+        // sub-pixel, and point sampling it reads as a dotted outline.
+        let atlas = mip.create(device, queue, "viewport cube atlas", atlas_w, atlas_h, &atlas_data);
         let atlas_view = atlas.create_view(&wgpu::TextureViewDescriptor::default());
         let cube_texture_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("viewport cube atlas"),
@@ -787,7 +765,7 @@ impl Viewport {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&linear_sampler),
+                    resource: wgpu::BindingResource::Sampler(&mip.sampler),
                 },
             ],
         });
@@ -814,6 +792,21 @@ impl Viewport {
             view_formats: &[],
         });
         let cube_target_view = cube_target.create_view(&wgpu::TextureViewDescriptor::default());
+        let cube_msaa = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("viewport cube msaa"),
+            size: wgpu::Extent3d {
+                width: CUBE_TARGET_SIZE,
+                height: CUBE_TARGET_SIZE,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: CUBE_SAMPLE_COUNT,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let cube_msaa_view = cube_msaa.create_view(&wgpu::TextureViewDescriptor::default());
         let cube_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("viewport cube"),
             layout: Some(&cube_pipeline_layout),
@@ -854,7 +847,10 @@ impl Viewport {
                 ..Default::default()
             },
             depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
+            multisample: wgpu::MultisampleState {
+                count: CUBE_SAMPLE_COUNT,
+                ..Default::default()
+            },
             multiview_mask: None,
             cache: None,
         });
@@ -1274,6 +1270,8 @@ impl Viewport {
             cube_vertex_buffer,
             cube_target,
             cube_target_view,
+            cube_msaa,
+            cube_msaa_view,
             cube_texture_bind,
             decal,
             decal_buffer,
@@ -2948,8 +2946,11 @@ impl Viewport {
         };
         let eye = direction * 3.2;
         let view = glam::Mat4::look_at_rh(eye, glam::Vec3::ZERO, glam::Vec3::Z);
-        // `new THREE.PerspectiveCamera(50, ...)` on a 1:1 target.
-        let proj = glam::Mat4::perspective_rh(50f32.to_radians(), 1.0, 0.1, 10.0);
+        // The gizmo camera is orthographic: the cube must not foreshorten.
+        // Half-extent 1.15 puts the rotated cube at ~60% of the widget, which is
+        // the footprint `ZUpGizmoViewcube`'s `scale=[60,60,60]` has.
+        let half = 1.15;
+        let proj = glam::Mat4::orthographic_rh(-half, half, -half, half, 0.1, 10.0);
         let view_proj = proj * view;
         for (index, tint) in [[1.0f32, 1.0, 1.0, 1.0], [accent[0], accent[1], accent[2], 1.0]]
             .into_iter()
@@ -2974,8 +2975,8 @@ impl Viewport {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("viewport cube"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &self.cube_target_view,
-                    resolve_target: None,
+                    view: &self.cube_msaa_view,
+                    resolve_target: Some(&self.cube_target_view),
                     depth_slice: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
