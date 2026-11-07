@@ -822,7 +822,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let key = vec3<f32>(1.0) * max(dot(n, key_dir), 0.0) * 1.12;
     let fill = vec3<f32>(0.565, 0.655, 1.0) * max(dot(n, fill_dir), 0.0) * 0.168;
     let head = vec3<f32>(1.0) * max(dot(n, view_dir), 0.0) * 1.0;
-    let lighting = (ambient + key + fill + head) * 0.55;
+    let lighting = (ambient + key + fill + head) / 3.14159265;
 
     let base = uniforms.base_color;
     let half = normalize(key_dir + view_dir);
@@ -992,7 +992,7 @@ fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) f32 {
     let rand = vec3<f32>(cos(noise), sin(noise), 0.0);
     let tangent = normalize(rand - n * dot(rand, n));
     let bitangent = cross(n, tangent);
-    let radius = 4.0;
+    let radius = 12.0;
     var occlusion = 0.0;
     for (var i = 0; i < 16; i = i + 1) {
         let sample = KERNEL[i] * (0.25 + 0.75 * f32(i) / 16.0);
@@ -1006,7 +1006,7 @@ fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) f32 {
         }
         let scene_pos = view_position(suv);
         let range = smoothstep(0.0, 1.0, radius / abs(p.z - scene_pos.z));
-        if (scene_pos.z >= sample_pos.z + 0.05) {
+        if (scene_pos.z >= sample_pos.z + 0.03) {
             occlusion += range;
         }
     }
@@ -1040,6 +1040,6 @@ fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     let uv = frag.xy / uniforms.resolution;
     let color = textureSampleLevel(scene_tex, samp, uv, 0.0).rgb;
     let ao = textureSampleLevel(ao_tex, samp, uv, 0.0).r;
-    return vec4<f32>(color * mix(1.0, ao, 0.85), 1.0);
+    return vec4<f32>(color * mix(1.0, pow(ao, 1.5), 1.0), 1.0);
 }
 "#;
