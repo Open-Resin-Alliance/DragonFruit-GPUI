@@ -756,14 +756,15 @@ impl Viewport {
             true,
             SAMPLE_COUNT,
         );
-        // `meshBasicMaterial` defaults to `FrontSide`.
+        // `meshBasicMaterial` defaults to `FrontSide`, but the generated caps
+        // are closed from both sides; culling none keeps them visible.
         let axis_mesh = pipeline(
             device,
             &uniform_pipeline_layout,
             &axis_shader,
             &[Some(axis_layout.clone())],
             wgpu::PrimitiveTopology::TriangleList,
-            Some(wgpu::Face::Back),
+            None,
             false,
             wgpu::CompareFunction::LessEqual,
             WgpuSurface::DEFAULT_FORMAT,
@@ -1900,11 +1901,12 @@ fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
 /// maps the same 16x256 gradient onto both geometries, so the colour restarts at
 /// the cone's base).
 fn axis_arrows(metrics: &PlateMetrics) -> Vec<[f32; 6]> {
-    let origin = [metrics.origin_min_x(), metrics.origin_min_y(), 0.5];
+    let origin = [-109.44, -61.44, 0.5];
     let length = metrics.axis_length;
     let shaft_radius = metrics.shaft_radius;
     let head_radius = metrics.head_radius;
     let head_length = metrics.head_length;
+    let total = length + head_length;
     let segments = 12;
     let axes: [([f32; 3], u32, u32); 3] = [
         ([1.0, 0.0, 0.0], 0x8d232f, 0xff7a7a),
@@ -1933,43 +1935,60 @@ fn axis_arrows(metrics: &PlateMetrics) -> Vec<[f32; 6]> {
                 origin[2] + dir[2] * t + (u[2] * cos + v[2] * sin) * radius,
             ]
         };
-        // `v` runs 0 at the geometry's base to 1 at its tip; the canvas gradient
-        // is dark at v=0 and light at v=1.
-        let shade = |k: f32| -> [f32; 3] {
-            let k = k.clamp(0.0, 1.0);
+        let shade = |t: f32| -> [f32; 3] {
+            let k = (t / total).clamp(0.0, 1.0);
             [
                 base[0] + (tip[0] - base[0]) * k,
                 base[1] + (tip[1] - base[1]) * k,
                 base[2] + (tip[2] - base[2]) * k,
             ]
         };
-        let apex = [
-            origin[0] + dir[0] * (length + head_length),
-            origin[1] + dir[1] * (length + head_length),
-            origin[2] + dir[2] * (length + head_length),
+        let tip_point = [
+            origin[0] + dir[0] * total,
+            origin[1] + dir[1] * total,
+            origin[2] + dir[2] * total,
         ];
+        let center_at = |t: f32| -> [f32; 3] {
+            [
+                origin[0] + dir[0] * t,
+                origin[1] + dir[1] * t,
+                origin[2] + dir[2] * t,
+            ]
+        };
         for i in 0..segments {
             let a0 = i as f32 / segments as f32 * std::f32::consts::TAU;
             let a1 = (i + 1) as f32 / segments as f32 * std::f32::consts::TAU;
-            // Shaft: base ring at 0 (dark), top ring at `length` (light).
+            // Shaft: `CylinderGeometry(shaftRadius, shaftRadius, length, 12)`,
+            // closed at both ends.
             let p00 = ring(0.0, shaft_radius, a0);
             let p01 = ring(0.0, shaft_radius, a1);
             let p10 = ring(length, shaft_radius, a0);
             let p11 = ring(length, shaft_radius, a1);
             let c0 = shade(0.0);
-            let c1 = shade(1.0);
+            let c1 = shade(length);
             push(p00, c0);
-            push(p11, c1);
             push(p10, c1);
-            push(p00, c0);
-            push(p01, c0);
             push(p11, c1);
-            // Cone: its own base (dark) to its apex (light).
+            push(p00, c0);
+            push(p11, c1);
+            push(p01, c0);
+            // Bottom cap.
+            push(center_at(0.0), c0);
+            push(p01, c0);
+            push(p00, c0);
+            // Top cap.
+            push(center_at(length), c1);
+            push(p10, c1);
+            push(p11, c1);
+            // Cone: `ConeGeometry(headRadius, headLength, 12)`, base capped.
             let b0 = ring(length, head_radius, a0);
             let b1 = ring(length, head_radius, a1);
-            push(b0, c0);
-            push(b1, c0);
-            push(apex, c1);
+            push(b0, c1);
+            push(b1, c1);
+            push(tip_point, shade(total));
+            push(center_at(length), c1);
+            push(b1, c1);
+            push(b0, c1);
         }
     }
     out
