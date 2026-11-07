@@ -21,7 +21,7 @@ impl Camera {
             distance,
             target: center,
             fov_y,
-            orthographic: false,
+            orthographic: true,
         }
     }
 

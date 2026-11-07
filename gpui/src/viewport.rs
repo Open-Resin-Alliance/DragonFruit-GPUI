@@ -50,6 +50,9 @@ pub struct Viewport {
     plate_vertex_buffer: wgpu::Buffer,
     plate_index_buffer: wgpu::Buffer,
     plate_index_count: u32,
+    volume: wgpu::RenderPipeline,
+    volume_buffer: wgpu::Buffer,
+    volume_vertex_count: u32,
     grid: wgpu::RenderPipeline,
     footprint: wgpu::RenderPipeline,
     mesh_pipeline: wgpu::RenderPipeline,
@@ -76,6 +79,10 @@ impl Viewport {
         let plate_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("viewport plate"),
             source: wgpu::ShaderSource::Wgsl(PLATE_SHADER.into()),
+        });
+        let volume_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("viewport volume"),
+            source: wgpu::ShaderSource::Wgsl(VOLUME_SHADER.into()),
         });
         let grid_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("viewport grid"),
@@ -307,6 +314,35 @@ impl Viewport {
             SAMPLE_COUNT,
         );
 
+        let volume = pipeline(
+            device,
+            &uniform_pipeline_layout,
+            &volume_shader,
+            &[Some(wgpu::VertexBufferLayout {
+                array_stride: 12,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &[wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x3,
+                    offset: 0,
+                    shader_location: 0,
+                }],
+            })],
+            wgpu::PrimitiveTopology::LineList,
+            None,
+            false,
+            wgpu::CompareFunction::LessEqual,
+            WgpuSurface::DEFAULT_FORMAT,
+            true,
+            true,
+            SAMPLE_COUNT,
+        );
+        let mut volume_edges = build_volume_edges(218.88, 122.88, 220.0);
+        volume_edges.extend_from_slice(&plate_outline(218.88, 122.88, -0.07));
+        let volume_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("viewport volume"),
+            contents: bytemuck::cast_slice(&volume_edges),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
         let (plate_vertices, plate_indices) = plate_mesh(224.88, 128.88, 3.0, -0.08, 3.0, 8);
         let plate_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("viewport plate vertices"),
@@ -335,6 +371,9 @@ impl Viewport {
             plate_vertex_buffer,
             plate_index_buffer,
             plate_index_count: plate_indices.len() as u32,
+            volume,
+            volume_buffer,
+            volume_vertex_count: volume_edges.len() as u32,
             grid,
             footprint,
             mesh_pipeline,
@@ -476,6 +515,9 @@ impl Viewport {
                 pass.set_pipeline(&self.grid);
                 pass.draw(0..6, 0..1);
             }
+            pass.set_pipeline(&self.volume);
+            pass.set_vertex_buffer(0, self.volume_buffer.slice(..));
+            pass.draw(0..self.volume_vertex_count, 0..1);
             if let Some(mesh) = &self.mesh {
                 if !below_plate && mesh.footprint_vertex_count > 0 {
                     pass.set_pipeline(&self.footprint);
@@ -650,6 +692,46 @@ impl Targets {
     }
 }
 
+fn plate_outline(width: f32, depth: f32, z: f32) -> Vec<[f32; 3]> {
+    let hx = width * 0.5;
+    let hy = depth * 0.5;
+    let corners = [
+        [-hx, -hy, z],
+        [hx, -hy, z],
+        [hx, hy, z],
+        [-hx, hy, z],
+    ];
+    let edges = [(0, 1), (1, 2), (2, 3), (3, 0)];
+    edges
+        .iter()
+        .flat_map(|&(a, b)| [corners[a], corners[b]])
+        .collect()
+}
+
+fn build_volume_edges(width: f32, depth: f32, height: f32) -> Vec<[f32; 3]> {
+    let hx = width * 0.5;
+    let hy = depth * 0.5;
+    let corners = [
+        [-hx, -hy, 0.0],
+        [hx, -hy, 0.0],
+        [hx, hy, 0.0],
+        [-hx, hy, 0.0],
+        [-hx, -hy, height],
+        [hx, -hy, height],
+        [hx, hy, height],
+        [-hx, hy, height],
+    ];
+    let edges = [
+        (0, 1), (1, 2), (2, 3), (3, 0),
+        (4, 5), (5, 6), (6, 7), (7, 4),
+        (0, 4), (1, 5), (2, 6), (3, 7),
+    ];
+    edges
+        .iter()
+        .flat_map(|&(a, b)| [corners[a], corners[b]])
+        .collect()
+}
+
 fn plate_mesh(
     width: f32,
     depth: f32,
@@ -664,10 +746,9 @@ fn plate_mesh(
     let z0 = top;
     let z1 = top - thickness;
 
-    let mut perimeter: Vec<[f32; 2]> = Vec::new();
-    perimeter.push([-half_w + r, -half_d]);
+    let mut perimeter: Vec<[f32; 2]> = vec![[-half_w + r, -half_d]];
     let arc = |cx: f32, cy: f32, a0: f32, a1: f32, points: &mut Vec<[f32; 2]>| {
-        for i in 0..=segments {
+        for i in 1..=segments {
             let a = a0 + (a1 - a0) * i as f32 / segments as f32;
             points.push([cx + r * a.cos(), cy + r * a.sin()]);
         }
@@ -676,13 +757,16 @@ fn plate_mesh(
     arc(half_w - r, half_d - r, 0.0, std::f32::consts::FRAC_PI_2, &mut perimeter);
     arc(-half_w + r, half_d - r, std::f32::consts::FRAC_PI_2, std::f32::consts::PI, &mut perimeter);
     arc(-half_w + r, -half_d + r, std::f32::consts::PI, 1.5 * std::f32::consts::PI, &mut perimeter);
-    perimeter.dedup_by(|a, b| (a[0] - b[0]).abs() < 1e-5 && (a[1] - b[1]).abs() < 1e-5);
+    if let (Some(first), Some(last)) = (perimeter.first(), perimeter.last()) {
+        if (first[0] - last[0]).abs() < 1e-5 && (first[1] - last[1]).abs() < 1e-5 {
+            perimeter.pop();
+        }
+    }
 
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
     let count = perimeter.len();
 
-    // Top and bottom fans around the centre; the rounded rectangle is convex.
     let top_center = vertices.len() as u32;
     vertices.push(Vertex { pos: [0.0, 0.0, z0], normal: [0.0, 0.0, 1.0], ao: 1.0 });
     let top_start = vertices.len() as u32;
@@ -707,7 +791,6 @@ fn plate_mesh(
         indices.extend_from_slice(&[bottom_center, b, a]);
     }
 
-    // Side walls, one quad per perimeter edge.
     for i in 0..count {
         let p0 = perimeter[i];
         let p1 = perimeter[(i + 1) % count];
@@ -916,14 +999,35 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
 
     let base = uniforms.base_color;
     let f0 = mix(vec3<f32>(0.04), base, 0.02);
-    let spec = specular(n, view_dir, key_dir, 0.55, f0) * 1.2 * max(dot(n, key_dir), 0.0)
-        + specular(n, view_dir, view_dir, 0.55, f0) * 1.0 * max(dot(n, view_dir), 0.0);
+    let spec = (specular(n, view_dir, key_dir, 0.55, f0) * 1.2 * max(dot(n, key_dir), 0.0)
+        + specular(n, view_dir, view_dir, 0.55, f0) * 1.0 * max(dot(n, view_dir), 0.0)) * 1.5;
     let n_dot_l = max(dot(n, key_dir), 0.0);
     let cavity = pow(1.0 - n_dot_l, 1.35);
     let fake_ao = 1.0 - cavity * 0.2;
     let baked = mix(1.0, clamp(in.ao, 0.0, 1.0), 0.85);
     let color = base * lighting * fake_ao * baked + spec;
     return vec4<f32>(color, 1.0);
+}
+"#;
+
+const VOLUME_SHADER: &str = r#"
+struct Uniforms {
+    view_proj: mat4x4<f32>,
+    inv_proj: mat4x4<f32>,
+    camera_pos: vec3<f32>,
+    base_color: vec3<f32>,
+    resolution: vec2<f32>,
+};
+@group(0) @binding(0) var<uniform> uniforms: Uniforms;
+
+@vertex
+fn vs_main(@location(0) position: vec3<f32>) -> @builtin(position) vec4<f32> {
+    return uniforms.view_proj * vec4<f32>(position, 1.0);
+}
+
+@fragment
+fn fs_main() -> @location(0) vec4<f32> {
+    return vec4<f32>(0.035, 0.042, 0.052, 1.0);
 }
 "#;
 
@@ -998,21 +1102,14 @@ fn fs_main(in: GridOut) -> @location(0) vec4<f32> {
     let cell = vec2<f32>(218.88 / 15.0, 122.88 / 15.0);
     let coord = in.world / cell;
     let width = fwidth(coord);
-    let grid = abs(fract(coord - 0.5) - 0.5) / width;
+    let grid = abs(fract(coord) - 0.5) / width;
     let line = 1.0 - min(min(grid.x, grid.y), 1.0);
-    let axis = 1.0 - min(
-        min(abs(in.world.x) / fwidth(in.world.x), abs(in.world.y) / fwidth(in.world.y)),
-        1.0,
-    );
-
     let view_dir = normalize(uniforms.camera_pos - vec3<f32>(in.world, 0.0));
     let head = max(view_dir.z, 0.0);
     let lighting = (vec3<f32>(0.965, 0.910, 1.0) * 0.28 + 1.12 + head * 1.0) / 3.14159265;
     let plate = vec3<f32>(0.032, 0.040, 0.054) * lighting;
-    let minor = vec3<f32>(0.025, 0.031, 0.040);
-    let major = vec3<f32>(0.078, 0.090, 0.116);
-    var color = mix(plate, minor, line);
-    color = mix(color, major, axis);
+    let grid_color = vec3<f32>(0.020, 0.024, 0.030);
+    let color = mix(plate, grid_color, line);
     return vec4<f32>(color, 1.0);
 }
 "#;

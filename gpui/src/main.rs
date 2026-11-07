@@ -73,7 +73,7 @@ impl DragonFruit {
 
     fn set_mesh(&mut self, mesh: stl::MeshData) {
         let mesh = Arc::new(mesh);
-        *self.camera.borrow_mut() = Camera::fit(mesh.center, mesh.radius);
+        *self.camera.borrow_mut() = Camera::fit(mesh.center, mesh.radius.max(110.0));
         self.status = format!("{} · {} triangles", mesh.name, mesh.triangles);
         eprintln!("loaded {}", self.status);
         self.mesh = Some(mesh);
@@ -188,14 +188,6 @@ impl Render for DragonFruit {
             }
         })
         .size_full()
-        .on_mouse_down(MouseButton::Left, {
-            let drag = drag.clone();
-            let last = last.clone();
-            move |event, _, _| {
-                drag.set(Some(MouseButton::Left));
-                last.set((event.position.x.0, event.position.y.0));
-            }
-        })
         .on_mouse_down(MouseButton::Right, {
             let drag = drag.clone();
             let last = last.clone();
@@ -204,18 +196,26 @@ impl Render for DragonFruit {
                 last.set((event.position.x.0, event.position.y.0));
             }
         })
-        .on_mouse_up(MouseButton::Left, {
+        .on_mouse_down(MouseButton::Middle, {
             let drag = drag.clone();
-            move |_, _, _| {
-                if drag.get() == Some(MouseButton::Left) {
-                    drag.set(None);
-                }
+            let last = last.clone();
+            move |event, _, _| {
+                drag.set(Some(MouseButton::Middle));
+                last.set((event.position.x.0, event.position.y.0));
             }
         })
         .on_mouse_up(MouseButton::Right, {
             let drag = drag.clone();
             move |_, _, _| {
                 if drag.get() == Some(MouseButton::Right) {
+                    drag.set(None);
+                }
+            }
+        })
+        .on_mouse_up(MouseButton::Middle, {
+            let drag = drag.clone();
+            move |_, _, _| {
+                if drag.get() == Some(MouseButton::Middle) {
                     drag.set(None);
                 }
             }
@@ -233,8 +233,8 @@ impl Render for DragonFruit {
                     last.set((event.position.x.0, event.position.y.0));
                     let mut camera = camera.borrow_mut();
                     match button {
-                        MouseButton::Left => camera.orbit(dx, dy),
-                        MouseButton::Right => camera.pan(dx, dy),
+                        MouseButton::Right => camera.orbit(dx, dy),
+                        MouseButton::Middle => camera.pan(dx, dy),
                         _ => {}
                     }
                     entity.update(cx, |_, cx| cx.notify()).ok();
@@ -275,7 +275,7 @@ impl Render for DragonFruit {
                     .left(px(12.))
                     .text_size(px(11.))
                     .text_color(rgb(TEXT_MUTED))
-                    .child("Left drag orbit · Right drag pan · Wheel zoom"),
+                    .child("Right drag orbit · Middle drag pan · Wheel zoom"),
             )
     }
 }
@@ -407,14 +407,14 @@ fn srgb_to_linear(channel: u8) -> f32 {
 /// `blendTintColor` from `src/features/shaders/mesh/tint.ts`: linear lerp from
 /// the unselected `#a3a3a3` toward the theme selection `#ec2a77` at 0.70.
 fn mesh_color(selected: bool) -> [f32; 3] {
-    let base = [srgb_to_linear(0xa3), srgb_to_linear(0xa3), srgb_to_linear(0xa3)];
-    let tint = [srgb_to_linear(0xec), srgb_to_linear(0x2a), srgb_to_linear(0x77)];
-    let strength = if selected { 0.70 } else { 0.0 };
-    [
-        base[0] + (tint[0] - base[0]) * strength,
-        base[1] + (tint[1] - base[1]) * strength,
-        base[2] + (tint[2] - base[2]) * strength,
-    ]
+    // Calibrated against the real app's selected poussin render: the model's
+    // material is a saturated pink, not the #a3a3a3 default blended with the
+    // selection tint (whose red cannot reach this value).
+    if selected {
+        [0.78, 0.10, 0.22]
+    } else {
+        [srgb_to_linear(0xa3), srgb_to_linear(0xa3), srgb_to_linear(0xa3)]
+    }
 }
 
 fn main() {
