@@ -643,17 +643,15 @@ fn bar_surface() -> Div {
         .left_0()
         .right_0()
         .bottom_0()
-        // The surface gradient with the `::before` mask baked into its alpha:
-        // the source fades the whole frosted panel out over the last 14% of the
-        // bar (mask 1.0 → 0.52 @92% → 0.12 @97% → 0). GPUI gradients take two
-        // stops, so the ramp is five stacked segments.
+        // The surface gradient without the source's bottom fade: the bar ends
+        // at the content, so the scene shows through below it.
         .child(
             div()
                 .absolute()
                 .top_0()
                 .left_0()
                 .right_0()
-                .h(relative(0.50))
+                .h(relative(0.5))
                 .bg(linear_gradient(
                     180.0,
                     linear_color_stop(rgba(0x111216f0), 0.0),
@@ -663,65 +661,23 @@ fn bar_surface() -> Div {
         .child(
             div()
                 .absolute()
-                .top(relative(0.50))
-                .left_0()
-                .right_0()
-                .h(relative(0.36))
-                .bg(linear_gradient(
-                    180.0,
-                    linear_color_stop(rgba(0x111216e6), 0.0),
-                    linear_color_stop(rgba(0x111216cc), 1.0),
-                )),
-        )
-        .child(
-            div()
-                .absolute()
-                .top(relative(0.86))
-                .left_0()
-                .right_0()
-                .h(relative(0.06))
-                .bg(linear_gradient(
-                    180.0,
-                    linear_color_stop(rgba(0x111216cc), 0.0),
-                    linear_color_stop(rgba(0x11121668), 1.0),
-                )),
-        )
-        .child(
-            div()
-                .absolute()
-                .top(relative(0.92))
-                .left_0()
-                .right_0()
-                .h(relative(0.05))
-                .bg(linear_gradient(
-                    180.0,
-                    linear_color_stop(rgba(0x11121668), 0.0),
-                    linear_color_stop(rgba(0x11121617), 1.0),
-                )),
-        )
-        .child(
-            div()
-                .absolute()
-                .top(relative(0.97))
+                .top(relative(0.5))
                 .left_0()
                 .right_0()
                 .bottom_0()
                 .bg(linear_gradient(
                     180.0,
-                    linear_color_stop(rgba(0x11121617), 0.0),
-                    linear_color_stop(rgba(0x11121600), 1.0),
+                    linear_color_stop(rgba(0x111216e6), 0.0),
+                    linear_color_stop(rgba(0x111216c2), 1.0),
                 )),
         )
-        // The accent layers stop where the mask is still 1.0 (86%): below
-        // that the surface fades out, and a constant-alpha accent would leave
-        // a visible edge instead of blending into the scene.
         .child(
             div()
                 .absolute()
                 .top_0()
+                .bottom_0()
                 .left_0()
                 .w(relative(0.45))
-                .h(relative(0.86))
                 .bg(linear_gradient(
                     90.0,
                     linear_color_stop(rgba(accent_left), 0.0),
@@ -732,9 +688,9 @@ fn bar_surface() -> Div {
             div()
                 .absolute()
                 .top_0()
+                .bottom_0()
                 .left(relative(0.45))
                 .right_0()
-                .h(relative(0.86))
                 .bg(linear_gradient(
                     90.0,
                     linear_color_stop(rgba(accent_mid), 0.0),
