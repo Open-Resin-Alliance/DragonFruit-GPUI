@@ -54,20 +54,30 @@ pub fn atlas() -> (u32, u32, Vec<u8>) {
         for pixel in scratch.chunks_mut(4) {
             pixel.copy_from_slice(&[FACE.0, FACE.1, FACE.2, 0xff]);
         }
-        // 1px stroke around the face (`strokeRect(0, 0, 128, 128)`).
+        // The border is a 2px band whose outer row is half-strength: a hard 2px
+        // line at ~1px on screen is what read as a jagged lime edge, while a
+        // stepped edge survives the mip minification as a soft one.
+        let edge_rows = [
+            (0u32, 0.5f32),
+            (1u32, 1.0f32),
+            (FACE_SIZE - 2, 1.0),
+            (FACE_SIZE - 1, 0.5),
+        ];
+        let stroke_on = |buffer: &mut [u8], x: u32, y: u32, coverage: f32| {
+            let i = ((y * FACE_SIZE + x) * 4) as usize;
+            let mix = |base: u8, ink: u8| {
+                (base as f32 + (ink as f32 - base as f32) * coverage) as u8
+            };
+            buffer[i] = mix(buffer[i], STROKE.0);
+            buffer[i + 1] = mix(buffer[i + 1], STROKE.1);
+            buffer[i + 2] = mix(buffer[i + 2], STROKE.2);
+        };
         for edge in 0..FACE_SIZE {
-            for (x, y) in [
-                (edge, 0),
-                (edge, 1),
-                (edge, FACE_SIZE - 2),
-                (edge, FACE_SIZE - 1),
-                (0, edge),
-                (1, edge),
-                (FACE_SIZE - 2, edge),
-                (FACE_SIZE - 1, edge),
-            ] {
-                let i = ((y * FACE_SIZE + x) * 4) as usize;
-                scratch[i..i + 4].copy_from_slice(&[STROKE.0, STROKE.1, STROKE.2, 0xff]);
+            for (offset, coverage) in edge_rows {
+                stroke_on(&mut scratch, edge, offset, coverage);
+                stroke_on(&mut scratch, edge, FACE_SIZE - 1 - offset, coverage);
+                stroke_on(&mut scratch, offset, edge, coverage);
+                stroke_on(&mut scratch, FACE_SIZE - 1 - offset, edge, coverage);
             }
         }
         if let Some(font) = font.as_ref() {
