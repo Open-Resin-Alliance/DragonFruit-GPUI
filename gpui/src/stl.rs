@@ -6,6 +6,7 @@ use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 use dragonfruit_mesh_core::mesh::{IndexedMesh, Vec3};
+use dragonfruit_mesh_core::vertex_occlusion::bake_smoothed_vertex_occlusion;
 use glam::Vec3 as GVec3;
 
 #[repr(C)]
@@ -13,6 +14,7 @@ use glam::Vec3 as GVec3;
 pub struct Vertex {
     pub pos: [f32; 3],
     pub normal: [f32; 3],
+    pub ao: f32,
 }
 
 pub struct MeshData {
@@ -41,6 +43,9 @@ pub fn load_stl(path: &Path) -> Result<MeshData> {
         bail!("{} welded to an empty mesh", path.display());
     }
 
+    // The app's bake: 32 rays, turned fan, one graph smoothing pass.
+    let ao = bake_smoothed_vertex_occlusion(&mesh, 32, None);
+
     // Flat normals: three vertices per triangle, each carrying the face normal.
     let mut vertices = Vec::with_capacity(mesh.triangles.len() * 3);
     for tri in &mesh.triangles {
@@ -54,10 +59,12 @@ pub fn load_stl(path: &Path) -> Result<MeshData> {
         } else {
             Vec3::new(0.0, 0.0, 1.0)
         };
-        for p in [a, b, c] {
+        for &vertex in tri {
+            let p = mesh.positions[vertex as usize];
             vertices.push(Vertex {
                 pos: [p.x, p.y, p.z],
                 normal: [normal.x, normal.y, normal.z],
+                ao: ao.get(vertex as usize).copied().unwrap_or(1.0),
             });
         }
     }
