@@ -1,10 +1,13 @@
 //! STL loading: binary and ASCII, welded into an indexed mesh with smooth
-//! vertex normals.
+//! vertex normals, baked per-vertex occlusion, and a plate footprint hull.
 
+use std::cmp::Ordering;
 use std::path::Path;
+use std::time::Instant;
 
 use anyhow::{bail, Context, Result};
 use dragonfruit_mesh_core::mesh::{IndexedMesh, Vec3};
+use dragonfruit_mesh_core::vertex_occlusion::bake_smoothed_vertex_occlusion;
 use glam::Vec3 as GVec3;
 
 #[repr(C)]
@@ -12,11 +15,14 @@ use glam::Vec3 as GVec3;
 pub struct Vertex {
     pub pos: [f32; 3],
     pub normal: [f32; 3],
+    pub ao: f32,
 }
 
 pub struct MeshData {
     pub vertices: Vec<Vertex>,
     pub indices: Vec<u32>,
+    /// Convex hull of the model's XY projection, for the plate outline.
+    pub footprint: Vec<[f32; 2]>,
     pub center: GVec3,
     pub radius: f32,
     pub triangles: usize,
@@ -24,8 +30,7 @@ pub struct MeshData {
 }
 
 pub fn load_stl(path: &Path) -> Result<MeshData> {
-    let bytes = std::fs::read(path)
-        .with_context(|| format!("reading {}", path.display()))?;
+    let bytes = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
     let soup = if is_binary(&bytes) {
         parse_binary(&bytes)?
     } else {
@@ -58,6 +63,14 @@ pub fn load_stl(path: &Path) -> Result<MeshData> {
         }
     }
 
+    let ao_started = Instant::now();
+    let ao = bake_smoothed_vertex_occlusion(&mesh, 32, None);
+    eprintln!(
+        "ao: baked {} vertices in {:.0} ms",
+        ao.len(),
+        ao_started.elapsed().as_secs_f64() * 1000.0
+    );
+
     let mut min = Vec3::new(f32::MAX, f32::MAX, f32::MAX);
     let mut max = Vec3::new(f32::MIN, f32::MIN, f32::MIN);
     for p in &mesh.positions {
@@ -75,16 +88,20 @@ pub fn load_stl(path: &Path) -> Result<MeshData> {
         .positions
         .iter()
         .zip(&normals)
-        .map(|(p, n)| Vertex {
+        .enumerate()
+        .map(|(index, (p, n))| Vertex {
             pos: [p.x, p.y, p.z],
             normal: [n.x, n.y, n.z],
+            ao: ao.get(index).copied().unwrap_or(1.0),
         })
         .collect();
     let indices = mesh.triangles.iter().flatten().copied().collect();
+    let footprint = convex_hull(&mesh.positions);
 
     Ok(MeshData {
         vertices,
         indices,
+        footprint,
         center,
         radius,
         triangles: mesh.triangles.len(),
@@ -93,6 +110,45 @@ pub fn load_stl(path: &Path) -> Result<MeshData> {
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| path.display().to_string()),
     })
+}
+
+fn convex_hull(points: &[Vec3]) -> Vec<[f32; 2]> {
+    let mut sorted: Vec<[f32; 2]> = points.iter().map(|p| [p.x, p.y]).collect();
+    sorted.sort_by(|a, b| {
+        a[0].partial_cmp(&b[0])
+            .unwrap_or(Ordering::Equal)
+            .then(a[1].partial_cmp(&b[1]).unwrap_or(Ordering::Equal))
+    });
+    sorted.dedup_by(|a, b| (a[0] - b[0]).abs() < 1e-4 && (a[1] - b[1]).abs() < 1e-4);
+    if sorted.len() < 3 {
+        return sorted;
+    }
+
+    let cross = |o: [f32; 2], a: [f32; 2], b: [f32; 2]| {
+        (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+    };
+    let mut lower: Vec<[f32; 2]> = Vec::new();
+    for &point in &sorted {
+        while lower.len() >= 2
+            && cross(lower[lower.len() - 2], lower[lower.len() - 1], point) <= 0.0
+        {
+            lower.pop();
+        }
+        lower.push(point);
+    }
+    let mut upper: Vec<[f32; 2]> = Vec::new();
+    for &point in sorted.iter().rev() {
+        while upper.len() >= 2
+            && cross(upper[upper.len() - 2], upper[upper.len() - 1], point) <= 0.0
+        {
+            upper.pop();
+        }
+        upper.push(point);
+    }
+    lower.pop();
+    upper.pop();
+    lower.extend(upper);
+    lower
 }
 
 fn is_binary(bytes: &[u8]) -> bool {
@@ -127,7 +183,9 @@ fn parse_ascii(bytes: &[u8]) -> Result<Vec<f32>> {
         let Some(rest) = line.trim().strip_prefix("vertex ") else {
             continue;
         };
-        let mut values = rest.split_whitespace().filter_map(|value| value.parse::<f32>().ok());
+        let mut values = rest
+            .split_whitespace()
+            .filter_map(|value| value.parse::<f32>().ok());
         let (Some(x), Some(y), Some(z)) = (values.next(), values.next(), values.next()) else {
             continue;
         };
