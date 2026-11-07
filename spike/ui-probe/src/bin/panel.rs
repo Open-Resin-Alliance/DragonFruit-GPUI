@@ -107,11 +107,15 @@ fn layer_rail() -> Div {
 }
 
 fn icon(path: &str, color: u32, size: f32) -> Icon {
+    // GPUI's paint_svg recolors the whole SVG with the element's text color,
+    // so the stroke in the markup is irrelevant; the color must be set on the
+    // Icon element itself.
     let svg = format!(
-        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#{color:06x}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{path}</svg>"##
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{path}</svg>"##
     );
     Icon::default()
         .data(svg.as_bytes())
+        .text_color(rgb(color))
         .w(px(size))
         .h(px(size))
 }
