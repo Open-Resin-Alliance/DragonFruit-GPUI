@@ -1,5 +1,6 @@
 //! The wgpu viewport: background gradient, build-plate grid, footprint outline,
-//! flat-shaded clay mesh, and screen-space ambient occlusion.
+//! flat-shaded clay mesh with GGX specular, SSAO, MSAA, and the app's mood
+//! overlay.
 
 use anyhow::Result;
 use gpui_interop::WgpuSurface;
@@ -7,6 +8,8 @@ use wgpu::util::DeviceExt as _;
 
 use crate::camera::Camera;
 use crate::stl::{MeshData, Vertex};
+
+const SAMPLE_COUNT: u32 = 4;
 
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -31,8 +34,12 @@ struct GpuMesh {
 struct Targets {
     _scene: wgpu::Texture,
     scene_view: wgpu::TextureView,
+    _msaa_color: wgpu::Texture,
+    msaa_color_view: wgpu::TextureView,
     _depth: wgpu::Texture,
     depth_view: wgpu::TextureView,
+    _msaa_depth: wgpu::Texture,
+    msaa_depth_view: wgpu::TextureView,
     _ao: wgpu::Texture,
     ao_view: wgpu::TextureView,
     final_texture: wgpu::Texture,
@@ -47,6 +54,8 @@ pub struct Viewport {
     grid: wgpu::RenderPipeline,
     footprint: wgpu::RenderPipeline,
     mesh_pipeline: wgpu::RenderPipeline,
+    depth_grid: wgpu::RenderPipeline,
+    depth_mesh: wgpu::RenderPipeline,
     ssao_pipeline: wgpu::RenderPipeline,
     composite_pipeline: wgpu::RenderPipeline,
     uniform: wgpu::Buffer,
@@ -219,18 +228,29 @@ impl Viewport {
                 },
             ],
         };
+        let footprint_layout = wgpu::VertexBufferLayout {
+            array_stride: 8,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &[wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32x2,
+                offset: 0,
+                shader_location: 0,
+            }],
+        };
 
         let mesh_pipeline = pipeline(
             device,
             &uniform_pipeline_layout,
             &mesh_shader,
-            &[Some(vertex_layout)],
+            &[Some(vertex_layout.clone())],
             wgpu::PrimitiveTopology::TriangleList,
             Some(wgpu::Face::Back),
             true,
             wgpu::CompareFunction::Less,
             WgpuSurface::DEFAULT_FORMAT,
             true,
+            true,
+            SAMPLE_COUNT,
         );
         let grid = pipeline(
             device,
@@ -243,26 +263,22 @@ impl Viewport {
             wgpu::CompareFunction::Less,
             WgpuSurface::DEFAULT_FORMAT,
             true,
+            true,
+            SAMPLE_COUNT,
         );
         let footprint = pipeline(
             device,
             &uniform_pipeline_layout,
             &footprint_shader,
-            &[Some(wgpu::VertexBufferLayout {
-                array_stride: 8,
-                step_mode: wgpu::VertexStepMode::Vertex,
-                attributes: &[wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x2,
-                    offset: 0,
-                    shader_location: 0,
-                }],
-            })],
+            &[Some(footprint_layout)],
             wgpu::PrimitiveTopology::LineList,
             None,
             false,
             wgpu::CompareFunction::LessEqual,
             WgpuSurface::DEFAULT_FORMAT,
             true,
+            true,
+            SAMPLE_COUNT,
         );
         let background = pipeline(
             device,
@@ -275,6 +291,36 @@ impl Viewport {
             wgpu::CompareFunction::Always,
             WgpuSurface::DEFAULT_FORMAT,
             true,
+            true,
+            SAMPLE_COUNT,
+        );
+        let depth_grid = pipeline(
+            device,
+            &uniform_pipeline_layout,
+            &grid_shader,
+            &[],
+            wgpu::PrimitiveTopology::TriangleList,
+            None,
+            true,
+            wgpu::CompareFunction::Less,
+            WgpuSurface::DEFAULT_FORMAT,
+            true,
+            false,
+            1,
+        );
+        let depth_mesh = pipeline(
+            device,
+            &uniform_pipeline_layout,
+            &mesh_shader,
+            &[Some(vertex_layout)],
+            wgpu::PrimitiveTopology::TriangleList,
+            Some(wgpu::Face::Back),
+            true,
+            wgpu::CompareFunction::Less,
+            WgpuSurface::DEFAULT_FORMAT,
+            true,
+            false,
+            1,
         );
         let ssao_pipeline = pipeline(
             device,
@@ -287,6 +333,8 @@ impl Viewport {
             wgpu::CompareFunction::Always,
             wgpu::TextureFormat::R8Unorm,
             false,
+            true,
+            1,
         );
         let composite_pipeline = pipeline(
             device,
@@ -299,6 +347,8 @@ impl Viewport {
             wgpu::CompareFunction::Always,
             WgpuSurface::DEFAULT_FORMAT,
             false,
+            true,
+            1,
         );
 
         let linear_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -325,6 +375,8 @@ impl Viewport {
             grid,
             footprint,
             mesh_pipeline,
+            depth_grid,
+            depth_mesh,
             ssao_pipeline,
             composite_pipeline,
             uniform,
@@ -423,13 +475,42 @@ impl Viewport {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("viewport frame"),
         });
+
+        // Depth prepass: the SSAO source, at sample count 1.
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("viewport depth prepass"),
+                color_attachments: &[],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.targets.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_bind_group(0, &self.scene_bind, &[]);
+            pass.set_pipeline(&self.depth_grid);
+            pass.draw(0..6, 0..1);
+            if let Some(mesh) = &self.mesh {
+                pass.set_pipeline(&self.depth_mesh);
+                pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                pass.draw(0..mesh.vertex_count, 0..1);
+            }
+        }
+
+        // MSAA scene pass, resolved into the scene texture.
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("viewport scene"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &self.targets.scene_view,
+                    view: &self.targets.msaa_color_view,
                     depth_slice: None,
-                    resolve_target: None,
+                    resolve_target: Some(&self.targets.scene_view),
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
                             r: 0.043,
@@ -441,7 +522,7 @@ impl Viewport {
                     },
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &self.targets.depth_view,
+                    view: &self.targets.msaa_depth_view,
                     depth_ops: Some(wgpu::Operations {
                         load: wgpu::LoadOp::Clear(1.0),
                         store: wgpu::StoreOp::Store,
@@ -468,6 +549,8 @@ impl Viewport {
                 pass.draw(0..mesh.vertex_count, 0..1);
             }
         }
+
+        // SSAO from the prepass depth.
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("viewport ssao"),
@@ -489,6 +572,8 @@ impl Viewport {
             pass.set_pipeline(&self.ssao_pipeline);
             pass.draw(0..3, 0..1);
         }
+
+        // Composite: scene * AO + mood overlay.
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("viewport composite"),
@@ -510,6 +595,7 @@ impl Viewport {
             pass.set_pipeline(&self.composite_pipeline);
             pass.draw(0..3, 0..1);
         }
+
         encoder.copy_texture_to_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &self.targets.final_texture,
@@ -610,8 +696,12 @@ impl Targets {
     ) -> Self {
         let scene = color_target(device, width, height, false);
         let scene_view = scene.create_view(&wgpu::TextureViewDescriptor::default());
+        let msaa_color = msaa_color_target(device, width, height);
+        let msaa_color_view = msaa_color.create_view(&wgpu::TextureViewDescriptor::default());
         let depth = depth_target(device, width, height);
         let depth_view = depth.create_view(&wgpu::TextureViewDescriptor::default());
+        let msaa_depth = msaa_depth_target(device, width, height);
+        let msaa_depth_view = msaa_depth.create_view(&wgpu::TextureViewDescriptor::default());
         let ao = ao_target(device, width, height);
         let ao_view = ao.create_view(&wgpu::TextureViewDescriptor::default());
         let final_texture = color_target(device, width, height, true);
@@ -657,8 +747,12 @@ impl Targets {
         Self {
             _scene: scene,
             scene_view,
+            _msaa_color: msaa_color,
+            msaa_color_view,
             _depth: depth,
             depth_view,
+            _msaa_depth: msaa_depth,
+            msaa_depth_view,
             _ao: ao,
             ao_view,
             final_texture,
@@ -680,7 +774,24 @@ fn pipeline(
     depth_compare: wgpu::CompareFunction,
     format: wgpu::TextureFormat,
     depth: bool,
+    fragment: bool,
+    sample_count: u32,
 ) -> wgpu::RenderPipeline {
+    let color_targets = [Some(wgpu::ColorTargetState {
+        format,
+        blend: None,
+        write_mask: wgpu::ColorWrites::ALL,
+    })];
+    let fragment_state = if fragment {
+        Some(wgpu::FragmentState {
+            module: shader,
+            entry_point: Some("fs_main"),
+            targets: &color_targets,
+            compilation_options: Default::default(),
+        })
+    } else {
+        None
+    };
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: None,
         layout: Some(layout),
@@ -690,16 +801,7 @@ fn pipeline(
             buffers,
             compilation_options: Default::default(),
         },
-        fragment: Some(wgpu::FragmentState {
-            module: shader,
-            entry_point: Some("fs_main"),
-            targets: &[Some(wgpu::ColorTargetState {
-                format,
-                blend: None,
-                write_mask: wgpu::ColorWrites::ALL,
-            })],
-            compilation_options: Default::default(),
-        }),
+        fragment: fragment_state,
         primitive: wgpu::PrimitiveState {
             topology,
             cull_mode: cull,
@@ -716,7 +818,10 @@ fn pipeline(
         } else {
             None
         },
-        multisample: wgpu::MultisampleState::default(),
+        multisample: wgpu::MultisampleState {
+            count: sample_count,
+            ..Default::default()
+        },
         multiview_mask: None,
         cache: None,
     })
@@ -743,6 +848,23 @@ fn color_target(device: &wgpu::Device, width: u32, height: u32, copy: bool) -> w
     })
 }
 
+fn msaa_color_target(device: &wgpu::Device, width: u32, height: u32) -> wgpu::Texture {
+    device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("viewport msaa color"),
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: SAMPLE_COUNT,
+        dimension: wgpu::TextureDimension::D2,
+        format: WgpuSurface::DEFAULT_FORMAT,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        view_formats: &[],
+    })
+}
+
 fn depth_target(device: &wgpu::Device, width: u32, height: u32) -> wgpu::Texture {
     device.create_texture(&wgpu::TextureDescriptor {
         label: Some("viewport depth"),
@@ -756,6 +878,23 @@ fn depth_target(device: &wgpu::Device, width: u32, height: u32) -> wgpu::Texture
         dimension: wgpu::TextureDimension::D2,
         format: wgpu::TextureFormat::Depth32Float,
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    })
+}
+
+fn msaa_depth_target(device: &wgpu::Device, width: u32, height: u32) -> wgpu::Texture {
+    device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("viewport msaa depth"),
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: SAMPLE_COUNT,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Depth32Float,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
         view_formats: &[],
     })
 }
@@ -805,29 +944,57 @@ fn vs_main(
     return out;
 }
 
+fn distribution_ggx(n_dot_h: f32, roughness: f32) -> f32 {
+    let a = roughness * roughness;
+    let a2 = a * a;
+    let d = n_dot_h * n_dot_h * (a2 - 1.0) + 1.0;
+    return a2 / (3.14159265 * d * d);
+}
+
+fn geometry_schlick_ggx(n_dot_v: f32, roughness: f32) -> f32 {
+    let r = roughness + 1.0;
+    let k = (r * r) / 8.0;
+    return n_dot_v / (n_dot_v * (1.0 - k) + k);
+}
+
+fn fresnel_schlick(cos_theta: f32, f0: vec3<f32>) -> vec3<f32> {
+    return f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - cos_theta, 5.0);
+}
+
+fn specular(n: vec3<f32>, v: vec3<f32>, l: vec3<f32>, roughness: f32, f0: vec3<f32>) -> vec3<f32> {
+    let h = normalize(v + l);
+    let n_dot_l = max(dot(n, l), 0.0);
+    let n_dot_v = max(dot(n, v), 0.0);
+    let n_dot_h = max(dot(n, h), 0.0);
+    let v_dot_h = max(dot(v, h), 0.0);
+    let d = distribution_ggx(n_dot_h, roughness);
+    let g = geometry_schlick_ggx(n_dot_v, roughness) * geometry_schlick_ggx(n_dot_l, roughness);
+    let f = fresnel_schlick(v_dot_h, f0);
+    return d * g * f / (4.0 * n_dot_v * n_dot_l + 0.0001);
+}
+
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let n = normalize(in.normal);
     let view_dir = normalize(uniforms.camera_pos - in.world);
 
-    // DragonFruit defaults: ambient 0.28, directional 1.12 (Lightness 1.40,
-    // Contrast 0.80), hemisphere 0.168, blue fill 0.168, camera headlight.
     let key_dir = normalize(vec3<f32>(0.0, 0.0, 1.0));
     let fill_dir = normalize(vec3<f32>(0.0, 0.0, -1.0));
     let sky = vec3<f32>(0.965, 0.910, 1.0);
     let ground = vec3<f32>(0.243, 0.255, 0.361);
     let hemi = mix(ground, sky, n.z * 0.5 + 0.5);
 
-    let ambient = hemi * 0.28 + vec3<f32>(0.25) * 0.10;
-    let key = vec3<f32>(1.0) * max(dot(n, key_dir), 0.0) * 1.12;
+    let ambient = hemi * 0.25;
+    let key = vec3<f32>(1.0) * max(dot(n, key_dir), 0.0) * 1.2;
     let fill = vec3<f32>(0.565, 0.655, 1.0) * max(dot(n, fill_dir), 0.0) * 0.168;
-    let head = vec3<f32>(1.0) * max(dot(n, view_dir), 0.0) * 1.0;
+    let head = vec3<f32>(1.0) * max(dot(n, view_dir), 0.0) * 0.9;
     let lighting = (ambient + key + fill + head) / 3.14159265;
 
     let base = uniforms.base_color;
-    let half = normalize(key_dir + view_dir);
-    let spec = pow(max(dot(n, half), 0.0), 8.0) * 0.05;
-    let color = base * lighting + vec3<f32>(spec);
+    let f0 = mix(vec3<f32>(0.04), base, 0.02);
+    let spec = specular(n, view_dir, key_dir, 0.55, f0) * 1.12 * max(dot(n, key_dir), 0.0)
+        + specular(n, view_dir, view_dir, 0.55, f0) * 1.0 * max(dot(n, view_dir), 0.0);
+    let color = base * lighting + spec;
     return vec4<f32>(color, 1.0);
 }
 "#;
@@ -939,12 +1106,6 @@ struct Uniforms {
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
 @group(0) @binding(1) var depth_tex: texture_depth_2d;
 
-fn depth_at(uv: vec2<f32>) -> f32 {
-    let max = uniforms.resolution - vec2<f32>(1.0, 1.0);
-    let coord = vec2<i32>(clamp(uv * uniforms.resolution, vec2<f32>(0.0, 0.0), max));
-    return textureLoad(depth_tex, coord, 0);
-}
-
 const KERNEL = array<vec3<f32>, 16>(
     vec3<f32>(0.10, 0.10, 0.10),
     vec3<f32>(-0.10, 0.10, 0.20),
@@ -963,6 +1124,12 @@ const KERNEL = array<vec3<f32>, 16>(
     vec3<f32>(0.30, 0.40, 0.10),
     vec3<f32>(-0.30, -0.40, 0.20),
 );
+
+fn depth_at(uv: vec2<f32>) -> f32 {
+    let max = uniforms.resolution - vec2<f32>(1.0, 1.0);
+    let coord = vec2<i32>(clamp(uv * uniforms.resolution, vec2<f32>(0.0, 0.0), max));
+    return textureLoad(depth_tex, coord, 0);
+}
 
 @vertex
 fn vs_main(@builtin(vertex_index) index: u32) -> @builtin(position) vec4<f32> {
@@ -1038,8 +1205,28 @@ fn vs_main(@builtin(vertex_index) index: u32) -> @builtin(position) vec4<f32> {
 @fragment
 fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     let uv = frag.xy / uniforms.resolution;
-    let color = textureSampleLevel(scene_tex, samp, uv, 0.0).rgb;
-    let ao = textureSampleLevel(ao_tex, samp, uv, 0.0).r;
-    return vec4<f32>(color * mix(1.0, pow(ao, 1.5), 1.0), 1.0);
+    var color = textureSampleLevel(scene_tex, samp, uv, 0.0).rgb;
+    let ao = pow(textureSampleLevel(ao_tex, samp, uv, 0.0).r, 2.0);
+    color = color * mix(1.0, ao, 1.0);
+
+    // SceneMoodOverlay: radial + linear pink/purple gradients, screen blend.
+    let radial = length((uv - vec2<f32>(0.5, 0.46)) / vec2<f32>(1.2, 0.95));
+    let radial_alpha = smoothstep(0.56, 1.0, radial) * 0.18 * 0.75;
+    let pink = vec3<f32>(1.0, 0.0382, 0.402);
+    let violet = vec3<f32>(0.158, 0.0331, 1.0);
+    var linear_color = pink;
+    var linear_alpha = 0.10 * 0.75;
+    if (uv.y > 0.4) {
+        let k = (uv.y - 0.4) / 0.6;
+        linear_color = mix(violet, vec3<f32>(0.0), k);
+        linear_alpha = mix(0.06 * 0.75, 0.0, k);
+    } else {
+        let k = uv.y / 0.4;
+        linear_color = mix(pink, violet, k);
+        linear_alpha = mix(0.10 * 0.75, 0.06 * 0.75, k);
+    }
+    let overlay = pink * radial_alpha + linear_color * linear_alpha;
+    color = vec3<f32>(1.0) - (vec3<f32>(1.0) - color) * (vec3<f32>(1.0) - overlay);
+    return vec4<f32>(color, 1.0);
 }
 "#;
