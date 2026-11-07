@@ -1309,10 +1309,10 @@ pub fn home_button(
                 .home(glam::Vec3::new(0.0, 0.0, 110.0));
             entity.update(cx, |_, cx| cx.notify()).ok();
         })
-        // lucide's house, the icon the rest of the UI uses. `icons::icon`
-        // resolves it from the core crate's assets; a hand-built
-        // `external_path` here pointed at the repo root instead.
-        .child(icons::icon("house", 22.0, HOME_GLYPH))
+        // `HomeButton` fills lucide's closed silhouette and paints the open
+        // detail (the door) in the chip's own colour, so the glyph reads solid
+        // rather than as an outline.
+        .child(icons::icon("house-filled", 22.0, HOME_GLYPH))
 }
 
 /// `HOME_SIZE` from `ZUpGizmoHelper`: `0.47` of the cube's 60-unit scale.
