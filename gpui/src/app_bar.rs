@@ -609,7 +609,7 @@ pub fn app_bar(state: AppBarState, entity: WeakEntity<DragonFruit>) -> impl Into
     );
 
     let right = ui! {
-        div(flex, flex_1, max_w_430, items_center, justify_end, gap_8, pr_0) {
+        div(flex, flex_1, max_w_430, items_center, justify_end, gap_8, pr_3) {
             div(flex, items_center, gap_8, when(actions_disabled, opacity_45)) {
                 { view_mode }
                 { overhang_button }
@@ -660,7 +660,7 @@ pub fn app_bar(state: AppBarState, entity: WeakEntity<DragonFruit>) -> impl Into
             absolute, top_0, left_0, right_0,
             h = px(TOPBAR_HEIGHT),
             flex, items_center, gap_12,
-            pl_4, pr_0, pt_3, pb_9,
+            px_4, pt_3, pb_9,
         ) {
             { bar_surface() }
             // Painted above the surface so every control wins the click; the

@@ -53,6 +53,21 @@ pub fn ensure_geist() {
             register_font(&destination);
         }
     }
+    unsafe extern "system" {
+        fn SendMessageTimeoutW(
+            hwnd: isize,
+            msg: u32,
+            wparam: usize,
+            lparam: isize,
+            flags: u32,
+            timeout: u32,
+            result: *mut usize,
+        ) -> isize;
+    }
+    // `HWND_BROADCAST` + `WM_FONTCHANGE`: tell the font cache the set changed.
+    unsafe {
+        SendMessageTimeoutW(0xffff, 0x001d, 0, 0, 0x0002, 1000, std::ptr::null_mut());
+    }
 }
 
 #[cfg(windows)]
@@ -60,7 +75,7 @@ fn register_font(path: &Path) {
     use winreg::RegKey;
     use winreg::enums::HKEY_CURRENT_USER;
 
-    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+    let Some(stem) = path.file_stem().and_then(|name| name.to_str()) else {
         return;
     };
     let Ok(key) = RegKey::predef(HKEY_CURRENT_USER).open_subkey_with_flags(
@@ -69,9 +84,12 @@ fn register_font(path: &Path) {
     ) else {
         return;
     };
-    // The value name is the display name DirectWrite reports; the file name is
-    // what the font loader opens.
-    let _ = key.set_value(&format!("Geist (TrueType)"), &name);
+    // Per-user fonts store the **full path** as the value data (system fonts
+    // store the bare file name); the value name is only the Fonts UI label.
+    let _ = key.set_value(
+        &format!("{stem} (TrueType)"),
+        &path.to_string_lossy().to_string(),
+    );
 }
 
 #[cfg(not(windows))]
