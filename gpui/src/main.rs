@@ -13,8 +13,9 @@ use std::sync::Arc;
 use camera::Camera;
 use gpui::{
     App, Bounds, Context, Corners, FocusHandle, FontWeight, IntoElement, MouseButton, Render,
-    ScrollDelta, WeakEntity, Window, WindowBounds, WindowOptions, div, gpu_canvas, prelude::*, px,
-    rgb, rgba, size,
+    ScrollDelta, TitlebarOptions, WeakEntity, Window, WindowBounds, WindowControlArea,
+    WindowOptions, div, gpu_canvas, linear_color_stop, linear_gradient, prelude::*, px, rgb, rgba,
+    size, svg,
 };
 use gpui_interop::attach;
 use gpui_wgpu::{ImportedTextureExt as _, WgpuRenderer};
@@ -32,6 +33,66 @@ const ACCENT_CONTRAST: u32 = 0xfff6ff;
 const SURFACE_1: u32 = 0x1a1b21;
 const SURFACE_2: u32 = 0x23252e;
 const ACCENT: u32 = 0xec2a77;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PanelDock {
+    Left,
+    Right,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PanelKind {
+    Models,
+    Supports,
+    Export,
+    Printing,
+    Info,
+}
+
+#[derive(Clone, Copy)]
+struct PanelDef {
+    id: &'static str,
+    title: &'static str,
+    kind: PanelKind,
+    dock: PanelDock,
+}
+
+fn panel_defs(mode: Mode) -> Vec<PanelDef> {
+    let mut panels = vec![PanelDef {
+        id: "models",
+        title: "Models",
+        kind: PanelKind::Models,
+        dock: PanelDock::Left,
+    }];
+    match mode {
+        Mode::Prepare => {}
+        Mode::Support => panels.push(PanelDef {
+            id: "supports",
+            title: "Auto Supports (Beta)",
+            kind: PanelKind::Supports,
+            dock: PanelDock::Left,
+        }),
+        Mode::Export => panels.push(PanelDef {
+            id: "export",
+            title: "Export",
+            kind: PanelKind::Export,
+            dock: PanelDock::Left,
+        }),
+        Mode::Printing => panels.push(PanelDef {
+            id: "printing",
+            title: "Printing",
+            kind: PanelKind::Printing,
+            dock: PanelDock::Left,
+        }),
+    }
+    panels.push(PanelDef {
+        id: "info",
+        title: "Model info",
+        kind: PanelKind::Info,
+        dock: PanelDock::Right,
+    });
+    panels
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Mode {
@@ -83,8 +144,7 @@ struct DragonFruit {
     smoke_done: Rc<Cell<bool>>,
     mode: Mode,
     show_settings: bool,
-    show_models: bool,
-    show_supports: bool,
+    collapsed: std::collections::HashMap<&'static str, bool>,
     layer: f32,
     supports: Rc<RefCell<Vec<[f32; 3]>>>,
     show_grid: bool,
@@ -127,8 +187,7 @@ impl DragonFruit {
             smoke_done: Rc::new(Cell::new(false)),
             mode: Mode::Prepare,
             show_settings: false,
-            show_models: true,
-            show_supports: true,
+            collapsed: std::collections::HashMap::new(),
             layer: 0.0,
             supports: Rc::new(RefCell::new(Vec::new())),
             show_grid: true,
@@ -490,19 +549,18 @@ impl Render for DragonFruit {
             })
             .child(canvas)
             .child(left_rail(entity.clone(), self.active_tool))
-            .child(left_panel(
+            .child(panel_stack(
+                mode,
+                entity.clone(),
+                &self.collapsed,
                 mesh_name.clone(),
                 triangles,
-                entity.clone(),
                 loading,
-                mode,
                 self.supports.borrow().len(),
-                self.show_models,
-                self.show_supports,
-                self.selected.get(),
+                size,
+                volume,
             ))
             .child(orientation_cube(camera.clone(), entity.clone()))
-            .child(info_card(mesh_name, triangles, size, volume))
             .child(layer_bar(layer, entity.clone(), self.window_width))
             .child(
                 div()
@@ -555,41 +613,90 @@ impl Render for DragonFruit {
     }
 }
 
+fn mix(a: u32, b: u32, weight_a: f32) -> u32 {
+    let channel = |shift: u32| {
+        let av = ((a >> shift) & 0xff) as f32;
+        let bv = ((b >> shift) & 0xff) as f32;
+        (av * weight_a + bv * (1.0 - weight_a)).round() as u32
+    };
+    (channel(16) << 16) | (channel(8) << 8) | channel(0)
+}
+
+fn icon(name: &str, size: f32, color: u32) -> impl IntoElement {
+    let path = format!("{}/assets/icons/{name}.svg", env!("CARGO_MANIFEST_DIR"));
+    svg()
+        .external_path(path)
+        .w(px(size))
+        .h(px(size))
+        .text_color(rgb(color))
+}
+
 fn step_button(
     mode: Mode,
     active: Mode,
+    locked: bool,
     entity: WeakEntity<DragonFruit>,
 ) -> impl IntoElement {
     let is_active = mode == active;
+    let icon_name = match mode {
+        Mode::Prepare => "folder-open",
+        Mode::Support => "anchor",
+        Mode::Export => "upload",
+        Mode::Printing => "printer",
+    };
+    let background = if is_active {
+        mix(ACCENT, SURFACE_0, 0.16)
+    } else {
+        SURFACE_1
+    };
+    let border = if is_active {
+        mix(ACCENT, 0xffffff, 0.92)
+    } else {
+        BORDER_SUBTLE
+    };
     div()
         .id(format!("step-{}", mode.step()))
+        .h(px(32.))
+        .flex_1()
+        .min_w(px(90.))
+        .max_w(px(190.))
         .flex()
         .items_center()
         .gap(px(6.))
-        .h(px(32.))
-        .px(px(10.))
-        .rounded(px(6.))
-        .bg(rgb(if is_active { SURFACE_2 } else { SURFACE_0 }))
+        .px(px(6.))
+        .rounded(px(5.5))
         .border_1()
-        .border_color(rgb(if is_active { ACCENT } else { BORDER_SUBTLE }))
-        .text_size(px(12.))
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(rgb(if is_active { TEXT_STRONG } else { TEXT_MUTED }))
+        .border_color(rgb(border))
+        .bg(rgb(background))
+        .when(locked, |this| this.opacity(0.45))
         .child(
             div()
-                .w(px(16.))
-                .h(px(16.))
+                .w(px(20.))
+                .h(px(20.))
                 .rounded_full()
                 .flex()
                 .items_center()
                 .justify_center()
-                .bg(rgb(if is_active { ACCENT } else { SURFACE_2 }))
-                .text_size(px(9.))
-                .text_color(rgb(ACCENT_CONTRAST))
-                .child(format!("{}", mode.step())),
+                .when(!is_active, |this| this.bg(rgb(SURFACE_2)))
+                .child(icon(
+                    icon_name,
+                    12.,
+                    if is_active { ACCENT } else { TEXT_MUTED },
+                )),
         )
-        .child(mode.label())
+        .child(
+            div()
+                .flex_1()
+                .text_center()
+                .text_size(px(12.))
+                .font_weight(FontWeight::BOLD)
+                .text_color(rgb(TEXT_STRONG))
+                .child(mode.label()),
+        )
         .on_click(move |_, _, cx| {
+            if locked {
+                return;
+            }
             entity
                 .update(cx, |this, cx| {
                     this.mode = mode;
@@ -597,6 +704,21 @@ fn step_button(
                 })
                 .ok();
         })
+}
+
+fn window_button(area: WindowControlArea, tint: u32, icon_name: &str) -> impl IntoElement {
+    div()
+        .w(px(32.))
+        .h(px(32.))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(4.))
+        .border_1()
+        .border_color(rgb(mix(tint, BORDER_SUBTLE, 0.45)))
+        .bg(rgb(mix(tint, SURFACE_1, 0.14)))
+        .child(icon(icon_name, 16., mix(tint, TEXT_STRONG, 0.16)))
+        .window_control_area(area)
 }
 
 fn top_bar(
@@ -612,36 +734,97 @@ fn top_bar(
     show_printer_menu: bool,
     show_app_menu: bool,
 ) -> impl IntoElement {
-    let selection_entity = entity.clone();
-    let selection = div()
-        .id("selection")
-        .h(px(32.))
-        .px(px(10.))
+    let logo_entity = entity.clone();
+    let logo = div()
+        .id("logo-menu")
+        .w(px(40.))
+        .h(px(40.))
         .flex()
         .items_center()
         .justify_center()
         .rounded(px(6.))
-        .border_1()
-        .border_color(rgb(BORDER_SUBTLE))
-        .bg(rgb(SURFACE_1))
-        .text_size(px(12.))
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(rgb(TEXT_STRONG))
-        .child(if selected { "Selected" } else { "Unselected" })
+        .when(show_app_menu, |this| this.bg(rgb(mix(ACCENT, SURFACE_0, 0.2))))
+        .child(
+            div()
+                .w(px(28.))
+                .h(px(28.))
+                .rounded(px(7.))
+                .bg(rgb(ACCENT))
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_size(px(14.))
+                .font_weight(FontWeight::BOLD)
+                .text_color(rgb(ACCENT_CONTRAST))
+                .child("D"),
+        )
         .on_click(move |_, _, cx| {
-            selection_entity
+            logo_entity
                 .update(cx, |this, cx| {
-                    this.selected.set(!this.selected.get());
+                    this.show_app_menu = !this.show_app_menu;
                     cx.notify();
                 })
                 .ok();
         });
+
+    let printer_entity = entity.clone();
+    let printer = div()
+        .id("printer")
+        .h(px(40.))
+        .max_w(px(300.))
+        .flex()
+        .items_center()
+        .gap(px(8.))
+        .px(px(8.))
+        .rounded(px(6.))
+        .when(show_printer_menu, |this| this.bg(rgb(mix(ACCENT, SURFACE_0, 0.2))))
+        .child(
+            div()
+                .w(px(32.))
+                .h(px(32.))
+                .rounded(px(4.))
+                .bg(rgb(mix(SURFACE_1, SURFACE_0, 0.94)))
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(icon("printer", 16., TEXT_MUTED)),
+        )
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .items_start()
+                .gap(px(2.))
+                .child(
+                    div()
+                        .text_size(px(11.))
+                        .text_color(rgb(TEXT_MUTED))
+                        .child("PRINTER"),
+                )
+                .child(
+                    div()
+                        .text_size(px(12.))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(rgb(TEXT_STRONG))
+                        .child("Standard"),
+                ),
+        )
+        .child(icon("chevron-down", 14., mix(TEXT_MUTED, 0xffffff, 0.92)))
+        .on_click(move |_, _, cx| {
+            printer_entity
+                .update(cx, |this, cx| {
+                    this.show_printer_menu = !this.show_printer_menu;
+                    cx.notify();
+                })
+                .ok();
+        });
+
     let toggle_camera = camera.clone();
     let toggle_entity = entity.clone();
     let projection = div()
         .id("projection")
         .h(px(32.))
-        .px(px(10.))
+        .px(px(8.))
         .flex()
         .items_center()
         .justify_center()
@@ -649,35 +832,33 @@ fn top_bar(
         .border_1()
         .border_color(rgb(BORDER_SUBTLE))
         .bg(rgb(SURFACE_1))
-        .text_size(px(12.))
+        .text_size(px(11.))
         .font_weight(FontWeight::SEMIBOLD)
-        .text_color(rgb(TEXT_STRONG))
+        .text_color(rgb(TEXT_MUTED))
         .child(if orthographic { "Ortho" } else { "Persp" })
         .on_click(move |_, _, cx| {
             let next = !toggle_camera.borrow().orthographic;
             toggle_camera.borrow_mut().orthographic = next;
             toggle_entity.update(cx, |_, cx| cx.notify()).ok();
         });
-    let printer_entity = entity.clone();
-    let printer = div()
-        .id("printer")
+    let _ = selected;
+    let settings_entity = entity.clone();
+    let settings = div()
+        .id("settings")
+        .w(px(32.))
         .h(px(32.))
-        .px(px(10.))
         .flex()
         .items_center()
-        .gap(px(4.))
+        .justify_center()
         .rounded(px(6.))
         .border_1()
-        .border_color(rgb(if show_printer_menu { ACCENT } else { BORDER_SUBTLE }))
+        .border_color(rgb(if show_settings { ACCENT } else { BORDER_SUBTLE }))
         .bg(rgb(SURFACE_1))
-        .text_size(px(11.))
-        .text_color(rgb(TEXT_MUTED))
-        .child("Printer")
-        .child("\u{25BE}")
+        .child(icon("settings", 16., TEXT_MUTED))
         .on_click(move |_, _, cx| {
-            printer_entity
+            settings_entity
                 .update(cx, |this, cx| {
-                    this.show_printer_menu = !this.show_printer_menu;
+                    this.show_settings = !this.show_settings;
                     cx.notify();
                 })
                 .ok();
@@ -705,30 +886,7 @@ fn top_bar(
                 })
                 .ok();
         });
-    let settings_entity = entity.clone();
-    let settings = div()
-        .id("settings")
-        .w(px(32.))
-        .h(px(32.))
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded(px(6.))
-        .border_1()
-        .border_color(rgb(if show_settings { ACCENT } else { BORDER_SUBTLE }))
-        .bg(rgb(SURFACE_1))
-        .text_size(px(14.))
-        .text_color(rgb(TEXT_MUTED))
-        .child("\u{2699}")
-        .on_click(move |_, _, cx| {
-            settings_entity
-                .update(cx, |this, cx| {
-                    this.show_settings = !this.show_settings;
-                    cx.notify();
-                })
-                .ok();
-        });
-    let mut button = div()
+    let mut open_button = div()
         .id("open-stl")
         .h(px(32.))
         .px(px(12.))
@@ -737,19 +895,70 @@ fn top_bar(
         .justify_center()
         .rounded(px(6.))
         .bg(rgb(if loading { 0x8a1745 } else { PRIMARY }))
-        .text_size(px(13.))
+        .text_size(px(12.))
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(rgb(ACCENT_CONTRAST))
         .child(if loading { "Loading…" } else { "Open STL" })
         .hover(|style| style.bg(rgb(PRIMARY_HOVER)));
     if !loading {
         let open_entity = entity.clone();
-        button = button.on_click(move |_, _, cx| {
+        open_button = open_button.on_click(move |_, _, cx| {
             open_entity
                 .update(cx, |this, cx| this.open_stl(cx))
                 .ok();
         });
     }
+
+    let left = div()
+        .flex()
+        .items_center()
+        .gap(px(10.))
+        .pr(px(16.))
+        .py(px(6.))
+        .child(logo)
+        .child(
+            div()
+                .w(px(1.))
+                .h(px(24.))
+                .bg(rgb(mix(BORDER_SUBTLE, 0x000000, 0.76))),
+        )
+        .child(printer);
+    let steps = div()
+        .flex_1()
+        .min_w(px(0.))
+        .flex()
+        .justify_center()
+        .px(px(8.))
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(8.))
+                .child(step_button(Mode::Prepare, mode, false, entity.clone()))
+                .child(step_button(Mode::Support, mode, triangles == 0, entity.clone()))
+                .child(step_button(Mode::Export, mode, triangles == 0, entity.clone()))
+                .child(step_button(Mode::Printing, mode, triangles == 0, entity.clone())),
+        );
+    let right = div()
+        .flex()
+        .items_center()
+        .justify_end()
+        .gap(px(8.))
+        .pr(px(3.))
+        .child(projection)
+        .child(settings)
+        .child(help)
+        .child(open_button)
+        .child(
+            div()
+                .ml(px(4.))
+                .flex()
+                .items_center()
+                .gap(px(4.))
+                .child(window_button(WindowControlArea::Min, 0xf4bf4f, "minimize"))
+                .child(window_button(WindowControlArea::Max, 0x40c463, "maximize"))
+                .child(window_button(WindowControlArea::Close, 0xff6b6b, "x")),
+        );
 
     div()
         .absolute()
@@ -757,64 +966,33 @@ fn top_bar(
         .left(px(0.))
         .right(px(0.))
         .h(px(52.))
-        .bg(rgb(SURFACE_0))
-        .border_b_1()
-        .border_color(rgb(BORDER_SUBTLE))
-        .px(px(14.))
         .flex()
         .items_center()
         .gap(px(12.))
-        .child({
-            let logo_entity = entity.clone();
-            div()
-                .id("logo-menu")
-                .w(px(24.))
-                .h(px(24.))
-                .rounded(px(6.))
-                .bg(rgb(ACCENT))
-                .flex()
-                .items_center()
-                .justify_center()
-                .text_size(px(13.))
-                .text_color(rgb(ACCENT_CONTRAST))
-                .child("D")
-                .on_click(move |_, _, cx| {
-                    logo_entity
-                        .update(cx, |this, cx| {
-                            this.show_app_menu = !this.show_app_menu;
-                            cx.notify();
-                        })
-                        .ok();
-                })
-        })
+        .px(px(4.))
+        .pt(px(3.))
+        .pb(px(9.))
+        .bg(linear_gradient(
+            180.0,
+            linear_color_stop(rgba(0x111216f2), 0.0),
+            linear_color_stop(rgba(0x111216c2), 1.0),
+        ))
         .child(
             div()
-                .text_size(px(15.))
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(rgb(TEXT_STRONG))
-                .child("DragonFruit"),
+                .absolute()
+                .top(px(0.))
+                .left(px(0.))
+                .right(px(0.))
+                .bottom(px(0.))
+                .on_mouse_down(MouseButton::Left, move |_, window, _| {
+                    window.start_window_move();
+                }),
         )
-        .child(div().w(px(8.)))
-        .child(step_button(Mode::Prepare, mode, entity.clone()))
-        .child(step_button(Mode::Support, mode, entity.clone()))
-        .child(step_button(Mode::Export, mode, entity.clone()))
-        .child(step_button(Mode::Printing, mode, entity.clone()))
-        .child(div().flex_1())
-        .child(
-            div()
-                .text_size(px(12.))
-                .text_color(rgb(TEXT_MUTED))
-                .child(format!("{triangles} tris")),
-        )
-        .child(projection)
-        .child(selection)
-        .child(printer)
-        .child(settings)
-        .child(help)
-        .child(button)
+        .child(left)
+        .child(steps)
+        .child(right)
         .child(if show_app_menu {
             let import_entity = entity.clone();
-            let close_entity = entity.clone();
             div()
                 .absolute()
                 .top(px(44.))
@@ -864,10 +1042,7 @@ fn top_bar(
                         .text_color(rgb(0xe45454))
                         .hover(|style| style.bg(rgb(SURFACE_1)))
                         .child("Close program")
-                        .on_click(move |_, _, cx| {
-                            let _ = close_entity;
-                            cx.quit();
-                        }),
+                        .on_click(move |_, _, cx| cx.quit()),
                 )
         } else {
             div()
@@ -876,7 +1051,7 @@ fn top_bar(
             div()
                 .absolute()
                 .top(px(44.))
-                .right(px(210.))
+                .left(px(60.))
                 .w(px(240.))
                 .rounded(px(10.))
                 .border_1()
@@ -917,38 +1092,52 @@ fn menu_row(label: &'static str, enabled: bool, _action: Option<()>) -> impl Int
 }
 
 fn left_rail(entity: WeakEntity<DragonFruit>, active_tool: usize) -> impl IntoElement {
-    let tools = ["\u{2725}", "\u{27F3}", "\u{2921}", "\u{2693}", "\u{25D0}", "\u{2702}"];
+    let tools = [
+        ("move", "Move"),
+        ("rotate-3d", "Rotate"),
+        ("scaling", "Scale"),
+        ("anchor", "Supports"),
+        ("bot", "Auto supports"),
+        ("hollow", "Hollow"),
+    ];
     let mut rail = div()
         .absolute()
+        .left(px(6.))
         .top(px(52.))
-        .left(px(0.))
         .bottom(px(0.))
-        .w(px(44.))
-        .bg(rgb(SURFACE_0))
-        .border_r_1()
-        .border_color(rgb(BORDER_SUBTLE))
+        .w(px(54.))
         .flex()
         .flex_col()
-        .items_center()
-        .pt(px(10.))
-        .gap(px(6.));
-    for (index, glyph) in tools.iter().enumerate() {
-        let tool_entity = entity.clone();
+        .gap(px(6.))
+        .py(px(6.));
+    for (index, (icon_name, _label)) in tools.iter().enumerate() {
         let is_active = index == active_tool;
+        let background = if is_active {
+            mix(ACCENT, SURFACE_0, 0.22)
+        } else {
+            mix(ACCENT, SURFACE_1, 0.10)
+        };
+        let border = if is_active {
+            mix(ACCENT, 0xffffff, 0.86)
+        } else {
+            mix(ACCENT, BORDER_SUBTLE, 0.12)
+        };
+        let color = if is_active { ACCENT } else { TEXT_MUTED };
+        let tool_entity = entity.clone();
         rail = rail.child(
             div()
                 .id(format!("tool-{index}"))
-                .w(px(32.))
-                .h(px(32.))
+                .w_full()
+                .h(px(54.))
                 .flex()
                 .items_center()
                 .justify_center()
-                .rounded(px(6.))
-                .bg(rgb(if is_active { SURFACE_2 } else { SURFACE_0 }))
-                .text_size(px(14.))
-                .text_color(rgb(if is_active { ACCENT } else { TEXT_MUTED }))
-                .hover(|style| style.bg(rgb(SURFACE_1)))
-                .child(*glyph)
+                .rounded(px(5.5))
+                .border_1()
+                .border_color(rgb(border))
+                .bg(rgb(background))
+                .hover(|style| style.bg(rgb(mix(ACCENT, SURFACE_1, 0.16))))
+                .child(icon(icon_name, 28., color))
                 .on_click(move |_, _, cx| {
                     tool_entity
                         .update(cx, |this, cx| {
@@ -962,17 +1151,170 @@ fn left_rail(entity: WeakEntity<DragonFruit>, active_tool: usize) -> impl IntoEl
     rail
 }
 
-fn left_panel(
+fn panel_stack(
+    mode: Mode,
+    entity: WeakEntity<DragonFruit>,
+    collapsed: &std::collections::HashMap<&'static str, bool>,
+    mesh_name: String,
+    triangles: usize,
+    loading: bool,
+    support_count: usize,
+    size: [f32; 3],
+    volume: f32,
+) -> impl IntoElement {
+    let defs = panel_defs(mode);
+    let left: Vec<PanelDef> = defs
+        .iter()
+        .filter(|def| def.dock == PanelDock::Left)
+        .copied()
+        .collect();
+    let right: Vec<PanelDef> = defs
+        .iter()
+        .filter(|def| def.dock == PanelDock::Right)
+        .copied()
+        .collect();
+    div()
+        .absolute()
+        .top(px(58.))
+        .bottom(px(6.))
+        .left(px(0.))
+        .right(px(0.))
+        .child(dock_column(
+            left,
+            PanelDock::Left,
+            entity.clone(),
+            collapsed,
+            mesh_name.clone(),
+            triangles,
+            loading,
+            support_count,
+            size,
+            volume,
+        ))
+        .child(dock_column(
+            right,
+            PanelDock::Right,
+            entity.clone(),
+            collapsed,
+            mesh_name,
+            triangles,
+            loading,
+            support_count,
+            size,
+            volume,
+        ))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn dock_column(
+    defs: Vec<PanelDef>,
+    dock: PanelDock,
+    entity: WeakEntity<DragonFruit>,
+    collapsed: &std::collections::HashMap<&'static str, bool>,
+    mesh_name: String,
+    triangles: usize,
+    loading: bool,
+    support_count: usize,
+    size: [f32; 3],
+    volume: f32,
+) -> impl IntoElement {
+    let mut column = div()
+        .absolute()
+        .top(px(0.))
+        .bottom(px(0.))
+        .w(px(320.))
+        .flex()
+        .flex_col()
+        .gap(px(6.));
+    column = match dock {
+        PanelDock::Left => column.left(px(72.)),
+        PanelDock::Right => column.right(px(6.)),
+    };
+    for def in defs {
+        column = column.child(panel_card(
+            def,
+            entity.clone(),
+            collapsed.get(def.id).copied().unwrap_or(false),
+            mesh_name.clone(),
+            triangles,
+            loading,
+            support_count,
+            size,
+            volume,
+        ));
+    }
+    column
+}
+
+#[allow(clippy::too_many_arguments)]
+fn panel_card(
+    def: PanelDef,
+    entity: WeakEntity<DragonFruit>,
+    collapsed: bool,
+    mesh_name: String,
+    triangles: usize,
+    loading: bool,
+    support_count: usize,
+    size: [f32; 3],
+    volume: f32,
+) -> impl IntoElement {
+    let toggle_entity = entity.clone();
+    let id = def.id;
+    let body = match def.kind {
+        PanelKind::Models => models_body(mesh_name, triangles, entity.clone(), loading),
+        PanelKind::Supports => support_body(entity.clone(), support_count),
+        PanelKind::Export => export_body(entity.clone()),
+        PanelKind::Printing => printing_body(),
+        PanelKind::Info => info_body(mesh_name, triangles, size, volume),
+    };
+    div()
+        .w_full()
+        .rounded(px(8.))
+        .border_1()
+        .border_color(rgb(BORDER_SUBTLE))
+        .bg(rgb(SURFACE_0))
+        .flex()
+        .flex_col()
+        .overflow_hidden()
+        .child(
+            div()
+                .id(format!("panel-{id}"))
+                .h(px(38.))
+                .px(px(10.))
+                .flex()
+                .items_center()
+                .justify_between()
+                .child(
+                    div()
+                        .text_size(px(14.))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(rgb(TEXT_STRONG))
+                        .child(def.title),
+                )
+                .child(icon(
+                    if collapsed { "chevron-right" } else { "chevron-down" },
+                    14.,
+                    TEXT_MUTED,
+                ))
+                .on_click(move |_, _, cx| {
+                    toggle_entity
+                        .update(cx, |this, cx| {
+                            let entry = this.collapsed.entry(id).or_insert(false);
+                            *entry = !*entry;
+                            cx.notify();
+                        })
+                        .ok();
+                }),
+        )
+        .when(!collapsed, |this| this.child(body))
+}
+
+fn models_body(
     mesh_name: String,
     triangles: usize,
     entity: WeakEntity<DragonFruit>,
     loading: bool,
-    mode: Mode,
-    support_count: usize,
-    show_models: bool,
-    show_supports: bool,
-    selected: bool,
-) -> impl IntoElement {
+) -> gpui::Div {
     let add_entity = entity.clone();
     let mut add_button = div()
         .id("add-model")
@@ -994,27 +1336,18 @@ fn left_panel(
             add_entity.update(cx, |this, cx| this.open_stl(cx)).ok();
         });
     }
-
     let row_entity = entity.clone();
-    let model_row = div()
+    let row = div()
         .id("model-row")
         .flex()
         .items_center()
         .gap(px(8.))
-        .px(px(10.))
-        .py(px(8.))
+        .px(px(8.))
+        .py(px(6.))
         .rounded(px(6.))
         .border_1()
-        .border_color(rgb(if selected { ACCENT } else { SURFACE_1 }))
+        .border_color(rgb(BORDER_SUBTLE))
         .bg(rgb(SURFACE_1))
-        .on_click(move |_, _, cx| {
-            row_entity
-                .update(cx, |this, cx| {
-                    this.selected.set(!this.selected.get());
-                    cx.notify();
-                })
-                .ok();
-        })
         .child(
             div()
                 .w(px(18.))
@@ -1035,159 +1368,56 @@ fn left_panel(
                 .flex_1()
                 .child(
                     div()
-                        .text_size(px(12.))
-                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_size(px(13.))
+                        .font_weight(FontWeight::MEDIUM)
                         .text_color(rgb(TEXT_STRONG))
                         .child(mesh_name),
                 )
                 .child(
                     div()
-                        .text_size(px(10.))
+                        .text_size(px(11.))
                         .text_color(rgb(TEXT_MUTED))
                         .child(format!("{triangles} triangles")),
                 ),
         )
-        .child(
-            div()
-                .text_size(px(12.))
-                .text_color(rgb(TEXT_MUTED))
-                .child("\u{25C9}"),
-        );
-
-    div()
-        .absolute()
-        .top(px(52.))
-        .left(px(44.))
-        .bottom(px(0.))
-        .w(px(300.))
-        .bg(rgb(BACKGROUND))
-        .border_r_1()
-        .border_color(rgb(BORDER_SUBTLE))
-        .flex()
-        .flex_col()
-        .gap(px(8.))
-        .p(px(10.))
-        .child(
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(8.))
-                .rounded(px(10.))
-                .border_1()
-                .border_color(rgb(BORDER_SUBTLE))
-                .bg(rgb(SURFACE_0))
-                .p(px(10.))
-                .child({
-                    let header_entity = entity.clone();
-                    div()
-                        .id("models-header")
-                        .flex()
-                        .items_center()
-                        .justify_between()
-                        .child(
-                            div()
-                                .text_size(px(12.))
-                                .font_weight(FontWeight::BOLD)
-                                .text_color(rgb(TEXT_STRONG))
-                                .child("Models"),
-                        )
-                        .child(
-                            div()
-                                .text_size(px(10.))
-                                .text_color(rgb(TEXT_MUTED))
-                                .child(if triangles > 0 { "1" } else { "0" }),
-                        )
-                        .on_click(move |_, _, cx| {
-                            header_entity
-                                .update(cx, |this, cx| {
-                                    this.show_models = !this.show_models;
-                                    cx.notify();
-                                })
-                                .ok();
-                        })
+        .child(icon("eye", 15., TEXT_MUTED))
+        .on_click(move |_, _, cx| {
+            row_entity
+                .update(cx, |this, cx| {
+                    this.selected.set(!this.selected.get());
+                    cx.notify();
                 })
-                .when(show_models, |this| this.child(model_row).child(add_button)),
-        )
-        .child(match mode {
-            Mode::Prepare | Mode::Support => {
-                support_card(entity.clone(), support_count, show_supports)
-            }
-            Mode::Export => export_card(entity.clone()),
-            Mode::Printing => printing_card(),
-        })
-}
-
-fn card_shell(title: &'static str) -> gpui::Div {
+                .ok();
+        });
     div()
-        .relative()
+        .px(px(10.))
+        .pb(px(10.))
+        .pt(px(2.))
         .flex()
         .flex_col()
         .gap(px(8.))
-        .rounded(px(10.))
-        .border_1()
-        .border_color(rgb(BORDER_SUBTLE))
-        .bg(rgb(SURFACE_0))
-        .p(px(10.))
-        .child(
-            div()
-                .text_size(px(12.))
-                .font_weight(FontWeight::BOLD)
-                .text_color(rgb(TEXT_STRONG))
-                .child(title),
-        )
+        .when(triangles == 0, |this| {
+            this.child(
+                div()
+                    .text_size(px(12.))
+                    .text_color(rgb(TEXT_MUTED))
+                    .child("No models loaded"),
+            )
+        })
+        .when(triangles > 0, |this| this.child(row))
+        .child(add_button)
 }
 
-fn support_card(
-    entity: WeakEntity<DragonFruit>,
-    support_count: usize,
-    visible: bool,
-) -> gpui::Div {
-    let gear_entity = entity.clone();
-    let mut card = card_shell("Auto Supports (Beta)");
-    let header_entity = entity.clone();
-    card = card.child(
-        div()
-            .id("supports-header")
-            .absolute()
-            .top(px(0.))
-            .left(px(0.))
-            .right(px(0.))
-            .h(px(20.))
-            .on_click(move |_, _, cx| {
-                header_entity
-                    .update(cx, |this, cx| {
-                        this.show_supports = !this.show_supports;
-                        cx.notify();
-                    })
-                    .ok();
-            }),
-    );
-    card = card.child(
-        div()
-            .id("support-settings")
-            .absolute()
-            .top(px(6.))
-            .right(px(6.))
-            .w(px(20.))
-            .h(px(20.))
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded(px(4.))
-            .text_size(px(11.))
-            .text_color(rgb(TEXT_MUTED))
-            .child("\u{2699}")
-            .on_click(move |_, _, cx| {
-                gear_entity
-                    .update(cx, |this, cx| {
-                        this.show_support_settings = true;
-                        cx.notify();
-                    })
-                    .ok();
-            }),
-    );
-    card.when(visible, |this| {
-        this.child(
+fn support_body(entity: WeakEntity<DragonFruit>, support_count: usize) -> gpui::Div {
+    let generate_entity = entity.clone();
+    div()
+        .px(px(10.))
+        .pb(px(10.))
+        .pt(px(2.))
+        .flex()
+        .flex_col()
+        .gap(px(8.))
+        .child(
             div()
                 .flex()
                 .flex_col()
@@ -1198,12 +1428,11 @@ fn support_card(
         )
         .child(
             div()
-                .text_size(px(10.))
+                .text_size(px(11.))
                 .text_color(rgb(TEXT_MUTED))
                 .child("Load a model and scan for islands."),
         )
-        .child({
-            let generate_entity = entity.clone();
+        .child(
             div()
                 .id("generate-supports")
                 .h(px(30.))
@@ -1243,14 +1472,19 @@ fn support_card(
                             cx.notify();
                         })
                         .ok();
-                })
-        })
-    })
+                }),
+        )
 }
 
-fn export_card(entity: WeakEntity<DragonFruit>) -> gpui::Div {
+fn export_body(entity: WeakEntity<DragonFruit>) -> gpui::Div {
     let export_entity = entity.clone();
-    card_shell("Export")
+    div()
+        .px(px(10.))
+        .pb(px(10.))
+        .pt(px(2.))
+        .flex()
+        .flex_col()
+        .gap(px(8.))
         .child(modal_row("Format", "STL"))
         .child(modal_row("Units", "Millimetres"))
         .child(
@@ -1296,16 +1530,49 @@ fn export_card(entity: WeakEntity<DragonFruit>) -> gpui::Div {
         )
 }
 
-fn printing_card() -> gpui::Div {
-    card_shell("Printing")
+fn printing_body() -> gpui::Div {
+    div()
+        .px(px(10.))
+        .pb(px(10.))
+        .pt(px(2.))
+        .flex()
+        .flex_col()
+        .gap(px(8.))
         .child(modal_row("Layers", "0"))
         .child(modal_row("Layer height", "0.05 mm"))
         .child(
             div()
-                .text_size(px(10.))
+                .text_size(px(11.))
                 .text_color(rgb(TEXT_MUTED))
                 .child("Slice a model to inspect layers."),
         )
+}
+
+fn info_body(
+    mesh_name: String,
+    triangles: usize,
+    size: [f32; 3],
+    volume: f32,
+) -> gpui::Div {
+    let dimensions = format!("{:.1} × {:.1} × {:.1} mm", size[0], size[1], size[2]);
+    let volume = format!("{:.1} cm³", volume / 1000.0);
+    div()
+        .px(px(10.))
+        .pb(px(10.))
+        .pt(px(2.))
+        .flex()
+        .flex_col()
+        .gap(px(6.))
+        .child(
+            div()
+                .text_size(px(13.))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(rgb(TEXT_STRONG))
+                .child(mesh_name),
+        )
+        .child(info_row("Dimensions", &dimensions))
+        .child(info_row("Volume", &volume))
+        .child(info_row("Triangles", &format!("{triangles}")))
 }
 
 fn island_row(label: &'static str, count: usize) -> impl IntoElement {
@@ -1383,34 +1650,6 @@ fn orientation_cube(
                 .child(face("Bottom", -1.5708, -1.55, entity.clone(), camera.clone()))
                 .child(face("Front", -1.5708, 0.0, entity.clone(), camera.clone())),
         )
-}
-
-fn info_card(mesh_name: String, triangles: usize, size: [f32; 3], volume: f32) -> impl IntoElement {
-    let dimensions = format!("{:.1} × {:.1} × {:.1} mm", size[0], size[1], size[2]);
-    let volume = format!("{:.1} cm³", volume / 1000.0);
-    div()
-        .absolute()
-        .bottom(px(64.))
-        .right(px(12.))
-        .w(px(220.))
-        .rounded(px(10.))
-        .border_1()
-        .border_color(rgb(BORDER_SUBTLE))
-        .bg(rgb(SURFACE_0))
-        .p(px(10.))
-        .flex()
-        .flex_col()
-        .gap(px(6.))
-        .child(
-            div()
-                .text_size(px(12.))
-                .font_weight(FontWeight::BOLD)
-                .text_color(rgb(TEXT_STRONG))
-                .child(mesh_name),
-        )
-        .child(info_row("Dimensions", &dimensions))
-        .child(info_row("Volume", &volume))
-        .child(info_row("Triangles", &format!("{triangles}")))
 }
 
 fn info_row(label: &'static str, value: &str) -> impl IntoElement {
@@ -2000,6 +2239,11 @@ fn main() {
         let bounds = Bounds::centered(None, size(px(1280.), px(800.)), cx);
         let options = window::with_wgpu_renderer(WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
+            titlebar: Some(TitlebarOptions {
+                title: Some("DragonFruit".into()),
+                appears_transparent: true,
+                traffic_light_position: None,
+            }),
             ..Default::default()
         });
         cx.open_window(options, |_, cx| cx.new(DragonFruit::new))
