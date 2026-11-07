@@ -125,6 +125,26 @@ pub fn load_stl(path: &Path) -> Result<MeshData> {
     })
 }
 
+/// Centroids of downward-facing triangles above the plate, the points a
+/// support preview drops from.
+pub fn overhang_points(mesh: &MeshData) -> Vec<[f32; 3]> {
+    let mut points = Vec::new();
+    for triangle in mesh.vertices.chunks_exact(3) {
+        if triangle[0].normal[2] > -0.5 {
+            continue;
+        }
+        let a = triangle[0].pos;
+        let b = triangle[1].pos;
+        let c = triangle[2].pos;
+        let z = (a[2] + b[2] + c[2]) / 3.0;
+        if z < 0.5 {
+            continue;
+        }
+        points.push([(a[0] + b[0] + c[0]) / 3.0, (a[1] + b[1] + c[1]) / 3.0, z]);
+    }
+    points
+}
+
 /// Whether a world-space ray hits the model, by Moller-Trumbore.
 pub fn raycast(mesh: &MeshData, origin: GVec3, direction: GVec3) -> bool {
     let direction = direction.normalize();

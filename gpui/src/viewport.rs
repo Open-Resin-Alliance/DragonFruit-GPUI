@@ -83,6 +83,9 @@ pub struct Viewport {
     size: (u32, u32),
     mesh: Option<GpuMesh>,
     mesh_ptr: usize,
+    support_buffer: wgpu::Buffer,
+    support_vertex_count: u32,
+    support_ptr: usize,
 }
 
 impl Viewport {
@@ -642,6 +645,14 @@ impl Viewport {
             size: (1, 1),
             mesh: None,
             mesh_ptr: 0,
+            support_buffer: device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("viewport supports"),
+                size: 24,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }),
+            support_vertex_count: 0,
+            support_ptr: 0,
         })
     }
 
@@ -654,6 +665,7 @@ impl Viewport {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         mesh: Option<&MeshData>,
+        supports: &[[f32; 3]],
         camera: &Camera,
         base_color: [f32; 3],
         width: u32,
@@ -718,6 +730,26 @@ impl Viewport {
                 _pad: [0.0; 3],
             }),
         );
+
+        let support_ptr = supports.as_ptr() as usize;
+        if support_ptr != self.support_ptr {
+            self.support_ptr = support_ptr;
+            let mut vertices = Vec::with_capacity(supports.len() * 2);
+            for point in supports {
+                vertices.push([point[0], point[1], point[2], 0.49, 0.93, 0.03]);
+                vertices.push([point[0], point[1], 0.0, 0.49, 0.93, 0.03]);
+            }
+            if vertices.is_empty() {
+                self.support_vertex_count = 0;
+            } else {
+                self.support_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("viewport supports"),
+                    contents: bytemuck::cast_slice(&vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+                self.support_vertex_count = vertices.len() as u32;
+            }
+        }
 
         let aspect = width as f32 / height as f32;
         let projection = camera.projection(aspect);
@@ -807,6 +839,11 @@ impl Viewport {
             pass.draw(0..6, 0..1);
             pass.set_bind_group(2, &self.logo_bind, &[]);
             pass.draw(6..12, 0..1);
+            if self.support_vertex_count > 0 {
+                pass.set_pipeline(&self.axis);
+                pass.set_vertex_buffer(0, self.support_buffer.slice(..));
+                pass.draw(0..self.support_vertex_count, 0..1);
+            }
             if let Some(mesh) = &self.mesh {
                 if !below_plate && mesh.footprint_vertex_count > 0 {
                     pass.set_pipeline(&self.footprint);

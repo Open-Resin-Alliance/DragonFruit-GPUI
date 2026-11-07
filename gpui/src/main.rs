@@ -86,6 +86,7 @@ struct DragonFruit {
     show_models: bool,
     show_supports: bool,
     layer: f32,
+    supports: Rc<RefCell<Vec<[f32; 3]>>>,
     focus: FocusHandle,
     focused: bool,
     show_printer_menu: bool,
@@ -121,6 +122,7 @@ impl DragonFruit {
             show_models: true,
             show_supports: true,
             layer: 0.0,
+            supports: Rc::new(RefCell::new(Vec::new())),
             focus: cx.focus_handle(),
             focused: false,
             show_printer_menu: false,
@@ -181,6 +183,7 @@ impl Render for DragonFruit {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let mesh = self.mesh.clone();
         let click_mesh = self.mesh.clone();
+        let supports = self.supports.clone();
         let camera = self.camera.clone();
         let viewport = self.viewport.clone();
         let drag = self.drag.clone();
@@ -229,6 +232,7 @@ impl Render for DragonFruit {
                 &device,
                 &queue,
                 mesh_ref,
+                &supports.borrow(),
                 &canvas_camera.borrow(),
                 base_color,
                 width,
@@ -406,6 +410,7 @@ impl Render for DragonFruit {
                 entity.clone(),
                 loading,
                 mode,
+                self.supports.borrow().len(),
             ))
             .child(orientation_cube(camera.clone(), entity.clone()))
             .child(info_card(mesh_name, triangles, size, volume))
@@ -864,6 +869,7 @@ fn left_panel(
     entity: WeakEntity<DragonFruit>,
     loading: bool,
     mode: Mode,
+    support_count: usize,
 ) -> impl IntoElement {
     let add_entity = entity.clone();
     let mut add_button = div()
@@ -990,7 +996,7 @@ fn left_panel(
                 .child(add_button),
         )
         .child(match mode {
-            Mode::Prepare | Mode::Support => support_card(entity.clone()),
+            Mode::Prepare | Mode::Support => support_card(entity.clone(), support_count),
             Mode::Export => export_card(),
             Mode::Printing => printing_card(),
         })
@@ -1016,7 +1022,7 @@ fn card_shell(title: &'static str) -> gpui::Div {
         )
 }
 
-fn support_card(entity: WeakEntity<DragonFruit>) -> gpui::Div {
+fn support_card(entity: WeakEntity<DragonFruit>, support_count: usize) -> gpui::Div {
     let gear_entity = entity.clone();
     let mut card = card_shell("Auto Supports (Beta)");
     card = card.child(
@@ -1051,7 +1057,7 @@ fn support_card(entity: WeakEntity<DragonFruit>) -> gpui::Div {
                 .gap(px(4.))
                 .child(island_row("Voxel", 0))
                 .child(island_row("Minima", 0))
-                .child(island_row("Total", 0)),
+                .child(island_row("Total", support_count)),
         )
         .child(
             div()
@@ -1059,7 +1065,8 @@ fn support_card(entity: WeakEntity<DragonFruit>) -> gpui::Div {
                 .text_color(rgb(TEXT_MUTED))
                 .child("Load a model and scan for islands."),
         )
-        .child(
+        .child({
+            let generate_entity = entity.clone();
             div()
                 .id("generate-supports")
                 .h(px(30.))
@@ -1072,8 +1079,21 @@ fn support_card(entity: WeakEntity<DragonFruit>) -> gpui::Div {
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(rgb(ACCENT_CONTRAST))
                 .child("Generate Supports")
-                .hover(|style| style.bg(rgb(PRIMARY_HOVER))),
-        )
+                .hover(|style| style.bg(rgb(PRIMARY_HOVER)))
+                .on_click(move |_, _, cx| {
+                    generate_entity
+                        .update(cx, |this, cx| {
+                            if let Some(mesh) = this.mesh.as_ref() {
+                                let points = stl::overhang_points(mesh);
+                                let stride = (points.len() / 300).max(1);
+                                *this.supports.borrow_mut() =
+                                    points.into_iter().step_by(stride).collect();
+                            }
+                            cx.notify();
+                        })
+                        .ok();
+                })
+        })
 }
 
 fn export_card() -> gpui::Div {
