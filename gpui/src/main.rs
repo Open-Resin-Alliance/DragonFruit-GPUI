@@ -87,6 +87,9 @@ struct DragonFruit {
     show_supports: bool,
     layer: f32,
     supports: Rc<RefCell<Vec<[f32; 3]>>>,
+    show_grid: bool,
+    show_plate: bool,
+    show_box: bool,
     focus: FocusHandle,
     focused: bool,
     show_printer_menu: bool,
@@ -123,6 +126,9 @@ impl DragonFruit {
             show_supports: true,
             layer: 0.0,
             supports: Rc::new(RefCell::new(Vec::new())),
+            show_grid: true,
+            show_plate: true,
+            show_box: true,
             focus: cx.focus_handle(),
             focused: false,
             show_printer_menu: false,
@@ -184,6 +190,11 @@ impl Render for DragonFruit {
         let mesh = self.mesh.clone();
         let click_mesh = self.mesh.clone();
         let supports = self.supports.clone();
+        let show_layers = viewport::ViewLayers {
+            grid: self.show_grid,
+            plate: self.show_plate,
+            volume: self.show_box,
+        };
         let camera = self.camera.clone();
         let viewport = self.viewport.clone();
         let drag = self.drag.clone();
@@ -233,6 +244,7 @@ impl Render for DragonFruit {
                 &queue,
                 mesh_ref,
                 &supports.borrow(),
+                show_layers,
                 &canvas_camera.borrow(),
                 base_color,
                 width,
@@ -411,6 +423,9 @@ impl Render for DragonFruit {
                 loading,
                 mode,
                 self.supports.borrow().len(),
+                self.show_models,
+                self.show_supports,
+                self.selected.get(),
             ))
             .child(orientation_cube(camera.clone(), entity.clone()))
             .child(info_card(mesh_name, triangles, size, volume))
@@ -445,7 +460,13 @@ impl Render for DragonFruit {
                 self.show_app_menu,
             ))
             .when(show_settings, |this| {
-                this.child(settings_modal(entity.clone(), self.settings_tab))
+                this.child(settings_modal(
+                    entity.clone(),
+                    self.settings_tab,
+                    self.show_grid,
+                    self.show_plate,
+                    self.show_box,
+                ))
             })
             .when(self.show_help, |this| {
                 this.child(help_modal(entity.clone()))
@@ -870,6 +891,9 @@ fn left_panel(
     loading: bool,
     mode: Mode,
     support_count: usize,
+    show_models: bool,
+    show_supports: bool,
+    selected: bool,
 ) -> impl IntoElement {
     let add_entity = entity.clone();
     let mut add_button = div()
@@ -902,6 +926,8 @@ fn left_panel(
         .px(px(10.))
         .py(px(8.))
         .rounded(px(6.))
+        .border_1()
+        .border_color(rgb(if selected { ACCENT } else { SURFACE_1 }))
         .bg(rgb(SURFACE_1))
         .on_click(move |_, _, cx| {
             row_entity
@@ -973,8 +999,10 @@ fn left_panel(
                 .border_color(rgb(BORDER_SUBTLE))
                 .bg(rgb(SURFACE_0))
                 .p(px(10.))
-                .child(
+                .child({
+                    let header_entity = entity.clone();
                     div()
+                        .id("models-header")
                         .flex()
                         .items_center()
                         .justify_between()
@@ -990,13 +1018,22 @@ fn left_panel(
                                 .text_size(px(10.))
                                 .text_color(rgb(TEXT_MUTED))
                                 .child(if triangles > 0 { "1" } else { "0" }),
-                        ),
-                )
-                .child(model_row)
-                .child(add_button),
+                        )
+                        .on_click(move |_, _, cx| {
+                            header_entity
+                                .update(cx, |this, cx| {
+                                    this.show_models = !this.show_models;
+                                    cx.notify();
+                                })
+                                .ok();
+                        })
+                })
+                .when(show_models, |this| this.child(model_row).child(add_button)),
         )
         .child(match mode {
-            Mode::Prepare | Mode::Support => support_card(entity.clone(), support_count),
+            Mode::Prepare | Mode::Support => {
+                support_card(entity.clone(), support_count, show_supports)
+            }
             Mode::Export => export_card(),
             Mode::Printing => printing_card(),
         })
@@ -1022,9 +1059,31 @@ fn card_shell(title: &'static str) -> gpui::Div {
         )
 }
 
-fn support_card(entity: WeakEntity<DragonFruit>, support_count: usize) -> gpui::Div {
+fn support_card(
+    entity: WeakEntity<DragonFruit>,
+    support_count: usize,
+    visible: bool,
+) -> gpui::Div {
     let gear_entity = entity.clone();
     let mut card = card_shell("Auto Supports (Beta)");
+    let header_entity = entity.clone();
+    card = card.child(
+        div()
+            .id("supports-header")
+            .absolute()
+            .top(px(0.))
+            .left(px(0.))
+            .right(px(0.))
+            .h(px(20.))
+            .on_click(move |_, _, cx| {
+                header_entity
+                    .update(cx, |this, cx| {
+                        this.show_supports = !this.show_supports;
+                        cx.notify();
+                    })
+                    .ok();
+            }),
+    );
     card = card.child(
         div()
             .id("support-settings")
@@ -1049,8 +1108,8 @@ fn support_card(entity: WeakEntity<DragonFruit>, support_count: usize) -> gpui::
                     .ok();
             }),
     );
-    card
-        .child(
+    card.when(visible, |this| {
+        this.child(
             div()
                 .flex()
                 .flex_col()
@@ -1094,6 +1153,7 @@ fn support_card(entity: WeakEntity<DragonFruit>, support_count: usize) -> gpui::
                         .ok();
                 })
         })
+    })
 }
 
 fn export_card() -> gpui::Div {
@@ -1339,7 +1399,13 @@ fn layer_bar(layer: f32, entity: WeakEntity<DragonFruit>, window_width: f32) -> 
         )
 }
 
-fn settings_modal(entity: WeakEntity<DragonFruit>, tab: usize) -> impl IntoElement {
+fn settings_modal(
+    entity: WeakEntity<DragonFruit>,
+    tab: usize,
+    grid: bool,
+    plate: bool,
+    volume: bool,
+) -> impl IntoElement {
     let close_entity = entity.clone();
     div()
         .absolute()
@@ -1425,7 +1491,9 @@ fn settings_modal(entity: WeakEntity<DragonFruit>, tab: usize) -> impl IntoEleme
                         .gap(px(8.))
                         .child(modal_row("Theme", "Dark"))
                         .child(modal_row("Accent", "#ec2a77"))
-                        .child(modal_row("Build plate", "Rectangle")),
+                        .child(toggle_row("Grid", grid, entity.clone(), 0))
+                        .child(toggle_row("Build plate", plate, entity.clone(), 1))
+                        .child(toggle_row("Build volume", volume, entity.clone(), 2)),
                 }),
         )
 }
@@ -1581,6 +1649,56 @@ fn modal_tab(
             entity
                 .update(cx, |this, cx| {
                     this.settings_tab = index;
+                    cx.notify();
+                })
+                .ok();
+        })
+}
+
+fn toggle_row(
+    label: &'static str,
+    value: bool,
+    entity: WeakEntity<DragonFruit>,
+    kind: usize,
+) -> impl IntoElement {
+    div()
+        .id(format!("toggle-{kind}"))
+        .flex()
+        .items_center()
+        .justify_between()
+        .h(px(32.))
+        .px(px(10.))
+        .rounded(px(6.))
+        .bg(rgb(SURFACE_1))
+        .text_size(px(11.))
+        .text_color(rgb(TEXT_MUTED))
+        .child(label)
+        .child(
+            div()
+                .w(px(34.))
+                .h(px(18.))
+                .rounded_full()
+                .bg(rgb(if value { ACCENT } else { SURFACE_2 }))
+                .flex()
+                .items_center()
+                .justify_end()
+                .pr(px(2.))
+                .child(
+                    div()
+                        .w(px(14.))
+                        .h(px(14.))
+                        .rounded_full()
+                        .bg(rgb(ACCENT_CONTRAST)),
+                ),
+        )
+        .on_click(move |_, _, cx| {
+            entity
+                .update(cx, |this, cx| {
+                    match kind {
+                        0 => this.show_grid = !this.show_grid,
+                        1 => this.show_plate = !this.show_plate,
+                        _ => this.show_box = !this.show_box,
+                    }
                     cx.notify();
                 })
                 .ok();

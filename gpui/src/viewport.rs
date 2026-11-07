@@ -50,6 +50,13 @@ struct Targets {
     composite_bind: wgpu::BindGroup,
 }
 
+#[derive(Clone, Copy)]
+pub struct ViewLayers {
+    pub grid: bool,
+    pub plate: bool,
+    pub volume: bool,
+}
+
 pub struct Viewport {
     surface: WgpuSurface,
     background: wgpu::RenderPipeline,
@@ -666,6 +673,7 @@ impl Viewport {
         queue: &wgpu::Queue,
         mesh: Option<&MeshData>,
         supports: &[[f32; 3]],
+        layers: ViewLayers,
         camera: &Camera,
         base_color: [f32; 3],
         width: u32,
@@ -817,18 +825,22 @@ impl Viewport {
             pass.set_pipeline(&self.background);
             pass.draw(0..3, 0..1);
             let below_plate = view_signed_z >= 0.008;
-            if !below_plate {
+            if !below_plate && layers.plate {
                 pass.set_pipeline(&self.plate);
                 pass.set_bind_group(1, &self.plate_bind, &[]);
                 pass.set_vertex_buffer(0, self.plate_vertex_buffer.slice(..));
                 pass.set_index_buffer(self.plate_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..self.plate_index_count, 0, 0..1);
+            }
+            if !below_plate && layers.grid {
                 pass.set_pipeline(&self.grid);
                 pass.draw(0..6, 0..1);
             }
-            pass.set_pipeline(&self.volume);
-            pass.set_vertex_buffer(0, self.volume_buffer.slice(..));
-            pass.draw(0..self.volume_vertex_count, 0..1);
+            if layers.volume {
+                pass.set_pipeline(&self.volume);
+                pass.set_vertex_buffer(0, self.volume_buffer.slice(..));
+                pass.draw(0..self.volume_vertex_count, 0..1);
+            }
             pass.set_pipeline(&self.axis);
             pass.set_vertex_buffer(0, self.axis_buffer.slice(..));
             pass.draw(0..self.axis_vertex_count, 0..1);
