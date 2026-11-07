@@ -1291,10 +1291,14 @@ fn orientation_cube(
     camera: Rc<RefCell<Camera>>,
     entity: WeakEntity<DragonFruit>,
 ) -> impl IntoElement {
-    let face = |label: &'static str, yaw: f32, pitch: f32, entity: WeakEntity<DragonFruit>, camera: Rc<RefCell<Camera>>| {
+    let face = |label: &'static str,
+                yaw: f32,
+                pitch: f32,
+                entity: WeakEntity<DragonFruit>,
+                camera: Rc<RefCell<Camera>>| {
         div()
             .id(format!("face-{label}"))
-            .w(px(30.))
+            .w(px(44.))
             .h(px(30.))
             .flex()
             .items_center()
