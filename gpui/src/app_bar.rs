@@ -609,7 +609,7 @@ pub fn app_bar(state: AppBarState, entity: WeakEntity<DragonFruit>) -> impl Into
     );
 
     let right = ui! {
-        div(flex, flex_1, max_w_430, items_center, justify_end, gap_8, pr_3) {
+        div(flex, flex_1, max_w_430, items_center, justify_end, gap_8, pr_0) {
             div(flex, items_center, gap_8, when(actions_disabled, opacity_45)) {
                 { view_mode }
                 { overhang_button }
@@ -617,7 +617,13 @@ pub fn app_bar(state: AppBarState, entity: WeakEntity<DragonFruit>) -> impl Into
             }
             // `ml-1 flex items-center gap-1`.
             div(ml_4, flex, items_center, gap_4) {
-                { window_button(WindowControlArea::Min, 0xf4bf4f, "minimize-2", TintColor::Plain, 0.86) }
+                { window_button(
+                    WindowControlArea::Min,
+                    0xf4bf4f,
+                    "minimize-2",
+                    TintColor::Mix16,
+                    0.86,
+                ) }
                 { window_button(
                     WindowControlArea::Max,
                     0x40c463,
