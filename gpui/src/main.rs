@@ -37,6 +37,7 @@ struct DragonFruit {
     last: Rc<Cell<(f32, f32)>>,
     status: String,
     loading: bool,
+    selected: bool,
     smoke: bool,
     smoke_done: Rc<Cell<bool>>,
 }
@@ -57,6 +58,7 @@ impl DragonFruit {
             last: Rc::new(Cell::new((0.0, 0.0))),
             status: "No model loaded".to_owned(),
             loading: false,
+            selected: true,
             smoke,
             smoke_done: Rc::new(Cell::new(false)),
         };
@@ -114,6 +116,7 @@ impl Render for DragonFruit {
         let drag = self.drag.clone();
         let last = self.last.clone();
         let smoke = self.smoke;
+        let selected = self.selected;
         let smoke_done = self.smoke_done.clone();
         let status = self.status.clone();
         let triangles = self.mesh.as_ref().map(|mesh| mesh.triangles).unwrap_or(0);
@@ -150,9 +153,16 @@ impl Render for DragonFruit {
             let width = (bounds.size.width.0 * scale).round().max(1.0) as u32;
             let height = (bounds.size.height.0 * scale).round().max(1.0) as u32;
             let mesh_ref = mesh.as_deref();
-            if let Err(error) =
-                state.render(&device, &queue, mesh_ref, &canvas_camera.borrow(), width, height)
-            {
+            let base_color = mesh_color(selected);
+            if let Err(error) = state.render(
+                &device,
+                &queue,
+                mesh_ref,
+                &canvas_camera.borrow(),
+                base_color,
+                width,
+                height,
+            ) {
                 eprintln!("viewport: {error:#}");
                 return;
             }
@@ -249,7 +259,15 @@ impl Render for DragonFruit {
             .relative()
             .bg(rgb(BACKGROUND))
             .child(canvas)
-            .child(top_bar(status, triangles, entity, loading, camera.clone(), orthographic))
+            .child(top_bar(
+                status,
+                triangles,
+                entity,
+                loading,
+                camera.clone(),
+                orthographic,
+                selected,
+            ))
             .child(
                 div()
                     .absolute()
@@ -269,7 +287,32 @@ fn top_bar(
     loading: bool,
     camera: Rc<RefCell<Camera>>,
     orthographic: bool,
+    selected: bool,
 ) -> impl IntoElement {
+    let selection_entity = entity.clone();
+    let selection = div()
+        .id("selection")
+        .h(px(32.))
+        .px(px(10.))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(6.))
+        .border_1()
+        .border_color(rgb(BORDER_SUBTLE))
+        .bg(rgb(0x1a1b21))
+        .text_size(px(12.))
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(rgb(TEXT_STRONG))
+        .child(if selected { "Selected" } else { "Unselected" })
+        .on_click(move |_, _, cx| {
+            selection_entity
+                .update(cx, |this, cx| {
+                    this.selected = !this.selected;
+                    cx.notify();
+                })
+                .ok();
+        });
     let toggle_camera = camera.clone();
     let toggle_entity = entity.clone();
     let projection = div()
@@ -348,7 +391,30 @@ fn top_bar(
                 .child(format!("{triangles} tris")),
         )
         .child(projection)
+        .child(selection)
         .child(button)
+}
+
+fn srgb_to_linear(channel: u8) -> f32 {
+    let value = channel as f32 / 255.0;
+    if value <= 0.04045 {
+        value / 12.92
+    } else {
+        ((value + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+/// `blendTintColor` from `src/features/shaders/mesh/tint.ts`: linear lerp from
+/// the unselected `#a3a3a3` toward the theme selection `#ec2a77` at 0.70.
+fn mesh_color(selected: bool) -> [f32; 3] {
+    let base = [srgb_to_linear(0xa3), srgb_to_linear(0xa3), srgb_to_linear(0xa3)];
+    let tint = [srgb_to_linear(0xec), srgb_to_linear(0x2a), srgb_to_linear(0x77)];
+    let strength = if selected { 0.70 } else { 0.0 };
+    [
+        base[0] + (tint[0] - base[0]) * strength,
+        base[1] + (tint[1] - base[1]) * strength,
+        base[2] + (tint[2] - base[2]) * strength,
+    ]
 }
 
 fn main() {

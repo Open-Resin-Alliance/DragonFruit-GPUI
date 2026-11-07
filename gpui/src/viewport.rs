@@ -14,7 +14,9 @@ struct Uniforms {
     view_proj: [[f32; 4]; 4],
     inv_proj: [[f32; 4]; 4],
     camera_pos: [f32; 3],
-    _pad: f32,
+    _pad0: f32,
+    base_color: [f32; 3],
+    _pad1: f32,
     resolution: [f32; 2],
     _pad2: [f32; 2],
 }
@@ -347,6 +349,7 @@ impl Viewport {
         queue: &wgpu::Queue,
         mesh: Option<&MeshData>,
         camera: &Camera,
+        base_color: [f32; 3],
         width: u32,
         height: u32,
     ) -> Result<()> {
@@ -409,7 +412,9 @@ impl Viewport {
                 view_proj: view_proj.to_cols_array_2d(),
                 inv_proj: projection.inverse().to_cols_array_2d(),
                 camera_pos: [eye.x, eye.y, eye.z],
-                _pad: 0.0,
+                _pad0: 0.0,
+                base_color,
+                _pad1: 0.0,
                 resolution: [width as f32, height as f32],
                 _pad2: [0.0; 2],
             }),
@@ -777,6 +782,7 @@ struct Uniforms {
     view_proj: mat4x4<f32>,
     inv_proj: mat4x4<f32>,
     camera_pos: vec3<f32>,
+    base_color: vec3<f32>,
     resolution: vec2<f32>,
 };
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
@@ -818,7 +824,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let head = vec3<f32>(1.0) * max(dot(n, view_dir), 0.0) * 0.4;
     let lighting = (ambient + key + fill + head) / 3.14159265;
 
-    let base = vec3<f32>(0.66, 0.32, 0.39);
+    let base = uniforms.base_color;
     let half = normalize(key_dir + view_dir);
     let spec = pow(max(dot(n, half), 0.0), 8.0) * 0.05;
     let color = base * lighting + vec3<f32>(spec);
@@ -831,6 +837,7 @@ struct Uniforms {
     view_proj: mat4x4<f32>,
     inv_proj: mat4x4<f32>,
     camera_pos: vec3<f32>,
+    base_color: vec3<f32>,
     resolution: vec2<f32>,
 };
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
@@ -878,6 +885,7 @@ struct Uniforms {
     view_proj: mat4x4<f32>,
     inv_proj: mat4x4<f32>,
     camera_pos: vec3<f32>,
+    base_color: vec3<f32>,
     resolution: vec2<f32>,
 };
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
@@ -898,6 +906,7 @@ struct Uniforms {
     view_proj: mat4x4<f32>,
     inv_proj: mat4x4<f32>,
     camera_pos: vec3<f32>,
+    base_color: vec3<f32>,
     resolution: vec2<f32>,
 };
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
@@ -924,6 +933,7 @@ struct Uniforms {
     view_proj: mat4x4<f32>,
     inv_proj: mat4x4<f32>,
     camera_pos: vec3<f32>,
+    base_color: vec3<f32>,
     resolution: vec2<f32>,
 };
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
@@ -1009,6 +1019,7 @@ struct Uniforms {
     view_proj: mat4x4<f32>,
     inv_proj: mat4x4<f32>,
     camera_pos: vec3<f32>,
+    base_color: vec3<f32>,
     resolution: vec2<f32>,
 };
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
