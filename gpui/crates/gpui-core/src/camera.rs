@@ -75,6 +75,11 @@ impl Camera {
         camera.distance = offset.length();
         camera.pitch = (offset.z / offset.length()).asin();
         camera.yaw = offset.y.atan2(offset.x);
+        // The goals must match, or the first `step` eases back to `fit`'s pose.
+        camera.goal_target = camera.target;
+        camera.goal_distance = camera.distance;
+        camera.goal_pitch = camera.pitch;
+        camera.goal_yaw = camera.yaw;
         camera
     }
 
