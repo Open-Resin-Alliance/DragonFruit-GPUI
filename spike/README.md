@@ -123,6 +123,24 @@ Result on Windows: builds (3m34s cold, dependencies at `opt-level = 2`) and
 renders the panel. The component line is usable; the cost is carrying two GPUI
 trees in one product.
 
+## Probe 7 — DragonFruit panel replica (`panel`)
+
+```sh
+cd spike/ui-probe
+cargo run --bin panel
+```
+
+`AutoSupportPanel` rebuilt with raw GPUI `div`s and the app's own tokens from
+`src/app/globals.css`: surface-0 card, 1px `border-subtle`, 8px radius, 10px
+header padding, the accent-tinted run button, the three-up island count card,
+and the preset / Auto-Lift row.
+
+This is the design-fidelity test, not a component-library test: the goal is the
+app's visual language, so the panel does not use `gpui-component`'s widgets.
+
+Known differences: Geist Sans vs the system font, `color-mix()` values
+precomputed to hex, and no backdrop blur.
+
 ## Ecosystem note
 
 The GPUI ecosystem is split across incompatible lines. This is the main
