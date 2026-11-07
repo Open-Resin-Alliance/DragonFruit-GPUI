@@ -266,13 +266,14 @@ pub fn models_add_button(entity: WeakEntity<DragonFruit>) -> impl IntoElement {
             // `IconButton size="sm"` with `<Plus className="h-3.5 w-3.5" />`
             // (14px), but the 2px stroke at that size reads thin next to the
             // 28px tile, so the glyph is drawn at the tile's own optical size.
-            // `.ui-button`'s `px-11` would leave 6px of content in a 28px tile,
-            // which is what squeezed the glyph into a dot.
+            // `IconButton size="sm"` is `h-8 w-8 !p-0` with a `h-3.5 w-3.5`
+            // glyph: a 32px tile and no padding. `!p-0` is the part that matters
+            // — `.ui-button`'s `px-11` left 10px of content and squeezed the
+            // glyph, which is what looked like a tiny icon.
             &ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Sm)
-                .width(28.0)
                 .padding_x(0.0)
                 .gap(0.0),
-            icon("plus", 16.0, TEXT_MUTED),
+            icon("plus", 14.0, TEXT_MUTED),
         )
         .on_click(move |_, _, cx| {
             add_entity.update(cx, |this, cx| this.open_stl(cx)).ok();
