@@ -7,11 +7,11 @@ use gpui_core::icons::icon;
 use gpui_core::support_state::*;
 use gpui_core::theme::*;
 use gpui_ui::panel_fields::{WHITE, with_alpha};
-use gpui_ui::ui::{button, spinner_colored};
+use gpui_ui::ui::{self, ButtonSize, ButtonSpec, ButtonVariant, IconTone, spinner_colored};
 
 use super::shared::{
-    ISLAND_INTERSECTION, ISLAND_MINIMA, ISLAND_OVERHANG, ISLAND_VOXEL, ROUNDED_BARE, flat_button,
-    hint, hint_full, notify, panel_icon_button, section_card,
+    ISLAND_INTERSECTION, ISLAND_MINIMA, ISLAND_OVERHANG, ISLAND_VOXEL, ROUNDED_BARE, hint,
+    hint_full, notify,
 };
 use crate::DragonFruit;
 
@@ -47,34 +47,44 @@ pub fn islands_body(
     let gear_entity = entity.clone();
     let gear = hint(
         "islands-settings-tip",
-        panel_icon_button("islands-settings", "settings", 14.0, 2.0, move |_, _, cx| {
-            gear_state.model_mut().settings_open = true;
-            notify(&gear_entity, cx);
-        }),
+        ui::icon_button_tile(
+            "islands-settings",
+            "settings",
+            14.0,
+            IconTone::Neutral,
+            2.0,
+            move |_, _, cx| {
+                gear_state.model_mut().settings_open = true;
+                notify(&gear_entity, cx);
+            },
+        ),
         "Scan settings",
     );
 
     // `Button size="auto"` at `w-full !h-8 text-[11px] disabled:opacity-50` with
     // the accent inline style.
     let scan_entity = entity.clone();
-    let scan_button = flat_button(
+    let scan_background = mix(ACCENT, SURFACE_0, 0.14);
+    let mut scan_spec = ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Sm)
+        .full()
+        .fill(scan_background, ACCENT, ACCENT);
+    if !(has_geometry && !scanning) {
+        scan_spec = scan_spec.disabled();
+    }
+    let mut scan_button = ui::button_with(
         "islands-scan",
         if scanning { "Scanning…" } else { "Scan Islands" },
-        32.0,
-        mix(ACCENT, SURFACE_0, 0.14),
-        ACCENT,
-        ACCENT,
-        None,
-        has_geometry && !scanning,
-        move |_, _, cx| {
+        &scan_spec,
+    );
+    if has_geometry && !scanning {
+        scan_button = scan_button.on_click(move |_, _, cx| {
             // PORT GAP: no island scanner — the run belongs to the shell.
             notify(&scan_entity, cx);
-        },
-    )
-    .w_full();
+        });
+    }
 
     // Breakdown by type: `grid grid-cols-3 gap-2 text-center`.
-    let breakdown = section_card().child(
+    let breakdown = ui::sub_card().child(
         div()
             .flex()
             .gap(px(8.0))
@@ -119,7 +129,7 @@ pub fn islands_body(
                     .child(format!("/ {island_count}")),
             )
         });
-    let navigation = section_card().child(
+    let navigation = ui::sub_card().child(
         div()
             .flex()
             .items_center()
@@ -166,10 +176,7 @@ pub fn islands_body(
             div().flex_1().min_w(px(0.0)).child(b),
         )
     };
-    let display_toggles = section_card()
-        .flex()
-        .flex_col()
-        .gap(px(6.0))
+    let display_toggles = ui::sub_card()
         .child(toggle_row(
             layer_toggle(
                 "islands-toggle-voxels",

@@ -1,4 +1,5 @@
 use super::*;
+use gpui_ui::ui::button_with_content;
 
 // ── UVTools (`UvToolsSettingsTab.tsx`) ───────────────────────────────────
 
@@ -20,7 +21,11 @@ pub(crate) fn uvtools_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>
     card = card.child(
         setting_row(
             "Enable UVTools Integration",
-            "Adds a “Send to UVTools” option in the slicing panel.",
+            Some("Adds a “Send to UVTools” option in the slicing panel.".into()),
+            SettingDensity::Compact,
+            true,
+            SettingSurface::Sunken,
+            false,
             segmented(
                 "uvtools-enabled",
                 &["OFF", "ON"],
@@ -37,58 +42,65 @@ pub(crate) fn uvtools_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>
     );
 
     if uvtools.enabled {
-        let (background, icon_slug, icon_color, label) = if uvtools.show_found_glow {
+        let (icon_slug, icon_color, label) = if uvtools.show_found_glow {
             (
-                mix(ACCENT_SECONDARY, SURFACE_1, 0.88),
                 "circle-check",
                 ACCENT_SECONDARY,
                 "Found!",
             )
         } else if uvtools.show_not_found {
             (
-                mix(DANGER, SURFACE_1, 0.90),
                 "search",
                 TEXT_MUTED,
                 "Auto-Discover",
             )
         } else {
-            (SURFACE_1, "search", TEXT_MUTED, "Auto-Discover")
+            ("search", TEXT_MUTED, "Auto-Discover")
         };
 
         // `autoDiscoverUvToolsPath` needs the native bridge, so the button is
         // inert; `discoveryBusy` still drives the source's spinner.
-        let mut discover = div()
-            .h(px(36.))
-            .px(px(12.))
-            .flex_shrink_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .gap(px(6.))
-            .rounded(px(6.))
-            .border_1()
-            .border_color(rgb(BORDER_SUBTLE))
-            .bg(rgb(background))
-            .text_size(px(14.))
-            .font_weight(FontWeight::SEMIBOLD)
-            .text_color(rgb(TEXT_STRONG));
-        if uvtools.discovery_busy {
-            discover = discover.child(spinner(16.));
-        } else {
-            discover = discover.child(icon(icon_slug, 16., icon_color));
+        let mut discover = button_with_content(
+            "uvtools-discover",
+            &ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Md)
+                .padding_x(12.0)
+                .padding_y(0.0, 0.0)
+                .font_size(14.0),
+            div()
+                .flex()
+                .items_center()
+                .gap(px(6.))
+                .child(
+                    if uvtools.discovery_busy {
+                        spinner(16.).into_any_element()
+                    } else {
+                        icon(icon_slug, 16., icon_color).into_any_element()
+                    },
+                )
+                .child(if uvtools.discovery_busy {
+                    "Scanning…".to_string()
+                } else {
+                    label.to_string()
+                }),
+        );
+        if uvtools.show_found_glow {
+            // `color-mix(in srgb, accent-secondary, surface-1 88%)`.
+            discover = discover.bg(rgb(mix(ACCENT_SECONDARY, SURFACE_1, 0.12)));
+        } else if uvtools.show_not_found {
+            // `color-mix(in srgb, danger, surface-1 90%)`.
+            discover = discover.bg(rgb(mix(DANGER, SURFACE_1, 0.10)));
         }
-        discover = discover.child(if uvtools.discovery_busy {
-            "Scanning…"
-        } else {
-            label
-        });
 
         card = card.child(
             inner_card()
                 .mt(px(8.))
-                .child(plain_row(
+                .child(setting_row(
                     "UVTools Executable Path",
-                    format!("Use auto-discover or enter the path to {executable_label} manually."),
+                    Some(format!("Use auto-discover or enter the path to {executable_label} manually.").into()),
+                    SettingDensity::Compact,
+                    false,
+                    SettingSurface::Sunken,
+                    false,
                     discover,
                 ))
                 .child(

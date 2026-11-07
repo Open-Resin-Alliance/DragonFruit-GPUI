@@ -11,7 +11,7 @@ use gpui_core::theme::*;
 use gpui_ui::panel_fields::{BLACK, with_alpha};
 use gpui_ui::ui::{IconButtonSize, IconButtonVariant, icon_button};
 
-use super::chrome::{LEADING_TIGHT, dialog_backdrop, dialog_panel, mix_b, shadow};
+use super::chrome::{LEADING_TIGHT, debug_sheet, mix_b, shadow};
 use super::format::{format_bytes_short, format_timestamp, format_history_label};
 
 // ── HistoryDebugModal ───────────────────────────────────────────────────────
@@ -501,14 +501,14 @@ pub fn history_debug_modal(
         .py(px(12.0))
         .child(timeline);
 
-    dialog_backdrop(0x99, 16.0).child(
-        dialog_panel(1024.0)
+    debug_sheet(1024.0, 0x99, 16.0, |panel| {
+        panel
             .max_h(relative(0.88))
             .overflow_hidden()
             .shadow(vec![shadow(0.0, 28.0, 64.0, 0.0, with_alpha(BLACK, 0x7a))])
             .child(header)
             .child(chips)
-            .child(body),
-    )
+            .child(body)
+    })
 }
 

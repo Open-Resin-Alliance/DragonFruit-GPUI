@@ -74,9 +74,13 @@ pub(crate) fn slicing_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>
                 .flex()
                 .flex_col()
                 .gap(px(8.))
-                .child(plain_row(
+                .child(setting_row(
                     "Background gradient",
-                    "Scene mood overlay in thumbnail",
+                    Some("Scene mood overlay in thumbnail".into()),
+                    SettingDensity::Compact,
+                    false,
+                    SettingSurface::Sunken,
+                    false,
                     segmented(
                         "settings-thumbnail-gradient",
                         &["OFF", "ON"],
@@ -89,9 +93,13 @@ pub(crate) fn slicing_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>
                         },
                     ),
                 ))
-                .child(plain_row(
+                .child(setting_row(
                     "Build plate",
-                    "Render build plate in thumbnail",
+                    Some("Render build plate in thumbnail".into()),
+                    SettingDensity::Compact,
+                    false,
+                    SettingSurface::Sunken,
+                    false,
                     segmented(
                         "settings-thumbnail-plate",
                         &["OFF", "ON"],
@@ -104,9 +112,13 @@ pub(crate) fn slicing_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>
                         },
                     ),
                 ))
-                .child(plain_row(
+                .child(setting_row(
                     "Grid",
-                    "Render build grid in thumbnail",
+                    Some("Render build grid in thumbnail".into()),
+                    SettingDensity::Compact,
+                    false,
+                    SettingSurface::Sunken,
+                    false,
                     segmented(
                         "settings-thumbnail-grid",
                         &["OFF", "ON"],
@@ -130,9 +142,13 @@ pub(crate) fn slicing_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>
             "Enable or disable PNG compression for PNG-based formats.",
         )
         .child(
-            inner_card().mt(px(12.)).child(plain_row(
+            inner_card().mt(px(12.)).child(setting_row(
                 "Compression",
-                "Auto adapts by AA level, Off is fastest, On favors smaller PNG files",
+                Some("Auto adapts by AA level, Off is fastest, On favors smaller PNG files".into()),
+                SettingDensity::Compact,
+                false,
+                SettingSurface::Sunken,
+                false,
                 segmented(
                     "settings-png-compression",
                     &["AUTO", "OFF", "ON"],

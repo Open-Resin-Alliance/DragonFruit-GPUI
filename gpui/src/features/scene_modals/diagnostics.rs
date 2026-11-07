@@ -11,7 +11,7 @@ use gpui_ui::panel_fields::{BLACK, WHITE, with_alpha};
 use gpui_ui::ui::{IconButtonSize, IconButtonVariant, SelectOption, icon_button, select_dropdown};
 
 use super::chrome::{
-    Run, dialog_backdrop, dialog_panel, mix_b, shadow, table_cell, table_header_cell,
+    Run, debug_sheet, mix_b, shadow, table_cell, table_header_cell,
 };
 use super::format::{fixed, quantity, grouped, format_bytes, format_percent};
 
@@ -847,13 +847,13 @@ pub fn diagnostics_modal(
         .child(support_picking);
 
     // Backdrop `bg-black/60`; panel `max-w-5xl` with the source's shadow.
-    dialog_backdrop(0x99, 16.0).child(
-        dialog_panel(1024.0)
+    debug_sheet(1024.0, 0x99, 16.0, |panel| {
+        panel
             .max_h(relative(0.88))
             .overflow_hidden()
             .shadow(vec![shadow(0.0, 28.0, 64.0, 0.0, with_alpha(BLACK, 0x7a))])
             .child(header)
-            .child(body),
-    )
+            .child(body)
+    })
 }
 

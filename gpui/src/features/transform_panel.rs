@@ -38,6 +38,7 @@ use std::rc::Rc;
 use gpui::{Div, FontWeight, IntoElement, SharedString, div, prelude::*, px, rgb};
 
 use gpui_ui::panel_fields::*;
+use gpui_ui::ui::{section_row, sub_card_with};
 use gpui_core::theme::*;
 
 /// `SelectionRotationMode` in `src/features/scene/selectionTransform.ts`.
@@ -177,57 +178,6 @@ pub fn transform_body(state: &TransformState, actions: &TransformActions) -> imp
     body.child(scale_section(state, actions))
 }
 
-/// `moveCardStyle`: `color-mix(#4f8cff, border-subtle 78%)` on
-/// `color-mix(#4f8cff, surface-1 94%)`.
-fn move_card() -> Div {
-    sub_card(
-        mix(MOVE_TINT, BORDER_SUBTLE, 0.22),
-        mix(MOVE_TINT, SURFACE_1, 0.06),
-    )
-}
-
-/// `liftCardStyle`: `color-mix(#f59e0b, border-subtle 76%)` on
-/// `color-mix(#f59e0b, surface-1 93%)`.
-fn lift_card() -> Div {
-    sub_card(
-        mix(LIFT_TINT, BORDER_SUBTLE, 0.24),
-        mix(LIFT_TINT, SURFACE_1, 0.07),
-    )
-}
-
-/// `rotateCardStyle`: `color-mix(#8f6cff, border-subtle 80%)` on
-/// `color-mix(#8f6cff, surface-1 95%)`.
-fn rotate_card() -> Div {
-    sub_card(
-        mix(ROTATE_TINT, BORDER_SUBTLE, 0.20),
-        mix(ROTATE_TINT, SURFACE_1, 0.05),
-    )
-}
-
-/// `scaleCardStyle`: `color-mix(#2eb67d, border-subtle 80%)` on
-/// `color-mix(#2eb67d, surface-1 95%)`.
-fn scale_card() -> Div {
-    sub_card(
-        mix(SCALE_TINT, BORDER_SUBTLE, 0.20),
-        mix(SCALE_TINT, SURFACE_1, 0.05),
-    )
-}
-
-/// The shared `flex items-center` header row: spacer, centred section title,
-/// trailing control.
-fn section_row(title: &str, leading: Option<Div>, trailing: Option<Div>) -> Div {
-    let row = div()
-        .flex()
-        .items_center()
-        .child(div().flex_1().when_some(leading, |this, leading| {
-            this.flex().justify_start().child(leading)
-        }))
-        .child(section_header(title));
-    row.child(div().flex_1().when_some(trailing, |this, trailing| {
-        this.flex().justify_end().child(trailing)
-    }))
-}
-
 /// `renderLocalSpaceToggle`: one button for move and rotate, since they share the
 /// gizmo's frame.
 fn local_space_toggle(state: &TransformState, actions: &TransformActions) -> Div {
@@ -275,9 +225,10 @@ fn move_section(state: &TransformState, actions: &TransformActions) -> Div {
     }
 
     let center = actions.on_center.clone();
-    move_card()
-        .flex()
-        .flex_col()
+    // `moveCardStyle`: `color-mix(#4f8cff, border-subtle 78%)` on
+    // `color-mix(#4f8cff, surface-1 94%)`.
+    sub_card_with(Some((MOVE_TINT, 0.06)), 8.0)
+        .gap(px(0.0))
         .child(section_row(
             "Move",
             None,
@@ -347,9 +298,10 @@ fn lift_section(state: &TransformState, actions: &TransformActions) -> Div {
         }
     };
 
-    lift_card()
-        .flex()
-        .flex_col()
+    // `liftCardStyle`: `color-mix(#f59e0b, border-subtle 76%)` on
+    // `color-mix(#f59e0b, surface-1 93%)`.
+    sub_card_with(Some((LIFT_TINT, 0.07)), 8.0)
+        .gap(px(0.0))
         .child(section_row(
             "Lift",
             None,
@@ -478,9 +430,10 @@ fn rotate_section(state: &TransformState, actions: &TransformActions) -> Div {
         ))
     });
 
-    rotate_card()
-        .flex()
-        .flex_col()
+    // `rotateCardStyle`: `color-mix(#8f6cff, border-subtle 80%)` on
+    // `color-mix(#8f6cff, surface-1 95%)`.
+    sub_card_with(Some((ROTATE_TINT, 0.05)), 8.0)
+        .gap(px(0.0))
         .child(section_row(
             "Rotate",
             leading,
@@ -584,9 +537,10 @@ fn scale_section(state: &TransformState, actions: &TransformActions) -> Div {
     let reset = actions.on_reset_scale.clone();
     let commit = actions.on_scale_commit.clone();
 
-    scale_card()
-        .flex()
-        .flex_col()
+    // `scaleCardStyle`: `color-mix(#2eb67d, border-subtle 80%)` on
+    // `color-mix(#2eb67d, surface-1 95%)`.
+    sub_card_with(Some((SCALE_TINT, 0.05)), 8.0)
+        .gap(px(0.0))
         .child(section_row(
             "Scale",
             None,

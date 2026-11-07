@@ -21,37 +21,31 @@ pub(crate) fn plugins_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>
     .relative();
     // `IconButton` absolute right-3 top-3, `PackageOpen`, warning tone.
     header = header.child(
-        div()
-            .absolute()
-            .top(px(12.))
-            .right(px(12.))
-            .child(
-                div()
-                    .id("plugins-allowance")
-                    .w(px(28.))
-                    .h(px(28.))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .rounded(px(6.))
-                    .border_1()
-                    .border_color(rgb(mix(0xf59e0b, BORDER_SUBTLE, 0.45)))
-                    .bg(rgb(mix(0xf59e0b, SURFACE_1, 0.9)))
-                    .cursor_pointer()
-                    .hover(|style| style.bg(rgb(mix(0xf59e0b, SURFACE_1, 0.82))))
-                    .on_click(move |_, _, cx| {
-                        edit_and_notify(&allowance_entity, cx, |draft| {
-                            draft.plugins.allowance_dialog_open = true;
-                        });
-                    })
-                    .child(icon("package-open", 16., 0xf59e0b)),
-            ),
+        icon_button_toned(
+            "plugins-allowance",
+            "package-open",
+            16.0,
+            IconButtonVariant::Surface,
+            IconButtonSize::Md,
+            IconTone::Warning,
+            false,
+        )
+        .absolute()
+        .top(px(12.))
+        .right(px(12.))
+        .on_click(move |_, _, cx| {
+            edit_and_notify(&allowance_entity, cx, |draft| {
+                draft.plugins.allowance_dialog_open = true;
+            });
+        }),
     );
 
-    let install_row = setting_row_surface(
+    let install_row = setting_row(
         "Install profile pack",
-        "Adds presets and materials from a repository. Contains no code.",
-        false,
+        Some("Adds presets and materials from a repository. Contains no code.".into()),
+        SettingDensity::Compact,
+        true,
+        SettingSurface::Sunken,
         false,
         div()
             .flex()
@@ -68,51 +62,38 @@ pub(crate) fn plugins_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>
                 )),
             )
             .child(
-                div()
-                    .id("plugins-install")
-                    .h(px(36.))
-                    .px(px(12.))
-                    .flex_shrink_0()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .gap(px(6.))
-                    .rounded(px(6.))
-                    .border_1()
-                    .border_color(rgb(mix(ACCENT, BORDER_SUBTLE, 0.45)))
-                    .bg(rgb(mix(ACCENT, SURFACE_1, 0.86)))
-                    .text_size(px(14.))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(rgb(ACCENT))
-                    .child(icon("download", 14., ACCENT))
-                    .child("Install"),
+                button_with(
+                    "plugins-install",
+                    "Install",
+                    ButtonSpec::new(ButtonVariant::TintedAccent, ButtonSize::Md)
+                        .padding_x(12.0)
+                        .padding_y(0.0, 0.0)
+                        .font_size(12.0)
+                        .gap(6.0)
+                        .icon("download", 14.0, ACCENT),
+                ),
             ),
     );
 
     let mut rows = div().mt(px(8.)).flex().flex_col().gap(px(8.)).child(install_row);
     if plugins.allow_sideload {
-        rows = rows.child(setting_row_surface(
+        rows = rows.child(setting_row(
             "Import package",
-            "Checks the publisher signature, then unseals and installs the .dfplugin file.",
+            Some("Checks the publisher signature, then unseals and installs the .dfplugin file.".into()),
+            SettingDensity::Compact,
+            true,
+            SettingSurface::Sunken,
             false,
-            false,
-            div()
-                .h(px(36.))
-                .px(px(12.))
-                .flex_shrink_0()
-                .flex()
-                .items_center()
-                .justify_center()
-                .gap(px(6.))
-                .rounded(px(6.))
-                .border_1()
-                .border_color(rgb(BORDER_SUBTLE))
-                .bg(rgb(SURFACE_1))
-                .text_size(px(14.))
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(rgb(TEXT_STRONG))
-                .child(icon("package-plus", 14., TEXT_STRONG))
-                .child("Choose file…"),
+            button_with(
+                "plugins-import",
+                "Choose file…",
+                ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Md)
+                    .padding_x(12.0)
+                    .padding_y(0.0, 0.0)
+                    .font_size(12.0)
+                    .gap(6.0)
+                    .icon("package-plus", 14.0, TEXT_STRONG),
+            ),
         ));
     }
     header = header.child(rows);
@@ -167,7 +148,7 @@ pub(crate) fn plugins_overlay(state: &SettingsState, entity: WeakEntity<DragonFr
     }
     let plugins = &state.plugins;
     let cancel_entity = entity.clone();
-    let toggle_entity = entity;
+    let toggle_entity = entity.clone();
 
     let body = if plugins.allow_sideload {
         div().child(
@@ -198,16 +179,18 @@ pub(crate) fn plugins_overlay(state: &SettingsState, entity: WeakEntity<DragonFr
             )
     };
 
-    Some(dialog_shell(
+    let close_entity = entity;
+    Some(dialog_modal_full(
         512.0, // max-w-lg
-        "shield-alert",
-        (0xf59e0b, mix(0xf59e0b, BORDER_SUBTLE, 0.45), mix(0xf59e0b, SURFACE_1, 0.9)),
         if plugins.allow_sideload {
             "Sideloading is on"
         } else {
             "Allow untrusted plugins?"
         },
         Some("Sideloaded packages".into()),
+        Some("shield-alert"),
+        IconTone::Warning,
+        false,
         body.child(
             div()
                 .mt(px(12.))
@@ -234,44 +217,62 @@ pub(crate) fn plugins_overlay(state: &SettingsState, entity: WeakEntity<DragonFr
             .flex()
             .items_center()
             .gap(px(8.))
-            .child(action_button(
-                "plugins-allowance-cancel",
-                "Cancel",
-                None,
-                16.0,
-                SURFACE_1,
-                BORDER_SUBTLE,
-                TEXT_STRONG,
-                SURFACE_2,
-                move |cx| {
+            .child(
+                button_with(
+                    "plugins-allowance-cancel",
+                    "Cancel",
+                    ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Lg)
+                        .padding_x(16.0)
+                        .padding_y(0.0, 0.0)
+                        .font_size(14.0),
+                )
+                .on_click(move |_, _, cx| {
                     edit_and_notify(&cancel_entity, cx, |draft| {
                         draft.plugins.allowance_dialog_open = false;
                     });
-                },
-            ))
-            .child(action_button(
-                "plugins-allowance-toggle",
-                if plugins.allow_sideload {
-                    "Disable Sideloading"
-                } else {
-                    "Enable Sideloading"
-                },
-                Some("shield-alert"),
-                16.0,
-                if plugins.allow_sideload {
-                    mix(0xef4444, SURFACE_1, 0.86)
-                } else {
-                    mix(0xf59e0b, SURFACE_1, 0.86)
-                },
-                mix(0xf59e0b, BORDER_SUBTLE, 0.45),
-                if plugins.allow_sideload { 0xef4444 } else { 0xf59e0b },
-                mix(0xf59e0b, SURFACE_1, 0.76),
-                move |cx| {
+                }),
+            )
+            .child(
+                button_with(
+                    "plugins-allowance-toggle",
+                    if plugins.allow_sideload {
+                        "Disable Sideloading"
+                    } else {
+                        "Enable Sideloading"
+                    },
+                    ButtonSpec::new(
+                        if plugins.allow_sideload {
+                            ButtonVariant::TintedDanger
+                        } else {
+                            ButtonVariant::TintedWarning
+                        },
+                        ButtonSize::Lg,
+                    )
+                    .padding_x(16.0)
+                    .padding_y(0.0, 0.0)
+                    .font_size(14.0)
+                    .gap(6.0)
+                    .icon(
+                        "shield-alert",
+                        14.0,
+                        if plugins.allow_sideload {
+                            DANGER
+                        } else {
+                            0xf59e0b
+                        },
+                    ),
+                )
+                .on_click(move |_, _, cx| {
                     edit_and_notify(&toggle_entity, cx, |draft| {
                         draft.plugins.allow_sideload = !draft.plugins.allow_sideload;
                         draft.plugins.allowance_dialog_open = false;
                     });
-                },
-            )),
+                }),
+            ),
+        move |_, _, cx| {
+            edit_and_notify(&close_entity, cx, |draft| {
+                draft.plugins.allowance_dialog_open = false;
+            });
+        },
     ))
 }

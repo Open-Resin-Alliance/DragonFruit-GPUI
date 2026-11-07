@@ -11,7 +11,7 @@ use gpui_core::icons::icon;
 use gpui_core::theme::*;
 use gpui_ui::panel_fields::{BLACK, with_alpha};
 
-use super::chrome::{AMBER_500, LEADING_TIGHT, dialog_backdrop, dialog_panel, mix_b};
+use super::chrome::{AMBER_500, LEADING_TIGHT, debug_sheet, mix_b};
 use super::format::{fixed, grouped, grouped_option, num};
 
 // ── SliceMetricsDebugModal ──────────────────────────────────────────────────
@@ -1210,14 +1210,14 @@ pub fn slice_metrics_debug_modal(
         )
         .child(geometry_card);
 
-    dialog_backdrop(0xb8, 0.0).child(
-        dialog_panel(1500.0)
+    debug_sheet(1500.0, 0xb8, 0.0, |panel| {
+        panel
             .id("slice-metrics-panel")
             .relative()
             .max_h(relative(0.92))
             .overflow_y_scroll()
             .child(header)
-            .child(body),
-    )
+            .child(body)
+    })
 }
 

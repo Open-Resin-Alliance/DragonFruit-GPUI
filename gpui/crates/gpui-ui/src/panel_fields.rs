@@ -515,7 +515,7 @@ pub fn accent_sub_card() -> Div {
 pub fn active_mode_style() -> (u32, u32, u32) {
     (
         mix(ACCENT, SURFACE_1, 0.15),
-        mix(ACCENT, BORDER_SUBTLE, 0.30),
+        mix(ACCENT, BORDER_SUBTLE, 0.70),
         TEXT_STRONG,
     )
 }
@@ -525,7 +525,7 @@ pub fn disabled_action_style() -> (u32, u32, u32) {
     (
         mix(SURFACE_1, BLACK, 0.92),
         mix(BORDER_SUBTLE, BLACK, 0.90),
-        mix(TEXT_MUTED, SURFACE_2, 0.18),
+        mix(TEXT_MUTED, SURFACE_2, 0.82),
     )
 }
 

@@ -15,10 +15,12 @@ pub(crate) fn autosave_tab(state: &SettingsState, entity: WeakEntity<DragonFruit
     let cap_minutes = (autosave.cap_ms / 60_000.0).round();
 
     let mut rows = div().mt(px(8.)).flex().flex_col().gap(px(8.));
-    rows = rows.child(setting_row_surface(
+    rows = rows.child(setting_row(
         "Enable scene autosave",
-        "Creates recovery snapshots while editing.",
-        false,
+        Some("Creates recovery snapshots while editing.".into()),
+        SettingDensity::Compact,
+        true,
+        SettingSurface::Sunken,
         false,
         segmented(
             "autosave-enabled",
@@ -32,10 +34,12 @@ pub(crate) fn autosave_tab(state: &SettingsState, entity: WeakEntity<DragonFruit
             },
         ),
     ));
-    rows = rows.child(setting_row_surface(
+    rows = rows.child(setting_row(
         "Autosave idle delay",
-        "Wait this long after edits before autosaving.",
-        false,
+        Some("Wait this long after edits before autosaving.".into()),
+        SettingDensity::Compact,
+        true,
+        SettingSurface::Sunken,
         !autosave.enabled,
         number_with_unit(
             number_input(
@@ -63,10 +67,12 @@ pub(crate) fn autosave_tab(state: &SettingsState, entity: WeakEntity<DragonFruit
             "sec",
         ),
     ));
-    rows = rows.child(setting_row_surface(
+    rows = rows.child(setting_row(
         "Autosave cooldown",
-        "After an autosave, defer further automatic saves until this interval ends.",
-        false,
+        Some("After an autosave, defer further automatic saves until this interval ends.".into()),
+        SettingDensity::Compact,
+        true,
+        SettingSurface::Sunken,
         !autosave.enabled,
         number_with_unit(
             number_input(
@@ -94,10 +100,12 @@ pub(crate) fn autosave_tab(state: &SettingsState, entity: WeakEntity<DragonFruit
             "sec",
         ),
     ));
-    rows = rows.child(setting_row_surface(
+    rows = rows.child(setting_row(
         "Maximum autosave interval",
-        "For continuous edits, save at least this often.",
-        false,
+        Some("For continuous edits, save at least this often.".into()),
+        SettingDensity::Compact,
+        true,
+        SettingSurface::Sunken,
         !autosave.enabled,
         number_with_unit(
             number_input(
@@ -150,20 +158,11 @@ pub(crate) fn autosave_tab(state: &SettingsState, entity: WeakEntity<DragonFruit
                     .flex()
                     .items_start()
                     .gap(px(8.))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .w(px(32.))
-                            .h(px(32.))
-                            .flex_shrink_0()
-                            .rounded(px(6.))
-                            .border_1()
-                            .border_color(rgb(mix(0xd97706, BORDER_SUBTLE, 0.5)))
-                            .bg(rgb(mix(0xd97706, SURFACE_1, 0.15)))
-                            .child(icon("triangle-alert", 16., 0xd97706)),
-                    )
+                    .child(icon_chip_with(
+                        IconChipSize::Md,
+                        IconTone::Warning,
+                        icon("triangle-alert", 16., 0xd97706),
+                    ))
                     .child(
                         div()
                             .flex_1()
@@ -184,8 +183,13 @@ pub(crate) fn autosave_tab(state: &SettingsState, entity: WeakEntity<DragonFruit
                     ),
             )
             .child(
-                setting_row_label_only(
+                setting_row(
                     "Recovery prompt on startup",
+                    None,
+                    SettingDensity::Compact,
+                    true,
+                    SettingSurface::Sunken,
+                    false,
                     segmented(
                         "autosave-recovery-prompt",
                         &["OFF", "ON"],
@@ -236,11 +240,20 @@ pub(crate) fn autosave_tab(state: &SettingsState, entity: WeakEntity<DragonFruit
                                     .child("Desktop-only diagnostics for autosave files and recovery state."),
                             ),
                     )
-                    .child(inert_small_button(
-                        "autosave-refresh",
-                        "Refresh",
-                        "refresh-cw",
-                    )),
+                    .child(
+                        button_with(
+                            "autosave-refresh",
+                            "Refresh",
+                            ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Sm)
+                                .padding_x(10.0)
+                                .padding_y(0.0, 0.0)
+                                .font_size(12.0)
+                                .gap(6.0)
+                                .disabled()
+                                .icon("refresh-cw", 14.0, TEXT_MUTED),
+                        )
+                        .opacity(0.6),
+                    ),
             )
             .child(
                 div()
@@ -256,30 +269,30 @@ pub(crate) fn autosave_tab(state: &SettingsState, entity: WeakEntity<DragonFruit
                     .grid_cols(2)
                     .gap(px(8.))
                     .child(
-                        action_button(
+                        button_with(
                             "autosave-mark-clean",
                             "Mark Recovery Clean",
-                            Some("triangle-alert"),
-                            12.0,
-                            mix(0xef4444, SURFACE_1, 0.86),
-                            mix(0xef4444, BORDER_SUBTLE, 0.45),
-                            0xef4444,
-                            mix(0xef4444, SURFACE_1, 0.76),
-                            |_| {},
+                            ButtonSpec::new(ButtonVariant::TintedDanger, ButtonSize::Lg)
+                                .padding_x(12.0)
+                                .padding_y(0.0, 0.0)
+                                .font_size(14.0)
+                                .gap(6.0)
+                                .disabled()
+                                .icon("triangle-alert", 16.0, DANGER),
                         )
                         .opacity(0.6),
                     )
                     .child(
-                        action_button(
+                        button_with(
                             "autosave-reveal",
                             "Open Autosave Location",
-                            Some("hard-drive"),
-                            12.0,
-                            mix(ACCENT, SURFACE_1, 0.14),
-                            mix(ACCENT, BORDER_SUBTLE, 0.55),
-                            ACCENT,
-                            mix(ACCENT, SURFACE_1, 0.24),
-                            |_| {},
+                            ButtonSpec::new(ButtonVariant::TintedAccent, ButtonSize::Lg)
+                                .padding_x(12.0)
+                                .padding_y(0.0, 0.0)
+                                .font_size(14.0)
+                                .gap(6.0)
+                                .disabled()
+                                .icon("hard-drive", 16.0, ACCENT),
                         )
                         .opacity(0.6),
                     ),

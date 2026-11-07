@@ -16,7 +16,11 @@ pub(crate) fn general_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>
         .child(
             setting_row(
                 "Interface language",
-                "Applied immediately across the app.",
+                Some("Applied immediately across the app.".into()),
+                SettingDensity::Compact,
+                true,
+                SettingSurface::Sunken,
+                false,
                 select_field(
                     "settings-language",
                     &LANGUAGE_OPTIONS,
@@ -56,9 +60,13 @@ pub(crate) fn general_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>
             .unwrap_or("custom")
     };
     let scale_entity = entity.clone();
-    let mut scale_card = inner_card().child(plain_row(
+    let mut scale_card = inner_card().child(setting_row(
         "Interface scale",
-        "Larger percentages magnify the whole UI.",
+        Some("Larger percentages magnify the whole UI.".into()),
+        SettingDensity::Compact,
+        false,
+        SettingSurface::Sunken,
+        false,
         select_field(
             "settings-ui-scale",
             &UI_SCALE_OPTIONS,
@@ -133,7 +141,11 @@ pub(crate) fn general_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>
         .child(
             setting_row(
                 "Toolbar position",
-                "A left column or a bar centred under the app bar.",
+                Some("A left column or a bar centred under the app bar.".into()),
+                SettingDensity::Compact,
+                true,
+                SettingSurface::Sunken,
+                false,
                 select_field(
                     "settings-tool-layout",
                     &TOOL_LAYOUT_OPTIONS,
@@ -174,7 +186,11 @@ pub(crate) fn general_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>
         .child(
             setting_row(
                 "Remember window positions",
-                "Persist dragged panel positions in local storage.",
+                Some("Persist dragged panel positions in local storage.".into()),
+                SettingDensity::Compact,
+                true,
+                SettingSurface::Sunken,
+                false,
                 segmented(
                     "settings-floating-persistence",
                     &["OFF", "ON"],
@@ -192,24 +208,28 @@ pub(crate) fn general_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>
         .child(
             setting_row(
                 "Reset saved window layout",
-                "Forget all stored panel positions and return to seeded layout.",
-                action_button(
+                Some("Forget all stored panel positions and return to seeded layout.".into()),
+                SettingDensity::Compact,
+                true,
+                SettingSurface::Sunken,
+                false,
+                button_with(
                     "settings-reset-layout",
                     "Reset",
-                    Some("rotate-ccw"),
-                    12.0,
-                    SURFACE_1,
-                    BORDER_SUBTLE,
-                    TEXT_STRONG,
-                    SURFACE_2,
-                    move |cx| {
-                        // The saved panel positions live outside this draft; the
-                        // only layout preference it owns is the persistence flag,
-                        // so Reset returns that to its default.
-                        edit(|draft| draft.floating_persistence = true);
-                        reset_entity.update(cx, |_, cx| cx.notify()).ok();
-                    },
-                ),
+                    ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Lg)
+                        .padding_x(12.0)
+                        .padding_y(0.0, 0.0)
+                        .font_size(14.0)
+                        .gap(6.0)
+                        .icon("rotate-ccw", 16.0, TEXT_STRONG),
+                )
+                .on_click(move |_, _, cx| {
+                    // The saved panel positions live outside this draft; the
+                    // only layout preference it owns is the persistence flag,
+                    // so Reset returns that to its default.
+                    edit(|draft| draft.floating_persistence = true);
+                    reset_entity.update(cx, |_, cx| cx.notify()).ok();
+                }),
             )
             .mt(px(8.)),
         ),
@@ -226,7 +246,11 @@ pub(crate) fn general_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>
         .child(
             setting_row(
                 "Show support tooltips",
-                "Shows \"Cannot Place Support\" and \"Stability Warning\" tooltips.",
+                Some("Shows \"Cannot Place Support\" and \"Stability Warning\" tooltips.".into()),
+                SettingDensity::Compact,
+                true,
+                SettingSurface::Sunken,
+                false,
                 segmented(
                     "settings-support-help",
                     &["OFF", "ON"],
@@ -257,7 +281,11 @@ pub(crate) fn general_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>
     .child(
         setting_row(
             "Default Raft Base",
-            "Chooses raft bottom mode for imported supports.",
+            Some("Chooses raft bottom mode for imported supports.".into()),
+            SettingDensity::Compact,
+            true,
+            SettingSurface::Sunken,
+            false,
             select_field(
                 "settings-raft-bottom",
                 &RAFT_OPTIONS,
@@ -291,7 +319,11 @@ pub(crate) fn general_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>
         import_section = import_section.child(
             setting_row(
                 "Default Raft Wall",
-                "Enable perimeter wall for imported solid rafts.",
+                Some("Enable perimeter wall for imported solid rafts.".into()),
+                SettingDensity::Compact,
+                true,
+                SettingSurface::Sunken,
+                false,
                 segmented(
                     "settings-raft-wall",
                     &["OFF", "ON"],
@@ -311,7 +343,11 @@ pub(crate) fn general_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>
         import_section = import_section.child(
             setting_row(
                 "Roots Enabled on Import",
-                "OFF makes imported root diameter match trunk diameter.",
+                Some("OFF makes imported root diameter match trunk diameter.".into()),
+                SettingDensity::Compact,
+                true,
+                SettingSurface::Sunken,
+                false,
                 segmented(
                     "settings-roots",
                     &["OFF", "ON"],
@@ -331,7 +367,11 @@ pub(crate) fn general_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>
         .child(
             setting_row(
                 "Auto-Repair",
-                "Automatically runs native mesh auto-repair for standard mesh imports.",
+                Some("Automatically runs native mesh auto-repair for standard mesh imports.".into()),
+                SettingDensity::Compact,
+                true,
+                SettingSurface::Sunken,
+                false,
                 segmented(
                     "settings-auto-repair",
                     &["OFF", "ON"],
@@ -349,7 +389,11 @@ pub(crate) fn general_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>
         .child(
             setting_row(
                 "Auto-Repair Scenes",
-                "Automatically runs native mesh auto-repair for scene-file imports.",
+                Some("Automatically runs native mesh auto-repair for scene-file imports.".into()),
+                SettingDensity::Compact,
+                true,
+                SettingSurface::Sunken,
+                false,
                 segmented(
                     "settings-auto-repair-scenes",
                     &["OFF", "ON"],

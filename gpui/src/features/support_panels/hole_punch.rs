@@ -3,13 +3,12 @@ use gpui::{FontWeight, IntoElement, WeakEntity, div, prelude::*, px, rgb, rgba};
 use gpui_core::icons::icon;
 use gpui_core::support_state::*;
 use gpui_core::theme::*;
-use gpui_ui::panel_fields::{BLACK, WHITE, with_alpha};
-use gpui_ui::ui::spinner_colored;
+use gpui_ui::panel_fields::{WHITE, format_number, with_alpha};
+use gpui_ui::ui::{self, ButtonSize, ButtonSpec, ButtonVariant, spinner_colored};
 
 use super::shared::{
-    ROUNDED_BARE, accent_card, accent_secondary_action_bg, accent_secondary_action_border,
-    clamp_float, flat_button, labeled_section_card, mode_pill, notify, panel_body, scroll_field,
-    section_card, ui_meta,
+    ROUNDED_BARE, accent_secondary_action_border, clamp_float, labeled_section_card, mode_pill,
+    notify, panel_body, ui_meta,
 };
 use crate::DragonFruit;
 
@@ -44,18 +43,11 @@ pub fn hole_punch_body(
     let body_opacity = if disabled { 0.45 } else { 1.0 };
 
     // Interior View Mode card: the accent-secondary fill.
-    let interior_card = div()
-        .rounded(px(ROUNDED_MD))
-        .border_1()
+    let interior_card = ui::sub_card_with(Some((ACCENT_SECONDARY, 0.08)), 8.0)
         .border_color(rgb(accent_secondary_action_border()))
-        .bg(rgb(accent_secondary_action_bg()))
-        .p(px(8.0))
         .min_h(px(72.0))
-        .flex()
-        .flex_col()
         .items_center()
         .justify_center()
-        .gap(px(6.0))
         .text_center()
         .child(
             div()
@@ -108,10 +100,7 @@ pub fn hole_punch_body(
     let auto_entity = entity.clone();
     let manual_state = state.clone();
     let manual_entity = entity.clone();
-    let depth_card = accent_card()
-        .flex()
-        .flex_col()
-        .gap(px(6.0))
+    let depth_card = ui::sub_card_with(Some((ACCENT, 0.05)), 8.0)
         .child(ui_meta("Depth Mode"))
         .child(
             div()
@@ -140,24 +129,31 @@ pub fn hole_punch_body(
         );
 
     // Punch Depth: `clampFloat(value, 1, 120, 1)`.
-    let depth_field_card = labeled_section_card("Punch Depth")
-        .child(scroll_field(
-            "hole-punch-depth",
-            depth_mm,
-            Some("mm"),
-            0.5,
-            1.0,
-            120.0,
-            disabled || is_applying,
-            {
-                let state = state.clone();
-                let entity = entity.clone();
-                move |next, _, cx| {
-                    state.model_mut().depth_mm = clamp_float(next, 1.0, 120.0, 1);
-                    notify(&entity, cx);
-                }
-            },
-        ));
+    let depth_disabled = disabled || is_applying;
+    let depth_value = depth_mm;
+    let depth_state = state.clone();
+    let depth_entity = entity.clone();
+    let depth_state_down = state.clone();
+    let depth_entity_down = entity.clone();
+    let depth_field_card = labeled_section_card("Punch Depth").child(ui::scrollable_number_field(
+        "hole-punch-depth",
+        format_number(depth_mm),
+        Some("mm"),
+        false,
+        depth_disabled,
+        depth_value < 120.0,
+        depth_value > 1.0,
+        move |_, _, cx| {
+            depth_state.model_mut().depth_mm =
+                clamp_float((depth_value - 0.5).max(1.0), 1.0, 120.0, 1);
+            notify(&depth_entity, cx);
+        },
+        move |_, _, cx| {
+            depth_state_down.model_mut().depth_mm =
+                clamp_float((depth_value + 0.5).min(120.0), 1.0, 120.0, 1);
+            notify(&depth_entity_down, cx);
+        },
+    ));
 
     // Hole Diameter: the link toggle, then the X and Y diameters.
     let link_state = state.clone();
@@ -196,11 +192,16 @@ pub fn hole_punch_body(
 
     let x_state = state.clone();
     let x_entity = entity.clone();
+    let x_state_down = state.clone();
+    let x_entity_down = entity.clone();
     let y_state = state.clone();
     let y_entity = entity.clone();
-    let diameter_card = section_card()
-        .flex()
-        .flex_col()
+    let y_state_down = state.clone();
+    let y_entity_down = entity.clone();
+    let diameter_disabled = disabled || is_applying;
+    let diameter_x = radius_mm * 2.0;
+    let diameter_y = effective_radius_y_mm * 2.0;
+    let diameter_card = ui::sub_card()
         .gap(px(8.0))
         .child(
             div()
@@ -215,16 +216,17 @@ pub fn hole_punch_body(
                 )
                 .child(link_toggle),
         )
-        .child(scroll_field(
+        .child(ui::scrollable_number_field(
             "hole-punch-diameter-x",
-            radius_mm * 2.0,
+            format_number(diameter_x),
             Some("mm"),
-            0.1,
-            0.4,
-            40.0,
-            disabled || is_applying,
-            move |next, _, cx| {
-                let next_radius = clamp_float(next * 0.5, 0.2, 20.0, 2);
+            false,
+            diameter_disabled,
+            diameter_x < 40.0,
+            diameter_x > 0.4,
+            move |_, _, cx| {
+                let next_radius =
+                    clamp_float((diameter_x - 0.1).max(0.4) * 0.5, 0.2, 20.0, 2);
                 let mut model = x_state.model_mut();
                 model.radius_mm = next_radius;
                 if model.linked {
@@ -233,18 +235,35 @@ pub fn hole_punch_body(
                 drop(model);
                 notify(&x_entity, cx);
             },
+            move |_, _, cx| {
+                let next_radius =
+                    clamp_float((diameter_x + 0.1).min(40.0) * 0.5, 0.2, 20.0, 2);
+                let mut model = x_state_down.model_mut();
+                model.radius_mm = next_radius;
+                if model.linked {
+                    model.radius_y_mm = None;
+                }
+                drop(model);
+                notify(&x_entity_down, cx);
+            },
         ))
-        .child(scroll_field(
+        .child(ui::scrollable_number_field(
             "hole-punch-diameter-y",
-            effective_radius_y_mm * 2.0,
+            format_number(diameter_y),
             Some("mm"),
-            0.1,
-            0.4,
-            40.0,
-            disabled || is_applying || linked,
-            move |next, _, cx| {
-                y_state.model_mut().radius_y_mm = Some(clamp_float(next * 0.5, 0.2, 20.0, 2));
+            false,
+            diameter_disabled || linked,
+            diameter_y < 40.0,
+            diameter_y > 0.4,
+            move |_, _, cx| {
+                y_state.model_mut().radius_y_mm =
+                    Some(clamp_float((diameter_y - 0.1).max(0.4) * 0.5, 0.2, 20.0, 2));
                 notify(&y_entity, cx);
+            },
+            move |_, _, cx| {
+                y_state_down.model_mut().radius_y_mm =
+                    Some(clamp_float((diameter_y + 0.1).min(40.0) * 0.5, 0.2, 20.0, 2));
+                notify(&y_entity_down, cx);
             },
         ));
 
@@ -253,48 +272,50 @@ pub fn hole_punch_body(
     let reset_entity = entity.clone();
     let apply_state = state.clone();
     let apply_entity = entity.clone();
+    let reset_enabled = !(disabled || is_applying || !can_reset);
+    let apply_enabled = !(disabled || is_applying || !can_apply);
+    let mut reset_spec = ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Sm).full();
+    if !reset_enabled {
+        reset_spec = reset_spec.disabled();
+    }
+    let mut apply_spec = ButtonSpec::new(ButtonVariant::Accent, ButtonSize::Sm).full();
+    if !apply_enabled {
+        apply_spec = apply_spec.disabled();
+    }
+    let mut reset = ui::button_with("hole-punch-reset", "Reset", &reset_spec);
+    if reset_enabled {
+        reset = reset.on_click(move |_, _, cx| {
+            *reset_state.model_mut() = HolePunchModel::default();
+            notify(&reset_entity, cx);
+        });
+    }
+    let mut apply = ui::button_with_content(
+        "hole-punch-apply",
+        &apply_spec,
+        div()
+            .flex()
+            .items_center()
+            .justify_center()
+            .gap(px(6.0))
+            .when(is_applying, |this| {
+                this.child(spinner_colored(12.0, ACCENT_SECONDARY_CONTRAST))
+            })
+            .child(if is_applying { "Applying…" } else { "Apply" }),
+    );
+    if apply_enabled {
+        apply = apply.on_click(move |_, _, cx| {
+            // PORT GAP: no punching engine — the flag is the port.
+            let mut model = apply_state.model_mut();
+            model.is_applying = false;
+            drop(model);
+            notify(&apply_entity, cx);
+        });
+    }
     let actions = div()
         .flex()
         .gap(px(8.0))
-        .child(div().flex_1().child(flat_button(
-            "hole-punch-reset",
-            "Reset",
-            32.0,
-            SURFACE_1,
-            BORDER_SUBTLE,
-            TEXT_STRONG,
-            Some(SURFACE_2),
-            !(disabled || is_applying || !can_reset),
-            move |_, _, cx| {
-                *reset_state.model_mut() = HolePunchModel::default();
-                notify(&reset_entity, cx);
-            },
-        )))
-        .child(div().flex_1().child(flat_button(
-            "hole-punch-apply",
-            div()
-                .flex()
-                .items_center()
-                .justify_center()
-                .gap(px(6.0))
-                .when(is_applying, |this| {
-                    this.child(spinner_colored(12.0, ACCENT_SECONDARY_CONTRAST))
-                })
-                .child(if is_applying { "Applying…" } else { "Apply" }),
-            32.0,
-            SECONDARY_BUTTON_SURFACE,
-            mix(SECONDARY_BUTTON_SURFACE, WHITE, 0.86),
-            ACCENT_SECONDARY_CONTRAST,
-            Some(mix(SECONDARY_BUTTON_SURFACE, BLACK, 0.91)),
-            !(disabled || is_applying || !can_apply),
-            move |_, _, cx| {
-                // PORT GAP: no punching engine — the flag is the port.
-                let mut model = apply_state.model_mut();
-                model.is_applying = false;
-                drop(model);
-                notify(&apply_entity, cx);
-            },
-        )));
+        .child(div().flex_1().child(reset))
+        .child(div().flex_1().child(apply));
 
     // `px-2 pb-2 space-y-2 sm:px-2.5 sm:pb-2.5`.
     panel_body()

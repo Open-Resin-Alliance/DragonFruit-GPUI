@@ -93,10 +93,6 @@ const PAD_Y_1: f32 = 4.0;
 const STACK_INSET: f32 = 24.0;
 /// Tailwind's `w-[22rem]`.
 const CARD_WIDTH: f32 = 352.0;
-/// Tailwind's `rounded-xl`.
-const ROUNDED_XL: f32 = 12.0;
-/// Tailwind's `rounded-md`.
-const ROUNDED_MD: f32 = 6.0;
 /// Tailwind's `h-8 w-8`.
 const ICON_BOX: f32 = 32.0;
 /// Tailwind's `h-4 w-4`.
@@ -111,10 +107,6 @@ const TEXT_11: f32 = 11.0;
 const TEXT_XS_LINE: f32 = 16.0;
 /// `.ui-button`'s `!h-9`.
 const ACTION_HEIGHT: f32 = 36.0;
-/// `.ui-button`'s `padding: 5px 11px 7px 11px`.
-const BUTTON_PAD_X: f32 = 11.0;
-const BUTTON_PAD_TOP: f32 = 5.0;
-const BUTTON_PAD_BOTTOM: f32 = 7.0;
 
 /// `#000000` — the base of each `color-mix(..., black N%)` in `.ui-button*`.
 const BLACK: u32 = 0x000000;
@@ -615,61 +607,42 @@ fn action_button(
     action: &SystemNotificationAction,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
-    let (background, border, text, hover) = match action.variant {
-        SystemActionVariant::Secondary => (SURFACE_1, BORDER_SUBTLE, TEXT_STRONG, SURFACE_2),
-        SystemActionVariant::Accent => (
-            mix(ACCENT, SURFACE_1, 0.14),
-            mix(ACCENT, BORDER_SUBTLE, 0.55),
-            ACCENT,
-            mix(ACCENT, SURFACE_1, 0.24),
-        ),
-        SystemActionVariant::Danger => (
-            mix(DANGER, SURFACE_1, 0.14),
-            mix(DANGER, BORDER_SUBTLE, 0.55),
-            DANGER,
-            mix(DANGER, SURFACE_1, 0.24),
-        ),
-        // `styleMap['accent-secondary']` overrides the tinted-accent fill; the
-        // inline `background` also wins over the variant's `:hover`.
-        SystemActionVariant::AccentSecondary => (
-            mix(ACCENT_SECONDARY, SURFACE_1, 0.14),
-            mix(ACCENT_SECONDARY, BORDER_SUBTLE, 0.45),
-            ACCENT_SECONDARY,
-            mix(ACCENT_SECONDARY, SURFACE_1, 0.14),
-        ),
+    // The variant already carries `TintedAccent`/`TintedDanger`; only
+    // `accent-secondary` has to restate its inline fill, border, text and the
+    // hover fill that inline `background` pins in the source.
+    let (variant, text, accent_secondary) = match action.variant {
+        SystemActionVariant::Secondary => (ui::ButtonVariant::Secondary, TEXT_STRONG, None),
+        SystemActionVariant::Accent => (ui::ButtonVariant::TintedAccent, ACCENT, None),
+        SystemActionVariant::Danger => (ui::ButtonVariant::TintedDanger, DANGER, None),
+        SystemActionVariant::AccentSecondary => {
+            let background = mix(ACCENT_SECONDARY, SURFACE_1, 0.14);
+            (
+                ui::ButtonVariant::TintedAccent,
+                ACCENT_SECONDARY,
+                Some((
+                    background,
+                    mix(ACCENT_SECONDARY, BORDER_SUBTLE, 0.45),
+                )),
+            )
+        }
     };
-    let mut content = div()
-        .flex()
-        .items_center()
-        .justify_center()
-        .gap(px(GAP_1_5));
-    if let Some(icon_name) = action.icon {
-        content = content.child(icon(icon_name, ICON_SIZE, text));
-    }
-    content = content.child(action.label.clone());
 
-    div()
-        .id(id)
-        .flex_1()
-        .h(px(ACTION_HEIGHT))
-        .px(px(BUTTON_PAD_X))
-        .pt(px(BUTTON_PAD_TOP))
-        .pb(px(BUTTON_PAD_BOTTOM))
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded(px(RADIUS_SM))
-        .border_1()
-        .border_color(rgb(border))
-        .bg(rgb(background))
-        .text_size(px(FONT_MD))
-        .font_weight(FontWeight::SEMIBOLD)
-        .line_height(px(FONT_MD))
-        .text_color(rgb(text))
-        .cursor_pointer()
-        .hover(move |style| style.bg(rgb(hover)))
-        .child(content)
-        .on_click(on_click)
+    let mut spec = ui::ButtonSpec::new(variant, ui::ButtonSize::Md).gap(GAP_1_5);
+    if let Some((background, _)) = accent_secondary {
+        spec.hover = Some(background);
+    }
+    if let Some(icon_name) = action.icon {
+        spec = spec.icon(icon_name, ICON_SIZE, text);
+    }
+
+    let mut el = ui::button_with_content(id, &spec, action.label.clone()).flex_1();
+    if let Some((background, border)) = accent_secondary {
+        el = el
+            .bg(rgb(background))
+            .border_color(rgb(border))
+            .text_color(rgb(text));
+    }
+    el.on_click(on_click)
 }
 
 /// One card of `SystemNotificationStack`.

@@ -7,12 +7,9 @@ use gpui_core::icons::icon;
 use gpui_core::support_state::*;
 use gpui_core::theme::*;
 use gpui_ui::panel_fields::{BLACK, WHITE, format_number, with_alpha};
-use gpui_ui::ui::{ButtonSize, ButtonVariant, button};
+use gpui_ui::ui::{self, ButtonSize, ButtonSpec, ButtonVariant, CheckboxLabel};
 
-use super::shared::{
-    GREEN_400, GREEN_500, ORANGE_400, ORANGE_500, ROUNDED_BARE, checkbox, flat_button, notify,
-    ui_meta,
-};
+use super::shared::{GREEN_400, GREEN_500, ORANGE_400, ORANGE_500, ROUNDED_BARE, notify, ui_meta};
 use crate::DragonFruit;
 
 // ---------------------------------------------------------------------------
@@ -40,8 +37,14 @@ pub fn island_list_body(
     // !py-0 text-[12px]` with an `sm` IconChip and a chevron.
     let hierarchy_state = state.clone();
     let hierarchy_entity = entity.clone();
-    let hierarchy = flat_button(
+    // `!h-9 !px-2.5 !py-0` — the source's `!` utilities do outrank the
+    // unlayered `.ui-button` padding.
+    let hierarchy_spec = ButtonSpec::new(ButtonVariant::Accent, ButtonSize::Md)
+        .padding_x(10.0)
+        .padding_y(0.0, 0.0);
+    let hierarchy = ui::button_with_content(
         "island-list-hierarchy",
+        &hierarchy_spec,
         div()
             .flex()
             .items_center()
@@ -70,18 +73,11 @@ pub fn island_list_body(
                 14.0,
                 mix(ACCENT_SECONDARY_CONTRAST, WHITE, 0.82),
             )),
-        36.0,
-        SECONDARY_BUTTON_SURFACE,
-        mix(SECONDARY_BUTTON_SURFACE, WHITE, 0.86),
-        ACCENT_SECONDARY_CONTRAST,
-        Some(mix(SECONDARY_BUTTON_SURFACE, BLACK, 0.91)),
-        true,
-        move |_, _, cx| {
-            hierarchy_state.model_mut().show_hierarchy = true;
-            notify(&hierarchy_entity, cx);
-        },
     )
-    .px(px(10.0));
+    .on_click(move |_, _, cx| {
+        hierarchy_state.model_mut().show_hierarchy = true;
+        notify(&hierarchy_entity, cx);
+    });
 
     // Summary stats: `grid grid-cols-2 gap-1.5`, each `rounded p-1` on surface-1.
     let stat = |label: &'static str, value: usize| {
@@ -106,13 +102,12 @@ pub fn island_list_body(
         .child(stat("Active", active));
 
     // Show child islands.
-    let merged_toggle = checkbox(
+    let merged_toggle = ui::checkbox(
         "island-list-show-merged",
         "Show child islands",
         show_merged,
         false,
-        15.0,
-        true,
+        CheckboxLabel::Meta,
         {
             let state = state.clone();
             let entity = entity.clone();
@@ -147,25 +142,22 @@ pub fn island_list_body(
         let state = state.clone();
         let entity = entity.clone();
         let active = sort_by == sort;
-        div().flex_1().child(
-            button(
-                id,
-                label,
-                if active {
-                    ButtonVariant::Primary
-                } else {
-                    ButtonVariant::Secondary
-                },
-                ButtonSize::Auto,
-            )
-            .h(px(32.0))
-            .px(px(8.0))
-            .w_full()
-            .on_click(move |_, _, cx| {
+        let spec = ButtonSpec::new(
+            if active {
+                ButtonVariant::Primary
+            } else {
+                ButtonVariant::Secondary
+            },
+            ButtonSize::Sm,
+        )
+        .full()
+        .padding_x(8.0);
+        div().flex_1().child(ui::button_with(id, label, &spec).on_click(
+            move |_, _, cx| {
                 state.model_mut().sort_by = Some(sort);
                 notify(&entity, cx);
-            }),
-        )
+            },
+        ))
     };
     let sort_row = div()
         .flex()
@@ -216,15 +208,13 @@ pub fn island_list_body(
     let clear_state = state.clone();
     let clear_entity = entity.clone();
     let clear = div().child(
-        button(
+        ui::button_with(
             "island-list-clear",
             "Clear Selection",
-            ButtonVariant::Secondary,
-            ButtonSize::Auto,
+            &ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Sm)
+                .full()
+                .padding_x(10.0),
         )
-        .h(px(32.0))
-        .px(px(10.0))
-        .w_full()
         .on_click(move |_, _, cx| {
             clear_state.model_mut().selected_id = None;
             notify(&clear_entity, cx);

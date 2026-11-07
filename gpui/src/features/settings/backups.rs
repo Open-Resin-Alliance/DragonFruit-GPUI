@@ -76,29 +76,35 @@ pub(crate) fn backups_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>
                     .grid()
                     .grid_cols(2)
                     .gap(px(8.))
-                    .child(action_button(
-                        "backups-choose-directory",
-                        "Choose Folder",
-                        Some("folder-open"),
-                        12.0,
-                        mix(ACCENT, SURFACE_1, 0.14),
-                        mix(ACCENT, BORDER_SUBTLE, 0.55),
-                        ACCENT,
-                        mix(ACCENT, SURFACE_1, 0.24),
-                        |_| {},
-                    ))
                     .child(
-                        action_button(
+                        button_with(
+                            "backups-choose-directory",
+                            "Choose Folder",
+                            ButtonSpec::new(ButtonVariant::TintedAccent, ButtonSize::Lg)
+                                .padding_x(12.0)
+                                .padding_y(0.0, 0.0)
+                                .font_size(14.0)
+                                .gap(6.0)
+                                .icon("folder-open", 16.0, ACCENT),
+                        )
+                        .on_click(|_, _, _| {}),
+                    )
+                    .child(
+                        button_with(
                             "backups-open-directory",
                             "Open Folder",
-                            Some("folder-open"),
-                            12.0,
-                            mix(ACCENT_SECONDARY, SURFACE_1, 0.86),
-                            mix(ACCENT_SECONDARY, BORDER_SUBTLE, 0.45),
-                            ACCENT_SECONDARY,
-                            mix(ACCENT_SECONDARY, SURFACE_1, 0.76),
-                            |_| {},
+                            ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Lg)
+                                .padding_x(12.0)
+                                .padding_y(0.0, 0.0)
+                                .font_size(14.0)
+                                .gap(6.0)
+                                .hover(mix(ACCENT_SECONDARY, SURFACE_1, 0.24))
+                                .icon("folder-open", 16.0, ACCENT_SECONDARY),
                         )
+                        .border_color(rgb(mix(ACCENT_SECONDARY, BORDER_SUBTLE, 0.55)))
+                        .bg(rgb(mix(ACCENT_SECONDARY, SURFACE_1, 0.14)))
+                        .text_color(rgb(ACCENT_SECONDARY))
+                        .on_click(|_, _, _| {})
                         .when(!has_selected, |this| this.opacity(0.6)),
                     ),
             ),
@@ -154,31 +160,31 @@ pub(crate) fn backups_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>
             .grid_cols(2)
             .gap(px(8.))
             .child(
-                action_button(
+                button_with(
                     "backups-now",
                     "Backup Now",
-                    Some("cloud-upload"),
-                    12.0,
-                    mix(ACCENT, SURFACE_1, 0.14),
-                    mix(ACCENT, BORDER_SUBTLE, 0.55),
-                    ACCENT,
-                    mix(ACCENT, SURFACE_1, 0.24),
-                    |_| {},
+                    ButtonSpec::new(ButtonVariant::TintedAccent, ButtonSize::Lg)
+                        .padding_x(12.0)
+                        .padding_y(0.0, 0.0)
+                        .font_size(14.0)
+                        .gap(6.0)
+                        .icon("cloud-upload", 16.0, ACCENT),
                 )
+                .on_click(|_, _, _| {})
                 .when(!has_selected, |this| this.opacity(0.6)),
             )
             .child(
-                action_button(
+                button_with(
                     "backups-refresh-history",
                     "Refresh History",
-                    Some("refresh-ccw"),
-                    12.0,
-                    SURFACE_1,
-                    BORDER_SUBTLE,
-                    TEXT_STRONG,
-                    SURFACE_2,
-                    |_| {},
+                    ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Lg)
+                        .padding_x(12.0)
+                        .padding_y(0.0, 0.0)
+                        .font_size(14.0)
+                        .gap(6.0)
+                        .icon("refresh-ccw", 16.0, TEXT_STRONG),
                 )
+                .on_click(|_, _, _| {})
                 .when(!has_selected, |this| this.opacity(0.6)),
             ),
     );
@@ -192,10 +198,12 @@ pub(crate) fn backups_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>
             .flex()
             .flex_col()
             .gap(px(8.))
-            .child(setting_row_surface(
+            .child(setting_row(
                 "Enable automatic backups",
-                "Automatically write snapshots to local disk on an interval.",
+                Some("Automatically write snapshots to local disk on an interval.".into()),
+                SettingDensity::Compact,
                 true,
+                SettingSurface::Raised,
                 false,
                 segmented(
                     "backups-auto",
@@ -209,10 +217,12 @@ pub(crate) fn backups_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>
                     },
                 ),
             ))
-            .child(setting_row_surface(
+            .child(setting_row(
                 "Sync interval",
-                "Minutes between automatic local backups.",
+                Some("Minutes between automatic local backups.".into()),
+                SettingDensity::Compact,
                 true,
+                SettingSurface::Raised,
                 !backups.auto_sync_enabled,
                 number_with_unit(
                     number_input(
@@ -267,11 +277,20 @@ pub(crate) fn backups_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>
                             .child("View, restore, or delete older snapshots from disk."),
                     ),
             )
-            .child(inert_small_button(
-                "backups-manage-refresh",
-                "Refresh",
-                "refresh-ccw",
-            )),
+            .child(
+                button_with(
+                    "backups-manage-refresh",
+                    "Refresh",
+                    ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Sm)
+                        .padding_x(10.0)
+                        .padding_y(0.0, 0.0)
+                        .font_size(12.0)
+                        .gap(6.0)
+                        .disabled()
+                        .icon("refresh-ccw", 14.0, TEXT_MUTED),
+                )
+                .opacity(0.6),
+            ),
     );
     manage = manage.child(
         div().mt(px(8.)).max_h(px(256.)).overflow_hidden().child(
@@ -305,17 +324,15 @@ pub(crate) fn backups_overlay(state: &SettingsState, entity: WeakEntity<DragonFr
 
     if let Some(id) = backups.confirm_delete_id.clone() {
         let cancel_entity = entity.clone();
-        let confirm_entity = entity;
-        return Some(dialog_shell(
+        let confirm_entity = entity.clone();
+        let close_entity = entity;
+        return Some(dialog_modal_full(
             448.0, // max-w-md
-            "trash-2",
-            (
-                0xef4444,
-                mix(0xef4444, BORDER_SUBTLE, 0.45),
-                mix(0xef4444, SURFACE_1, 0.12),
-            ),
             "Delete Backup Snapshot",
             Some("This action cannot be undone.".into()),
+            Some("trash-2"),
+            IconTone::Danger,
+            false,
             div().child(
                 div()
                     .text_size(px(12.))
@@ -329,52 +346,57 @@ pub(crate) fn backups_overlay(state: &SettingsState, entity: WeakEntity<DragonFr
                 .flex()
                 .items_center()
                 .gap(px(8.))
-                .child(action_button(
-                    "backups-delete-cancel",
-                    "Cancel",
-                    None,
-                    16.0,
-                    SURFACE_1,
-                    BORDER_SUBTLE,
-                    TEXT_STRONG,
-                    SURFACE_2,
-                    move |cx| {
+                .child(
+                    button_with(
+                        "backups-delete-cancel",
+                        "Cancel",
+                        ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Lg)
+                            .padding_x(16.0)
+                            .padding_y(0.0, 0.0)
+                            .font_size(14.0),
+                    )
+                    .on_click(move |_, _, cx| {
                         edit_and_notify(&cancel_entity, cx, |draft| {
                             draft.backups.confirm_delete_id = None;
                         });
-                    },
-                ))
-                .child(action_button(
-                    "backups-delete-confirm",
-                    "Delete",
-                    Some("trash-2"),
-                    16.0,
-                    mix(0xef4444, SURFACE_1, 0.86),
-                    mix(0xef4444, BORDER_SUBTLE, 0.45),
-                    0xef4444,
-                    mix(0xef4444, SURFACE_1, 0.76),
-                    move |cx| {
+                    }),
+                )
+                .child(
+                    button_with(
+                        "backups-delete-confirm",
+                        "Delete",
+                        ButtonSpec::new(ButtonVariant::TintedDanger, ButtonSize::Lg)
+                            .padding_x(16.0)
+                            .padding_y(0.0, 0.0)
+                            .font_size(14.0)
+                            .gap(6.0)
+                            .icon("trash-2", 16.0, DANGER),
+                    )
+                    .on_click(move |_, _, cx| {
                         edit_and_notify(&confirm_entity, cx, |draft| {
                             draft.backups.confirm_delete_id = None;
                         });
-                    },
-                )),
+                    }),
+                ),
+            move |_, _, cx| {
+                edit_and_notify(&close_entity, cx, |draft| {
+                    draft.backups.confirm_delete_id = None;
+                });
+            },
         ));
     }
 
     if let Some(id) = backups.confirm_restore_id.clone() {
         let cancel_entity = entity.clone();
-        let confirm_entity = entity;
-        return Some(dialog_shell(
+        let confirm_entity = entity.clone();
+        let close_entity = entity;
+        return Some(dialog_modal_full(
             448.0,
-            "triangle-alert",
-            (
-                0xf59e0b,
-                mix(0xf59e0b, BORDER_SUBTLE, 0.45),
-                mix(0xf59e0b, SURFACE_1, 0.9),
-            ),
             "Restore Snapshot",
             Some(format!("Snapshot from {id}").into()),
+            Some("triangle-alert"),
+            IconTone::Warning,
+            false,
             div().child(
                 div()
                     .text_size(px(12.))
@@ -386,36 +408,48 @@ pub(crate) fn backups_overlay(state: &SettingsState, entity: WeakEntity<DragonFr
                 .flex()
                 .items_center()
                 .gap(px(8.))
-                .child(action_button(
-                    "backups-restore-cancel",
-                    "Cancel",
-                    None,
-                    16.0,
-                    SURFACE_1,
-                    BORDER_SUBTLE,
-                    TEXT_STRONG,
-                    SURFACE_2,
-                    move |cx| {
+                .child(
+                    button_with(
+                        "backups-restore-cancel",
+                        "Cancel",
+                        ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Lg)
+                            .padding_x(16.0)
+                            .padding_y(0.0, 0.0)
+                            .font_size(14.0),
+                    )
+                    .on_click(move |_, _, cx| {
                         edit_and_notify(&cancel_entity, cx, |draft| {
                             draft.backups.confirm_restore_id = None;
                         });
-                    },
-                ))
-                .child(action_button(
-                    "backups-restore-confirm",
-                    "Yes, restore",
-                    Some("archive-restore"),
-                    16.0,
-                    mix(ACCENT_SECONDARY, SURFACE_1, 0.86),
-                    mix(ACCENT_SECONDARY, BORDER_SUBTLE, 0.45),
-                    ACCENT_SECONDARY,
-                    mix(ACCENT_SECONDARY, SURFACE_1, 0.76),
-                    move |cx| {
+                    }),
+                )
+                .child(
+                    button_with(
+                        "backups-restore-confirm",
+                        "Yes, restore",
+                        ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Lg)
+                            .padding_x(16.0)
+                            .padding_y(0.0, 0.0)
+                            .font_size(14.0)
+                            .gap(6.0)
+                            .hover(mix(ACCENT_SECONDARY, SURFACE_1, 0.24))
+                            .icon("archive-restore", 16.0, ACCENT_SECONDARY),
+                    )
+                    // `accentSecondaryActionStyle92`: accent-secondary over surface-1.
+                    .border_color(rgb(mix(ACCENT_SECONDARY, BORDER_SUBTLE, 0.58)))
+                    .bg(rgb(mix(ACCENT_SECONDARY, SURFACE_1, 0.08)))
+                    .text_color(rgb(ACCENT_SECONDARY))
+                    .on_click(move |_, _, cx| {
                         edit_and_notify(&confirm_entity, cx, |draft| {
                             draft.backups.confirm_restore_id = None;
                         });
-                    },
-                )),
+                    }),
+                ),
+            move |_, _, cx| {
+                edit_and_notify(&close_entity, cx, |draft| {
+                    draft.backups.confirm_restore_id = None;
+                });
+            },
         ));
     }
 

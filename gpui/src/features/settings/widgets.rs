@@ -233,7 +233,7 @@ pub(crate) fn message_strip(kind: Option<bool>, text: &str) -> Div {
         _ => (mix(0x22c55e, BORDER_SUBTLE, 0.4), 0x86efac),
     };
     div()
-        .rounded(px(6.))
+        .rounded(px(ROUNDED_MD))
         .border_1()
         .border_color(rgb(border))
         .bg(rgb(SURFACE_1))
@@ -247,7 +247,7 @@ pub(crate) fn message_strip(kind: Option<bool>, text: &str) -> Div {
 /// `rounded-md border px-2.5 py-2` fact tile on `--surface-0`.
 pub(crate) fn stat_card(label: &str, value: impl Into<SharedString>) -> Div {
     div()
-        .rounded(px(6.))
+        .rounded(px(ROUNDED_MD))
         .border_1()
         .border_color(rgb(BORDER_SUBTLE))
         .bg(rgb(SURFACE_0))
@@ -313,7 +313,7 @@ pub(crate) fn text_field(
 /// `rounded-md border px-3 py-2` callout with a leading icon.
 pub(crate) fn callout(border: u32, background: u32, icon_slug: &'static str, icon_color: u32, text: &str) -> Div {
     div()
-        .rounded(px(6.))
+        .rounded(px(ROUNDED_MD))
         .border_1()
         .border_color(rgb(border))
         .bg(rgb(background))
@@ -333,60 +333,11 @@ pub(crate) fn callout(border: u32, background: u32, icon_slug: &'static str, ico
         )
 }
 
-/// `SettingRow` with the `surface` / `disabled` props the source uses.
-///
-/// `raised` is `--surface-1` (a row inside a `--surface-0` panel), the default
-/// `sunken` is `--surface-0`; `disabled` dims the row to `opacity: 0.68`.
-pub(crate) fn setting_row_surface(
-    label: impl Into<SharedString>,
-    description: impl Into<SharedString>,
-    raised: bool,
-    disabled: bool,
-    controls: Div,
-) -> Div {
-    let row = div()
-        .flex()
-        .items_center()
-        .justify_between()
-        .gap(px(12.))
-        .rounded(px(6.))
-        .border_1()
-        .border_color(rgb(BORDER_SUBTLE))
-        .bg(rgb(if raised { SURFACE_1 } else { SURFACE_0 }))
-        .p(px(6.))
-        .child(
-            div()
-                .min_w(px(0.))
-                .pl(px(4.))
-                .child(
-                    div()
-                        .text_size(px(12.))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .line_height(relative(1.2))
-                        .text_color(rgb(TEXT_STRONG))
-                        .child(label.into()),
-                )
-                .child(
-                    div()
-                        .text_size(px(11.))
-                        .line_height(relative(1.2))
-                        .text_color(rgb(TEXT_MUTED))
-                        .child(description.into()),
-                ),
-        )
-        .child(div().flex().items_center().gap(px(8.)).child(controls));
-    if disabled {
-        row.opacity(0.68)
-    } else {
-        row
-    }
-}
-
 pub(crate) fn section(icon_slug: &'static str, title: &'static str, description: &'static str) -> Div {
     div()
         .flex()
         .flex_col()
-        .rounded(px(6.)) // rounded-md
+        .rounded(px(ROUNDED_MD))
         .border_1()
         .border_color(rgb(BORDER_SUBTLE))
         .bg(rgb(SURFACE_1))
@@ -422,98 +373,24 @@ pub(crate) fn section_header(icon_slug: &'static str, title: &'static str, descr
         )
 }
 
+/// The hand-written 32px section tile (`h-8 w-8 rounded-md border` with
+/// `color-mix(surface-2, transparent 8%)` over `surface-1`): the shared
+/// `IconChip` md shape with the source's fill and accent glyph instead of a
+/// tone.
 pub(crate) fn icon_chip(icon_slug: &'static str) -> Div {
-    div()
-        .flex()
-        .items_center()
-        .justify_center()
-        .w(px(32.))
-        .h(px(32.))
-        .flex_shrink_0()
-        .rounded(px(6.))
-        .border_1()
-        .border_color(rgb(BORDER_SUBTLE))
-        // color-mix(in srgb, surface-2, transparent 8%) over surface-1
-        .bg(rgb(mix(SURFACE_2, SURFACE_1, 0.92)))
-        .child(icon(icon_slug, 16., ACCENT))
-}
-
-/// `SettingRow` with `bordered`: `rounded-md border p-1.5` on `--surface-0`.
-pub(crate) fn setting_row(
-    label: impl Into<SharedString>,
-    description: impl Into<SharedString>,
-    control: impl IntoElement,
-) -> Div {
-    div()
-        .flex()
-        .items_center()
-        .justify_between()
-        .gap(px(12.))
-        .rounded(px(6.))
-        .border_1()
-        .border_color(rgb(BORDER_SUBTLE))
-        .bg(rgb(SURFACE_0))
-        .p(px(6.))
-        .child(
-            div()
-                .min_w(px(0.))
-                .pl(px(4.))
-                .child(
-                    div()
-                        .text_size(px(12.))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .line_height(relative(1.2))
-                        .text_color(rgb(TEXT_STRONG))
-                        .child(label.into()),
-                )
-                .child(
-                    div()
-                        .text_size(px(11.))
-                        .line_height(relative(1.2))
-                        .text_color(rgb(TEXT_MUTED))
-                        .child(description.into()),
-                ),
-        )
-        .child(div().flex().items_center().gap(px(8.)).child(control))
-}
-
-/// `SettingRow` without `bordered`.
-pub(crate) fn plain_row(
-    label: impl Into<SharedString>,
-    description: impl Into<SharedString>,
-    control: impl IntoElement,
-) -> Div {
-    div()
-        .flex()
-        .items_center()
-        .justify_between()
-        .gap(px(12.))
-        .child(
-            div()
-                .min_w(px(0.))
-                .child(
-                    div()
-                        .text_size(px(12.))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .line_height(relative(1.2))
-                        .text_color(rgb(TEXT_STRONG))
-                        .child(label.into()),
-                )
-                .child(
-                    div()
-                        .text_size(px(11.))
-                        .line_height(relative(1.2))
-                        .text_color(rgb(TEXT_MUTED))
-                        .child(description.into()),
-                ),
-        )
-        .child(div().flex().items_center().gap(px(8.)).child(control))
+    icon_chip_with(
+        IconChipSize::Md,
+        IconTone::Neutral,
+        icon(icon_slug, 16., ACCENT),
+    )
+    // color-mix(in srgb, surface-2, transparent 8%) over surface-1
+    .bg(rgb(mix(SURFACE_2, SURFACE_1, 0.92)))
 }
 
 /// `rounded-md border p-2.5` on `--surface-0`.
 pub(crate) fn inner_card() -> Div {
     div()
-        .rounded(px(6.))
+        .rounded(px(ROUNDED_MD))
         .border_1()
         .border_color(rgb(BORDER_SUBTLE))
         .bg(rgb(SURFACE_0))
@@ -525,7 +402,7 @@ pub(crate) fn inner_card() -> Div {
 /// `rounded-md border px-2.5 py-1.5` on `--surface-0`.
 pub(crate) fn field_card() -> Div {
     div()
-        .rounded(px(6.))
+        .rounded(px(ROUNDED_MD))
         .border_1()
         .border_color(rgb(BORDER_SUBTLE))
         .bg(rgb(SURFACE_0))
@@ -792,75 +669,4 @@ pub(crate) fn slider_field(
     .child(slider(value, min, max))
 }
 
-/// Footer action: `!h-10 !px-4 text-sm gap-1.5`.
-pub(crate) fn action_button(
-    id: &'static str,
-    label: &'static str,
-    icon_slug: Option<&'static str>,
-    padding: f32,
-    background: u32,
-    border: u32,
-    text: u32,
-    hover: u32,
-    on_click: impl Fn(&mut App) + 'static,
-) -> Stateful<Div> {
-    let mut button = div()
-        .id(id)
-        .h(px(40.))
-        .px(px(padding))
-        .flex()
-        .items_center()
-        .justify_center()
-        .gap(px(6.))
-        .flex_shrink_0()
-        .rounded(px(6.))
-        .border_1()
-        .border_color(rgb(border))
-        .bg(rgb(background))
-        .text_size(px(14.))
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(rgb(text))
-        .cursor_pointer()
-        .hover(move |style| style.bg(rgb(hover)))
-        .on_click(move |_, _, cx| on_click(cx));
-    if let Some(slug) = icon_slug {
-        button = button.child(icon(slug, 16., text));
-    }
-    button.child(label)
-}
 
-/// `!h-8 !px-2.5 text-xs` theme action (`ui-button-secondary`).
-pub(crate) fn small_button(
-    id: &'static str,
-    label: &'static str,
-    enabled: bool,
-    on_click: impl Fn(&mut App) + 'static,
-) -> Stateful<Div> {
-    let (background, border, text) = if enabled {
-        (SURFACE_1, BORDER_SUBTLE, TEXT_STRONG)
-    } else {
-        (SURFACE_1, BORDER_SUBTLE, TEXT_MUTED)
-    };
-    div()
-        .id(id)
-        .h(px(32.))
-        .px(px(10.))
-        .flex()
-        .items_center()
-        .justify_center()
-        .flex_shrink_0()
-        .rounded(px(6.))
-        .border_1()
-        .border_color(rgb(border))
-        .bg(rgb(background))
-        .text_size(px(12.))
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(rgb(text))
-        .when(enabled, |this| {
-            this.cursor_pointer()
-                .hover(|style| style.bg(rgb(SURFACE_2)))
-                .on_click(move |_, _, cx| on_click(cx))
-        })
-        .when(!enabled, |this| this.opacity(0.5))
-        .child(label)
-}

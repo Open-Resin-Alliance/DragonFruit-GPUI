@@ -14,7 +14,11 @@ pub(crate) fn camera_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>)
     .child(
         setting_row(
             "Camera scope",
-            "Choose one global projection mode for every workspace, or set projection defaults per workspace.",
+            Some("Choose one global projection mode for every workspace, or set projection defaults per workspace.".into()),
+            SettingDensity::Compact,
+            true,
+            SettingSurface::Sunken,
+            false,
             segmented(
                 "settings-camera-scope",
                 &["GLOBAL", "WORKSPACE"],
@@ -46,7 +50,11 @@ pub(crate) fn camera_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>)
             .gap(px(6.))
             .child(setting_row(
                 "Projection mode",
-                "Use one projection mode everywhere when global scope is active.",
+                Some("Use one projection mode everywhere when global scope is active.".into()),
+                SettingDensity::Compact,
+                true,
+                SettingSurface::Sunken,
+                false,
                 segmented(
                     "settings-projection",
                     &["ORTHO", "PERSPECTIVE"],
@@ -114,7 +122,11 @@ pub(crate) fn camera_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>)
             )
             .child(setting_row(
                 format!("{} default camera", WORKSPACES[active].0),
-                WORKSPACES[active].1,
+                Some(WORKSPACES[active].1.into()),
+                SettingDensity::Compact,
+                true,
+                SettingSurface::Sunken,
+                false,
                 segmented(
                     "settings-workspace-default",
                     &["ORTHO", "PERSPECTIVE"],
@@ -141,7 +153,11 @@ pub(crate) fn camera_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>)
     defaults = defaults.child(
         setting_row(
             "Camera feel",
-            "Controls smoothing and movement acceleration while orbiting, panning, and zooming.",
+            Some("Controls smoothing and movement acceleration while orbiting, panning, and zooming.".into()),
+            SettingDensity::Compact,
+            true,
+            SettingSurface::Sunken,
+            false,
             select_field(
                 "settings-camera-feel",
                 &FEEL_OPTIONS,
@@ -177,7 +193,11 @@ pub(crate) fn camera_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>)
             .gap(px(6.))
             .child(setting_row(
                 "Trackpad navigation mode",
-                "What a two-finger drag does. Pinch-to-zoom still works either way.",
+                Some("What a two-finger drag does. Pinch-to-zoom still works either way.".into()),
+                SettingDensity::Compact,
+                true,
+                SettingSurface::Sunken,
+                false,
                 select_field(
                     "settings-trackpad-action",
                     &TRACKPAD_OPTIONS,
@@ -203,7 +223,11 @@ pub(crate) fn camera_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>)
         trackpad = trackpad
             .child(setting_row(
                 "Alternate gesture modifier",
-                format!("Hold this key to temporarily switch two-finger drag to {alternate}."),
+                Some(format!("Hold this key to temporarily switch two-finger drag to {alternate}.").into()),
+                SettingDensity::Compact,
+                true,
+                SettingSurface::Sunken,
+                false,
                 segmented(
                     "settings-trackpad-modifier",
                     &["OPTION", "SHIFT"],

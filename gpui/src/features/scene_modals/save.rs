@@ -7,11 +7,12 @@ use gpui::{
 };
 use gpui_core::theme::*;
 use gpui_ui::panel_fields::{BLACK, with_alpha};
-use gpui_ui::ui::{ButtonSize, ButtonVariant, IconTone, button, button_disabled, dialog_modal};
+use gpui_ui::ui::{
+    ButtonSize, ButtonVariant, IconTone, button, button_disabled, dialog_modal, modal_shell,
+};
 
 use super::chrome::{
-    DIALOG_LG, GREEN_500, LEADING_SNUG, LEADING_TIGHT, action_slot, custom_dialog,
-    custom_dialog_header, mix_b,
+    DIALOG_LG, GREEN_500, LEADING_SNUG, LEADING_TIGHT, action_slot, custom_dialog_header, mix_b,
 };
 
 // ── Scene save choice / save error ──────────────────────────────────────────
@@ -120,7 +121,7 @@ pub fn scene_save_choice_modal(
                 .child(div().flex_1().child(overwrite)),
         );
 
-    custom_dialog(DIALOG_LG, header, body)
+    modal_shell(DIALOG_LG).child(header).child(body)
 }
 
 /// One save failure: the title, the message and the optional detail block.

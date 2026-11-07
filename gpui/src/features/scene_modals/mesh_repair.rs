@@ -6,21 +6,18 @@
 use std::rc::Rc;
 
 use gpui::{
-    App, ClickEvent, Div, ElementId, FontWeight, SharedString, Window, div, prelude::*, px,
-    relative, rgb,
+    App, ClickEvent, Div, FontWeight, SharedString, Window, div, prelude::*, px, relative, rgb,
 };
-use gpui_core::icons::icon;
 use gpui_core::theme::*;
-use gpui_ui::panel_fields::BLACK;
 use gpui_ui::ui::{
-    ButtonSize, ButtonVariant, IconButtonSize, IconButtonVariant, IconTone, button, dialog_modal,
-    dialog_modal_full, icon_button, spinner,
+    ButtonSize, ButtonSpec, ButtonVariant, IconTone, button, button_with_content, dialog_modal,
+    dialog_modal_full, modal_shell, spinner,
 };
 
 use super::chrome::{
-    AMBER_600, DIALOG_LG, LEADING_RELAXED, LEADING_SNUG, LEADING_TIGHT, Run, TintedTone,
-    action_slot, custom_dialog, identity_card, mix_b, muted_paragraph, muted_small_paragraph,
-    rich_paragraph, tinted_action, warning_strip,
+    AMBER_600, DIALOG_LG, LEADING_RELAXED, Run, action_slot, custom_dialog_header_full,
+    identity_card, mix_b, muted_paragraph, muted_small_paragraph, rich_paragraph, tinted_action,
+    two_button_row, warning_strip,
 };
 
 // ── Plate trash ─────────────────────────────────────────────────────────────
@@ -127,7 +124,7 @@ pub fn manifold_warning_modal(
                     "manifold-repair-now",
                     "Repair Now",
                     Some(("wrench", 14.0)),
-                    TintedTone::Accent,
+                    ButtonVariant::TintedAccent,
                 )
                 .on_click(move |event, window, cx| on_repair_now(event, window, cx)),
             )),
@@ -182,7 +179,7 @@ pub fn tetrahedral_remesh_confirm_modal(
                     "remesh-confirm",
                     "Remesh",
                     Some(("pyramid", 14.0)),
-                    TintedTone::Accent,
+                    ButtonVariant::TintedAccent,
                 )
                 .on_click(move |event, window, cx| on_confirm(event, window, cx)),
             )),
@@ -238,7 +235,7 @@ pub fn shrink_wrap_confirm_modal(
                     "shrink-wrap-confirm",
                     "Shrink-Wrap",
                     Some(("refresh-cw", 14.0)),
-                    TintedTone::Accent,
+                    ButtonVariant::TintedAccent,
                 )
                 .on_click(move |event, window, cx| on_confirm(event, window, cx)),
             )),
@@ -475,88 +472,20 @@ pub fn repair_mesh_modal(
         "Fixes geometry issues before you keep working.".into()
     };
 
-    let close = Rc::new(on_close);
-    let header_close = close.clone();
-
+    // `IconChip`'s amber tint from the source: `color-mix(#d97706,
+    // border-subtle 45%)` / `color-mix(#d97706, surface-1 88%)` / `#d97706`.
     // The close tile is disabled mid-repair, so it drops its handler.
-    let close_button = if repairing {
-        div()
-            .flex()
-            .flex_shrink_0()
-            .items_center()
-            .justify_center()
-            .w(px(36.0))
-            .h(px(36.0))
-            .rounded(px(ROUNDED_MD))
-            .border_1()
-            .border_color(rgb(mix(BORDER_SUBTLE, BLACK, 0.90)))
-            .bg(rgb(mix(SURFACE_1, BLACK, 0.92)))
-            .cursor_not_allowed()
-            .child(icon("x", 16.0, mix(TEXT_MUTED, SURFACE_2, 0.82)))
-            .into_any_element()
-    } else {
-        icon_button(
-            ElementId::named_usize("repair-mesh", 0),
-            "x",
-            IconButtonVariant::Surface,
-            IconButtonSize::Md,
-        )
-        .on_click(move |event, window, cx| header_close(event, window, cx))
-        .into_any_element()
-    };
-
-    let header = div()
-        .flex()
-        .items_center()
-        .justify_between()
-        .gap(px(16.0))
-        .border_b(px(1.0))
-        .border_color(rgb(BORDER_SUBTLE))
-        .px(px(20.0))
-        .py(px(16.0))
-        .child(
-            div()
-                .flex()
-                .min_w(px(0.0))
-                .items_center()
-                .gap(px(12.0))
-                .child(
-                    div()
-                        .flex()
-                        .flex_shrink_0()
-                        .items_center()
-                        .justify_center()
-                        .w(px(36.0))
-                        .h(px(36.0))
-                        .rounded(px(ROUNDED_MD))
-                        .border_1()
-                        .border_color(rgb(mix_b(AMBER_600, BORDER_SUBTLE, 0.45)))
-                        .bg(rgb(mix_b(AMBER_600, SURFACE_1, 0.88)))
-                        .child(icon("alert-triangle", 16.0, AMBER_600)),
-                )
-                .child(
-                    div()
-                        .min_w(px(0.0))
-                        .pr(px(8.0))
-                        .child(
-                            div()
-                                .text_size(px(16.0))
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .line_height(px(16.0 * LEADING_TIGHT))
-                                .text_color(rgb(TEXT_STRONG))
-                                .child(title),
-                        )
-                        .child(
-                            div()
-                                .mt(px(2.0))
-                                .text_size(px(11.0))
-                                .line_height(px(11.0 * LEADING_SNUG))
-                                .text_color(rgb(TEXT_MUTED))
-                                .child(subtitle),
-                        ),
-                ),
-        )
-        .child(close_button);
+    let header = custom_dialog_header_full(
+        "repair-mesh",
+        "alert-triangle",
+        mix_b(AMBER_600, BORDER_SUBTLE, 0.45),
+        mix_b(AMBER_600, SURFACE_1, 0.88),
+        AMBER_600,
+        title,
+        subtitle,
+        repairing,
+        move |event, window, cx| on_close(event, window, cx),
+    );
 
     let model_card = identity_card(
         if model_count > 1 { "Models" } else { "Model" },
@@ -587,41 +516,24 @@ pub fn repair_mesh_modal(
         "Keep Original".into()
     };
     let keep = {
-        let mut el = div()
-            .id("repair-mesh-keep")
-            .flex()
-            .items_center()
-            .justify_center()
-            .gap(px(6.0))
-            .w_full()
-            .h(px(36.0))
-            .rounded(px(RADIUS_SM))
-            .border_1()
-            .border_color(rgb(BORDER_SUBTLE))
-            .bg(rgb(SURFACE_1))
-            .pt(px(5.0))
-            .pb(px(7.0))
-            .px(px(11.0))
-            .text_size(px(FONT_MD))
-            .font_weight(FontWeight::SEMIBOLD)
-            .line_height(px(FONT_MD))
-            .text_color(rgb(TEXT_STRONG));
+        // `.ui-button-secondary` at `md`, full width; the cancelling state keeps
+        // the secondary colours and adds the `opacity-60` + spinner the source
+        // renders while the stop request is in flight.
+        let spec = ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Md)
+            .full()
+            .gap(6.0);
+        let mut content = div().flex().items_center().justify_center().gap(px(6.0));
         if cancelling {
-            el = el
-                .opacity(0.6)
-                .cursor_not_allowed()
-                .child(spinner(14.0))
-                .child(keep_label.clone());
+            content = content.child(spinner(14.0));
+        }
+        content = content.child(keep_label.clone());
+        let mut el = button_with_content("repair-mesh-keep", &spec, content);
+        if cancelling {
+            el = el.opacity(0.6).cursor_not_allowed();
+        } else if repairing {
+            el = el.on_click(move |event, window, cx| on_stop(event, window, cx));
         } else {
-            el = el
-                .cursor_pointer()
-                .hover(|style| style.bg(rgb(SURFACE_2)));
-            el = if repairing {
-                el.on_click(move |event, window, cx| on_stop(event, window, cx))
-            } else {
-                el.on_click(move |event, window, cx| on_keep_original(event, window, cx))
-            };
-            el = el.child(keep_label.clone());
+            el = el.on_click(move |event, window, cx| on_keep_original(event, window, cx));
         }
         el
     };
@@ -629,21 +541,17 @@ pub fn repair_mesh_modal(
     let footer = if auto_start || repairing {
         div().pt(px(4.0)).child(keep)
     } else {
-        div()
-            .flex()
-            .gap(px(8.0))
-            .pt(px(4.0))
-            .child(div().flex_1().child(keep))
-            .child(div().flex_1().child(
-                tinted_action(
-                    "repair-mesh-repair",
-                    "Repair",
-                    Some(("wrench", 14.0)),
-                    TintedTone::Accent,
-                )
-                .w_full()
-                .on_click(move |event, window, cx| on_repair(event, window, cx)),
-            ))
+        two_button_row(
+            keep,
+            tinted_action(
+                "repair-mesh-repair",
+                "Repair",
+                Some(("wrench", 14.0)),
+                ButtonVariant::TintedAccent,
+            )
+            .w_full()
+            .on_click(move |event, window, cx| on_repair(event, window, cx)),
+        )
     };
 
     let body = div()
@@ -656,6 +564,6 @@ pub fn repair_mesh_modal(
         .child(warning)
         .child(footer);
 
-    custom_dialog(DIALOG_LG, header, body)
+    modal_shell(DIALOG_LG).child(header).child(body)
 }
 

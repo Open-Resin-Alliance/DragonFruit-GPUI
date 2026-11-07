@@ -60,13 +60,14 @@
 //! 16. `hasPrintingData` — passed in by the parent. The GPUI app has no slicing
 //!     pipeline yet, so Printing stays locked as it does in a fresh source
 //!     session.
-//! 17. `ui::select_dropdown` / `ui::context_menu` do not expose the knobs this
-//!     bar needs (`selectClassName`, `menuClassName`, `chevronClassName`,
-//!     `hideChevron`, `selectedDisplay`, icon-only trigger) and render the
-//!     context row radius as `--radius-md` with an 18%-accent hover where the
-//!     source is `rounded-md` (6px) and 82% accent. The bar therefore builds
-//!     its own copies from the same source rather than inheriting those values.
-//!     `ui::select_dropdown` also renders its trigger at 14px / 4px radius;
+//! 17. `ui::select_dropdown` does not expose the knobs this bar needs
+//!     (`selectClassName`, `menuClassName`, `chevronClassName`, `hideChevron`,
+//!     `selectedDisplay`, icon-only trigger). The bar keeps its own trigger for
+//!     those; the app and fleet menus use `ui::context_menu_sized` /
+//!     `ui::menu_surface`, whose row radius is the theme's `rounded-md` (10px)
+//!     and whose hover is `color-mix(accent, surface-1 82%)`, exactly the
+//!     source's `MenuRow`.
+//!     `ui::select_dropdown` renders its trigger at 14px / 4px radius;
 //!     `.ui-input` is unlayered CSS, so its 13px `--font-size-sm` and 6px
 //!     `--radius-sm` beat the layered `text-sm` / `rounded-[4px]` utilities,
 //!     and only the `!`-prefixed classes override it.
@@ -93,6 +94,7 @@ use gpui::{
 
 use gpui_core::icons::icon;
 use gpui_core::theme::*;
+use gpui_ui::ui::{ContextMenuEntry, context_menu_sized, menu_surface, menu_title};
 use crate::{DragonFruit, Mode};
 pub use gpui_core::state::MeshShaderType;
 
@@ -1200,205 +1202,97 @@ fn view_type_menu(value: MeshShaderType, entity: WeakEntity<DragonFruit>) -> imp
 
 // ── Menus ───────────────────────────────────────────────────────────────────
 
-/// `ContextMenu`'s surface: `rounded-lg border p-1.5 shadow-xl`, `border-subtle`
-/// on `color-mix(surface-0, #000 10%)`.
-fn menu_surface(width: f32) -> Div {
-    div()
-        .absolute()
-        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-        .w(px(width))
-        .rounded(px(RADIUS_LG))
-        .border_1()
-        .border_color(rgb(BORDER_SUBTLE))
-        .bg(rgb(mix(SURFACE_0, BLACK, 0.90)))
-        .p(px(6.0))
-        .shadow(vec![
-            shadow(0.0, 14.0, 34.0, 0.0, 0x00000075),
-            shadow(0.0, 4.0, 12.0, 0.0, 0x00000052),
-        ])
-        .flex()
-        .flex_col()
-}
-
-/// `ContextMenu`'s heading row: `mb-1 px-2 py-1 text-[10px] font-semibold
-/// uppercase tracking-wide`. The caller passes the already-uppercased text, so
-/// no allocation happens per frame.
-fn menu_title(title: &'static str) -> Div {
-    div()
-        .mb(px(4.0))
-        .px(px(8.0))
-        .py(px(4.0))
-        .text_size(px(10.0))
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(rgb(TEXT_MUTED))
-        .child(title)
-}
-
-/// `ContextMenu`'s `MenuRow`: `flex w-full items-center gap-2 rounded-md px-2
-/// py-1.5 text-left text-[13px] font-medium`, 20px framed icon slot, hover fill
-/// `color-mix(accent, surface-1 82%)`.
-fn menu_row(
-    id: &'static str,
-    label: &'static str,
-    icon_name: &'static str,
-    disabled: bool,
-    on_click: impl Fn(&mut App) + 'static,
-) -> impl IntoElement {
-    let mut row = div()
-        .id(id)
-        .w_full()
-        .flex()
-        .items_center()
-        .gap(px(8.0))
-        .rounded(px(6.0))
-        .px(px(8.0))
-        .py(px(6.0))
-        .text_size(px(13.0))
-        .font_weight(FontWeight::MEDIUM)
-        .text_color(rgb(if disabled { TEXT_MUTED } else { TEXT_STRONG }))
-        .child(
-            div()
-                .w(px(20.0))
-                .h(px(20.0))
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded(px(4.0))
-                .border_1()
-                .border_color(rgb(BORDER_SUBTLE))
-                .bg(rgb(SURFACE_1))
-                .when(disabled, |el| el.opacity(0.8))
-                .child(icon(
-                    icon_name,
-                    14.0,
-                    if disabled { TEXT_MUTED } else { TEXT_STRONG },
-                )),
-        )
-        .child(
-            div()
-                .flex_1()
-                .min_w(px(0.0))
-                .truncate()
-                .child(label),
-        );
-
-    if disabled {
-        row = row.opacity(0.55).cursor_not_allowed();
-    } else {
-        row = row
-            .cursor_pointer()
-            .hover(|style| style.bg(rgb(mix(ACCENT, SURFACE_1, 0.82))))
-            .on_click(move |_, _, cx| on_click(cx));
-    }
-
-    row
-}
-
-/// `startsGroup && index > 0`: `my-1 h-px` on `border-subtle`.
-fn menu_separator() -> Div {
-    div()
-        .my(px(4.0))
-        .h(px(1.0))
-        .w_full()
-        .bg(rgb(BORDER_SUBTLE))
-}
-
 /// The `DragonFruit` app menu under the logo button.
 ///
 /// Entries and their disabled rules come from `appMenuEntries`; a handler the
 /// parent does not provide leaves the row disabled, exactly as the source's
-/// `!onSaveScene` checks do.
+/// `!onSaveScene` checks do. The surface, heading, row geometry and hover fill
+/// are `ui::context_menu`'s.
 fn app_menu(
     has_models: bool,
     actions_disabled: bool,
     entity: WeakEntity<DragonFruit>,
 ) -> impl IntoElement {
-    let new_scene_entity = entity.clone();
-    let new_scene = menu_row(
-        "menu-new-scene",
-        "New scene",
-        "file-plus2",
-        actions_disabled || !has_models,
-        move |cx| {
-            new_scene_entity
-                .update(cx, |this, cx| {
-                    this.mesh = None;
-                    this.supports.borrow_mut().clear();
-                    this.status = "No model loaded".to_owned();
-                    this.mode = Mode::Prepare;
-                    this.show_app_menu = false;
-                    cx.notify();
-                })
-                .ok();
-        },
-    );
+    let mut entries = Vec::with_capacity(7);
+
+    let mut new_scene = ContextMenuEntry::new("menu-new-scene", "New scene").with_icon("file-plus2");
+    if actions_disabled || !has_models {
+        new_scene = new_scene.disabled();
+    }
+    entries.push(new_scene);
 
     // `Save scene` / `Save scene as…` / `Open scene…` / `Import scene…` have no
     // handler in this build, so they render disabled.
-    let save_scene = menu_row("menu-save-scene", "Save scene", "save", true, |_| {});
-    let save_scene_as = menu_row(
-        "menu-save-scene-as",
-        "Save scene as…",
-        "save-all",
-        true,
-        |_| {},
+    entries.push(
+        ContextMenuEntry::new("menu-save-scene", "Save scene")
+            .with_icon("save")
+            .starts_group()
+            .disabled(),
     );
-    let open_scene = menu_row(
-        "menu-open-scene",
-        "Open scene…",
-        "folder-open",
-        true,
-        |_| {},
+    entries.push(
+        ContextMenuEntry::new("menu-save-scene-as", "Save scene as…")
+            .with_icon("save-all")
+            .disabled(),
+    );
+    entries.push(
+        ContextMenuEntry::new("menu-open-scene", "Open scene…")
+            .with_icon("folder-open")
+            .disabled(),
     );
 
-    let import_entity = entity.clone();
-    let import_mesh = menu_row(
-        "menu-import-mesh",
-        "Import mesh…",
-        "upload",
-        actions_disabled,
-        move |cx| {
-            import_entity
-                .update(cx, |this, cx| {
-                    this.show_app_menu = false;
-                    this.open_stl(cx);
-                })
-                .ok();
+    let mut import_mesh =
+        ContextMenuEntry::new("menu-import-mesh", "Import mesh…")
+            .with_icon("upload")
+            .starts_group();
+    if actions_disabled {
+        import_mesh = import_mesh.disabled();
+    }
+    entries.push(import_mesh);
+    entries.push(
+        ContextMenuEntry::new("menu-import-scene", "Import scene…")
+            .with_icon("folder-input")
+            .disabled(),
+    );
+    entries.push(
+        ContextMenuEntry::new("menu-close-program", "Close program")
+            .with_icon("power")
+            .starts_group(),
+    );
+
+    context_menu_sized(
+        &entries,
+        Some("DRAGONFRUIT".into()),
+        192.0,
+        move |id, _, cx| match id {
+            "menu-new-scene" => {
+                entity
+                    .update(cx, |this, cx| {
+                        this.mesh = None;
+                        this.supports.borrow_mut().clear();
+                        this.status = "No model loaded".to_owned();
+                        this.mode = Mode::Prepare;
+                        this.show_app_menu = false;
+                        cx.notify();
+                    })
+                    .ok();
+            }
+            "menu-import-mesh" => {
+                entity
+                    .update(cx, |this, cx| {
+                        this.show_app_menu = false;
+                        this.open_stl(cx);
+                    })
+                    .ok();
+            }
+            "menu-close-program" => cx.quit(),
+            _ => {}
         },
-    );
-
-    let import_scene = menu_row(
-        "menu-import-scene",
-        "Import scene…",
-        "folder-input",
-        true,
-        |_| {},
-    );
-
-    let close = menu_row("menu-close-program", "Close program", "power", false, |cx| {
-        cx.quit();
-    });
-
-    menu_surface(192.0)
-        .top(px(49.0))
-        .left(px(4.0))
-        .child(menu_title("DRAGONFRUIT"))
-        .child(
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(2.0))
-                .child(new_scene)
-                .child(menu_separator())
-                .child(save_scene)
-                .child(save_scene_as)
-                .child(open_scene)
-                .child(menu_separator())
-                .child(import_mesh)
-                .child(import_scene)
-                .child(menu_separator())
-                .child(close),
-        )
+    )
+    .absolute()
+    .top(px(49.0))
+    .left(px(4.0))
+    // The bar root starts a window drag on mouse-down; a menu press is not one.
+    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
 }
 
 /// The printer quick menu: `fixed z-[121] w-[280px] rounded-lg border p-1.5
@@ -1457,7 +1351,7 @@ fn printer_menu(
             .flex()
             .items_center()
             .gap(px(8.0))
-            .rounded(px(6.0))
+            .rounded(px(ROUNDED_MD))
             .border_1()
             .border_color(rgb(border))
             .bg(rgb(background))
@@ -1475,7 +1369,7 @@ fn printer_menu(
                     .items_center()
                     .justify_center()
                     .overflow_hidden()
-                    .rounded(px(4.0))
+                    .rounded(px(ROUNDED_SM))
                     .bg(rgba(0x1a1b21f0))
                     .child(thumbnail),
             )
@@ -1553,7 +1447,7 @@ fn printer_menu(
         .flex()
         .items_center()
         .gap(px(8.0))
-        .rounded(px(6.0))
+        .rounded(px(ROUNDED_MD))
         .px(px(8.0))
         .py(px(6.0))
         .text_left()
@@ -1577,8 +1471,10 @@ fn printer_menu(
         });
 
     menu_surface(280.0)
+        .absolute()
         .top(px(49.0))
         .left(px(69.0))
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
         .child(menu_title("FLEET UNITS"))
         .child(list)
         .child(

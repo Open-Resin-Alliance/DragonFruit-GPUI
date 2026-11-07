@@ -30,6 +30,9 @@ use gpui::{Div, FontWeight, IntoElement, SharedString, div, prelude::*, px, rgb,
 
 use gpui_core::icons::icon;
 use gpui_ui::panel_fields::*;
+use gpui_ui::ui::{
+    ButtonSize, ButtonSpec, ButtonVariant, button_with, column_heading, sub_card_with,
+};
 use gpui_core::theme::*;
 
 /// `ArrangeAnchorMode`.
@@ -197,8 +200,11 @@ fn header_badge(icon_name: &'static str, label: String) -> Div {
         )
 }
 
-/// One mode pill: `Button variant="secondary" size="auto"` with `!h-8`, the
-/// active fill from `activeModeStyle`, and `disabledModeStyle` while applying.
+/// One mode pill: `Button variant="secondary" size="auto"` with `!h-8` and the
+/// source's inline `activeModeStyle` while selected.
+///
+/// `.ui-button` is unlayered, so of `px-1.5 text-[10px] sm:text-[11px]` only the
+/// `!h-8` height survives; the padding and 14px type are the base recipe's.
 fn mode_button(
     id: &'static str,
     label: &'static str,
@@ -206,38 +212,22 @@ fn mode_button(
     enabled: bool,
     on_click: impl Fn(&gpui::ClickEvent, &mut gpui::Window, &mut gpui::App) + 'static,
 ) -> gpui::Stateful<Div> {
-    if !enabled {
-        let (background, border, text) = disabled_action_style();
-        return div()
-            .id(id)
-            .w_full()
-            .h(px(32.0))
-            .px(px(11.0))
-            .pt(px(5.0))
-            .pb(px(7.0))
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded(px(RADIUS_SM))
-            .border_1()
-            .border_color(rgb(border))
-            .bg(rgb(background))
-            .text_size(px(FONT_MD))
-            .font_weight(FontWeight::SEMIBOLD)
-            .line_height(px(FONT_MD))
-            .text_color(rgb(text))
-            .cursor_not_allowed()
-            .child(label);
+    let mut spec = ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Sm).full();
+    if active {
+        // `activeModeStyle` — the source's inline style triple.
+        let (background, border, text) = active_mode_style();
+        spec = spec.fill(background, border, text);
     }
-    let style = active.then(active_mode_style);
-    panel_button(
-        id,
-        label,
-        PanelButton::Secondary,
-        style,
-        true,
-        on_click,
-    )
+    if !enabled {
+        // `disabledModeStyle` is `.ui-button:disabled`'s own recipe.
+        spec = spec.disabled();
+    }
+    let el = button_with(id, label, &spec);
+    if enabled {
+        el.on_click(on_click)
+    } else {
+        el
+    }
 }
 
 /// The two-column mode grid: `grid grid-cols-2 gap-1`. Each cell is a flex-1
@@ -528,15 +518,6 @@ pub fn arrange_body(state: &ArrangeState, actions: &ArrangeActions) -> impl Into
 /// The Manual-mode array grid: `grid-cols-[24px_minmax(0,1fr)_minmax(0,1fr)]`,
 /// the Count/Gap headings, then one row per axis with a 32px chevron field each.
 fn array_grid(state: &ArrangeState, actions: &ArrangeActions) -> Div {
-    let heading = |label: &'static str| {
-        div()
-            .flex_1()
-            .text_center()
-            .text_size(px(10.0))
-            .text_color(rgb(TEXT_MUTED))
-            .child(label)
-    };
-
     let mut card = plain_sub_card().flex().flex_col();
     card = card.child(
         div()
@@ -545,8 +526,8 @@ fn array_grid(state: &ArrangeState, actions: &ArrangeActions) -> Div {
             .gap(px(4.0))
             .mb(px(4.0))
             .child(div().w(px(24.0)))
-            .child(heading("Count"))
-            .child(heading("Gap")),
+            .child(column_heading("Count"))
+            .child(column_heading("Gap")),
     );
 
     for (axis, label) in ["X", "Y", "Z"].iter().enumerate() {
@@ -598,14 +579,8 @@ fn allow_z_rotation(state: &ArrangeState, actions: &ArrangeActions) -> gpui::Sta
     let toggle = actions.on_allow_rotate_on_z_change.clone();
     let on = state.allow_rotate_on_z;
 
-    let (border, background) = if on {
-        (
-            mix(ACCENT, BORDER_SUBTLE, 0.24),
-            mix(ACCENT, SURFACE_1, 0.05),
-        )
-    } else {
-        (BORDER_SUBTLE, SURFACE_1)
-    };
+    // `accentCardStyle` while on, `panelCardStyle` otherwise.
+    let card = if on { accent_sub_card() } else { plain_sub_card() };
 
     let pill = div()
         .rounded(px(9999.0))
@@ -651,15 +626,9 @@ fn allow_z_rotation(state: &ArrangeState, actions: &ArrangeActions) -> gpui::Sta
         )
         .child(pill);
 
-    let el = div()
+    let el = card
         .id("arrange-allow-z")
         .w_full()
-        .rounded(px(ROUNDED_MD))
-        .border_1()
-        .border_color(rgb(border))
-        .bg(rgb(background))
-        .px(px(8.0))
-        .py(px(8.0))
         .child(row);
 
     if disabled {
@@ -739,22 +708,15 @@ impl Default for DuplicateActions {
     }
 }
 
-/// `panelCardStyleDisabled`: `color-mix(border-subtle, black 10%)` on
-/// `color-mix(surface-1, black 8%)`.
+/// `panelCardStyleDisabled`: `color-mix(surface-1, black 8%)` on the disabled
+/// border, through the shared tinted sub-card.
 fn disabled_card() -> Div {
-    sub_card(
-        mix(BORDER_SUBTLE, BLACK, 0.90),
-        mix(SURFACE_1, BLACK, 0.92),
-    )
+    sub_card_with(Some((BLACK, 0.08)), 8.0).gap(px(0.0))
 }
 
-/// `accentCardStyleDisabled`: the same border on
-/// `color-mix(surface-1, black 6%)`.
+/// `accentCardStyleDisabled`: the same, at `black 6%`.
 fn disabled_accent_card() -> Div {
-    sub_card(
-        mix(BORDER_SUBTLE, BLACK, 0.90),
-        mix(SURFACE_1, BLACK, 0.94),
-    )
+    sub_card_with(Some((BLACK, 0.06)), 8.0).gap(px(0.0))
 }
 
 /// The Duplicate body: `px-2 pb-2 space-y-2 sm:px-2.5 sm:pb-2.5`.

@@ -17,18 +17,13 @@ pub(crate) fn experiments_tab(state: &SettingsState, entity: WeakEntity<DragonFr
                     .items_start()
                     .gap(px(8.))
                     .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .w(px(32.))
-                            .h(px(32.))
-                            .flex_shrink_0()
-                            .rounded(px(6.))
-                            .border_1()
-                            .border_color(rgb(BORDER_SUBTLE))
-                            .bg(rgb(mix(SURFACE_2, SURFACE_1, 0.92)))
-                            .child(icon("flask-conical", 16., ACCENT_SECONDARY)),
+                        icon_chip_with(
+                            IconChipSize::Md,
+                            IconTone::Neutral,
+                            icon("flask-conical", 16., ACCENT_SECONDARY),
+                        )
+                        // color-mix(in srgb, surface-2, transparent 8%) over surface-1
+                        .bg(rgb(mix(SURFACE_2, SURFACE_1, 0.92))),
                     )
                     .child(
                         div()
@@ -158,20 +153,11 @@ pub(crate) fn experiments_overlay(state: &SettingsState, entity: WeakEntity<Drag
                             .border_color(rgb(BORDER_SUBTLE))
                             .px(px(20.))
                             .py(px(16.))
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .w(px(40.))
-                                    .h(px(40.))
-                                    .flex_shrink_0()
-                                    .rounded(px(10.))
-                                    .border_1()
-                                    .border_color(rgb(mix(0xf59e0b, BORDER_SUBTLE, 0.45)))
-                                    .bg(rgb(mix(0xf59e0b, SURFACE_1, 0.9)))
-                                    .child(icon("triangle-alert", 18., 0xf59e0b)),
-                            )
+                            .child(icon_chip_with(
+                                IconChipSize::Lg,
+                                IconTone::Warning,
+                                icon("triangle-alert", 16., 0xd97706),
+                            ))
                             .child(
                                 div()
                                     .min_w(px(0.))
@@ -227,39 +213,44 @@ pub(crate) fn experiments_overlay(state: &SettingsState, entity: WeakEntity<Drag
                                     .grid_cols(2)
                                     .gap(px(8.))
                                     .pt(px(4.))
-                                    .child(action_button(
-                                        "experiments-back",
-                                        "Take me back!",
-                                        None,
-                                        16.0,
-                                        SURFACE_1,
-                                        BORDER_SUBTLE,
-                                        TEXT_STRONG,
-                                        SURFACE_2,
-                                        move |cx| {
+                                    .child(
+                                        button_with(
+                                            "experiments-back",
+                                            "Take me back!",
+                                            ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Lg)
+                                                .full()
+                                                .padding_x(16.0)
+                                                .padding_y(0.0, 0.0)
+                                                .font_size(14.0),
+                                        )
+                                        .on_click(move |_, _, cx| {
                                             // "Take me back" keeps the gate for the
                                             // next entry, so it can reappear.
                                             edit_and_notify(&exit_entity, cx, |draft| {
                                                 draft.experiments.show_disclaimer = false;
                                             });
-                                        },
-                                    ))
-                                    .child(action_button(
-                                        "experiments-ack",
-                                        "I understand",
-                                        None,
-                                        16.0,
-                                        mix(0xf59e0b, SURFACE_1, 0.86),
-                                        mix(0xf59e0b, BORDER_SUBTLE, 0.45),
-                                        0xf59e0b,
-                                        mix(0xf59e0b, SURFACE_1, 0.76),
-                                        move |cx| {
+                                        }),
+                                    )
+                                    .child(
+                                        button_with(
+                                            "experiments-ack",
+                                            "I understand",
+                                            ButtonSpec::new(
+                                                ButtonVariant::TintedWarning,
+                                                ButtonSize::Lg,
+                                            )
+                                            .full()
+                                            .padding_x(16.0)
+                                            .padding_y(0.0, 0.0)
+                                            .font_size(14.0),
+                                        )
+                                        .on_click(move |_, _, cx| {
                                             edit_and_notify(&ack_entity, cx, |draft| {
                                                 draft.experiments.disclaimer_seen = true;
                                                 draft.experiments.show_disclaimer = false;
                                             });
-                                        },
-                                    )),
+                                        }),
+                                    ),
                             ),
                     ),
             ),

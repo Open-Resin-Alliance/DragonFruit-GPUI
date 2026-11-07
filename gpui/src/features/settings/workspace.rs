@@ -24,7 +24,11 @@ pub(crate) fn workspace_tab(state: &SettingsState, entity: WeakEntity<DragonFrui
     // profile store, so the source's notice branch never renders.
     inner = inner.child(setting_row(
         "Enable build volume bounds",
-        "Shows a faint printer volume outline and enables out-of-bounds checks.",
+        Some("Shows a faint printer volume outline and enables out-of-bounds checks.".into()),
+        SettingDensity::Compact,
+        true,
+        SettingSurface::Sunken,
+        false,
         segmented(
             "view3d-enabled",
             &["OFF", "ON"],
@@ -146,7 +150,11 @@ pub(crate) fn workspace_tab(state: &SettingsState, entity: WeakEntity<DragonFrui
         inner = inner.child(
             setting_row(
                 "Build volume origin",
-                "Choose where XYZ 0,0,0 is located for the printer volume.",
+                Some("Choose where XYZ 0,0,0 is located for the printer volume.".into()),
+                SettingDensity::Compact,
+                true,
+                SettingSurface::Sunken,
+                false,
                 segmented(
                     "view3d-origin",
                     &["CENTER", "FRONT-LEFT CORNER"],
@@ -224,7 +232,11 @@ pub(crate) fn workspace_tab(state: &SettingsState, entity: WeakEntity<DragonFrui
         .child(
             setting_row(
                 "Show out-of-bounds warnings",
-                "Warn when any visible model extends beyond the configured build volume.",
+                Some("Warn when any visible model extends beyond the configured build volume.".into()),
+                SettingDensity::Compact,
+                true,
+                SettingSurface::Sunken,
+                false,
                 segmented(
                     "view3d-violation",
                     &["OFF", "ON"],
@@ -242,7 +254,11 @@ pub(crate) fn workspace_tab(state: &SettingsState, entity: WeakEntity<DragonFrui
         .child(
             setting_row(
                 "Show model bounding boxes",
-                "Debug overlay: draws world-space bounds for each visible model (red if out-of-bounds).",
+                Some("Debug overlay: draws world-space bounds for each visible model (red if out-of-bounds).".into()),
+                SettingDensity::Compact,
+                true,
+                SettingSurface::Sunken,
+                false,
                 segmented(
                     "view3d-boxes",
                     &["OFF", "ON"],
@@ -260,7 +276,11 @@ pub(crate) fn workspace_tab(state: &SettingsState, entity: WeakEntity<DragonFrui
         .child(
             setting_row(
                 "Show slice SAT bounding mesh",
-                "SAT debug overlay for nesting and diagnostics.",
+                Some("SAT debug overlay for nesting and diagnostics.".into()),
+                SettingDensity::Compact,
+                true,
+                SettingSurface::Sunken,
+                false,
                 segmented(
                     "view3d-sat",
                     &["OFF", "ON"],
@@ -283,7 +303,11 @@ pub(crate) fn workspace_tab(state: &SettingsState, entity: WeakEntity<DragonFrui
         inner = inner.child(
             setting_row(
                 "SAT debug scope",
-                "Show SAT mesh on the active model only, or on all visible models.",
+                Some("Show SAT mesh on the active model only, or on all visible models.".into()),
+                SettingDensity::Compact,
+                true,
+                SettingSurface::Sunken,
+                false,
                 segmented(
                     "view3d-sat-scope",
                     &["ACTIVE ONLY", "ALL MODELS"],
@@ -301,7 +325,11 @@ pub(crate) fn workspace_tab(state: &SettingsState, entity: WeakEntity<DragonFrui
         inner = inner.child(
             setting_row(
                 "SAT mode",
-                "Choose accurate convex-hull SAT for nesting, or experimental slice-derived SAT for diagnostics.",
+                Some("Choose accurate convex-hull SAT for nesting, or experimental slice-derived SAT for diagnostics.".into()),
+                SettingDensity::Compact,
+                true,
+                SettingSurface::Sunken,
+                false,
                 segmented(
                     "view3d-sat-mode",
                     &["ACCURATE HULL-BASED SAT", "EXPERIMENTAL SLICE-BASED SAT"],
@@ -327,7 +355,11 @@ pub(crate) fn workspace_tab(state: &SettingsState, entity: WeakEntity<DragonFrui
             inner = inner.child(
                 setting_row(
                     "Experimental slice display",
-                    "Pick how the experimental slice-derived SAT is visualized.",
+                    Some("Pick how the experimental slice-derived SAT is visualized.".into()),
+                    SettingDensity::Compact,
+                    true,
+                    SettingSurface::Sunken,
+                    false,
                     segmented(
                         "view3d-sat-render",
                         &["SHADED", "WIREFRAME"],

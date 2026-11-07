@@ -86,10 +86,9 @@ const EMPTY_STATE_WIDTH: f32 = 560.0;
 /// `.ui-empty-state`'s `padding: 20px`.
 const EMPTY_STATE_PADDING: f32 = 20.0;
 
-/// Tailwind `rounded-md` / `rounded-lg` / `rounded` as the sources use them.
-const ROUNDED: f32 = 4.0;
-const ROUNDED_MD: f32 = 6.0;
-const ROUNDED_LG: f32 = 8.0;
+/// Bare Tailwind `rounded` (4px); `rounded-md`/`rounded-lg` come from the
+/// theme's `ROUNDED_MD` / `ROUNDED_LG` (10 / 14, the app's `--radius-*`).
+const RADIUS_BARE: f32 = 4.0;
 
 /// The version chip's `px-3.5 py-1 text-[13px]`.
 const CHIP_PADDING_X: f32 = 14.0;
@@ -826,7 +825,7 @@ fn recent_row(entry: &RecentOpenedFile) -> Div {
                 .gap(px(6.0))
                 .child(
                     div()
-                        .rounded(px(ROUNDED))
+                        .rounded(px(RADIUS_BARE))
                         .px(px(4.0))
                         .py(px(2.0))
                         .text_size(px(9.0))
@@ -1119,7 +1118,7 @@ fn card_back(model: Option<ModelStatsModel>) -> Div {
                 .flex()
                 .items_start()
                 .gap(px(6.0))
-                .rounded(px(ROUNDED))
+                .rounded(px(RADIUS_BARE))
                 .px(px(8.0))
                 .py(px(4.0))
                 .text_size(px(10.0))

@@ -32,6 +32,7 @@ use gpui::{
 
 use gpui_core::icons::icon;
 use gpui_ui::panel_fields::*;
+use gpui_ui::ui::{ButtonSize, ButtonSpec, ButtonVariant, button_with, section_header, sub_card_with};
 use gpui_core::theme::*;
 
 /// `MeshSmoothingFalloff`.
@@ -162,32 +163,23 @@ fn hue_color(hue: f32) -> u32 {
         | (b * 255.0).round() as u32
 }
 
-/// `brushCardStyle`: `color-mix(#4f8cff, border-subtle 78%)` on
-/// `color-mix(#4f8cff, surface-1 94%)`.
-fn brush_card() -> Div {
-    sub_card(
-        mix(MOVE_TINT, BORDER_SUBTLE, 0.22),
-        mix(MOVE_TINT, SURFACE_1, 0.06),
-    )
-}
-
-/// `highlightCardStyle`: `color-mix(#8f6cff, border-subtle 80%)` on
-/// `color-mix(#8f6cff, surface-1 95%)`.
-fn highlight_card() -> Div {
-    sub_card(
-        mix(ROTATE_TINT, BORDER_SUBTLE, 0.20),
-        mix(ROTATE_TINT, SURFACE_1, 0.05),
-    )
-}
-
 /// One falloff button: `min-h-[36px] rounded-md border px-3 text-[12px]
 /// font-semibold uppercase tracking-wide`.
+///
+/// This is a bare `<button>` in the source, not `.ui-button`, so the padding,
+/// radius and 12px type all apply; only the active fill is the source's inline
+/// `style`.
 fn falloff_button(
     id: &'static str,
     falloff: MeshSmoothingFalloff,
     active: bool,
     on_click: impl Fn(&gpui::ClickEvent, &mut gpui::Window, &mut gpui::App) + 'static,
 ) -> gpui::Stateful<Div> {
+    let spec = ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Auto)
+        .padding_x(12.0)
+        .padding_y(0.0, 0.0)
+        .radius(ROUNDED_MD)
+        .font_size(12.0);
     let (border, background, text) = if active {
         (
             mix(ACCENT, WHITE, 0.90),
@@ -197,23 +189,13 @@ fn falloff_button(
     } else {
         (BORDER_SUBTLE, SURFACE_1, TEXT_MUTED)
     };
-    div()
-        .id(id)
-        .min_h(px(36.0))
-        .px(px(12.0))
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded(px(ROUNDED_MD))
-        .border_1()
-        .border_color(rgb(border))
-        .bg(rgb(background))
-        .text_size(px(12.0))
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(rgb(text))
-        .cursor_pointer()
-        .on_click(on_click)
-        .child(falloff.label().to_uppercase())
+    button_with(
+        id,
+        falloff.label().to_uppercase(),
+        &spec.fill(background, border, text),
+    )
+    .min_h(px(36.0))
+    .on_click(on_click)
 }
 
 /// The Mesh Smoothing body: `px-2.5 pb-2.5 space-y-2`, scrolling.
@@ -255,9 +237,10 @@ pub fn smoothing_body(state: &SmoothingState, actions: &SmoothingActions) -> imp
     }
 
     body = body.child(
-        brush_card()
-            .flex()
-            .flex_col()
+        // `brushCardStyle`: `color-mix(#4f8cff, border-subtle 78%)` on
+        // `color-mix(#4f8cff, surface-1 94%)`.
+        sub_card_with(Some((MOVE_TINT, 0.06)), 8.0)
+            .gap(px(0.0))
             .child(section_header("Brush"))
             .child(
                 div()
@@ -402,9 +385,10 @@ pub fn smoothing_body(state: &SmoothingState, actions: &SmoothingActions) -> imp
         );
 
     body = body.child(
-        highlight_card()
-            .flex()
-            .flex_col()
+        // `highlightCardStyle`: `color-mix(#8f6cff, border-subtle 80%)` on
+        // `color-mix(#8f6cff, surface-1 95%)`.
+        sub_card_with(Some((ROTATE_TINT, 0.05)), 8.0)
+            .gap(px(0.0))
             .child(section_header("Highlight"))
             .child(
                 div()

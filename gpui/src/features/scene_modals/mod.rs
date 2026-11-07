@@ -42,8 +42,9 @@
 //!   source's `border-collapse` and `scope` attributes have no GPUI effect;
 //!   the per-row top border and the header fill are reproduced.
 //! * **`<input type="checkbox">`** — the plugin warning's "Do not remind
-//!   again" box is drawn as a 14px bordered square with a `check` glyph when
-//!   checked (`accentColor: #f59e0b` has no GPUI equivalent).
+//!   again" box is `ui::checkbox_with(.., CheckboxTone::Warning)`: a 14px
+//!   bordered square filled with `#f59e0b` and a `check` glyph when checked
+//!   (`accent-color` has no GPUI equivalent).
 //! * **Transitions / animation** — `transition-colors`, the repair bar's
 //!   `transition-[width] duration-300` and the spinner's SMIL rotation are
 //!   static; every element is drawn in its settled state.
@@ -138,4 +139,4 @@ pub use slice_metrics::{
     SliceMetricsConfig, SliceNativePerf, slice_metrics_debug_modal,
 };
 pub use unsaved_changes::{close_unsaved_changes_modal, new_scene_unsaved_changes_modal};
-
+

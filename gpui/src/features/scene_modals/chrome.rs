@@ -1,6 +1,10 @@
 //! Shared dialog chrome for the scene-file, material, mesh-repair and
-//! diagnostics dialogs: the scrim, the dialog panel and the title/action rows
-//! every dialog below composes.
+//! diagnostics dialogs: the debug-sheet shell and the title/action rows every
+//! dialog below composes.
+//!
+//! `StructuredDialogModal` shells come from `gpui_ui::ui::dialog_modal`; the
+//! hand-written modals whose `IconChip` carries a per-dialog `color-mix` keep
+//! their header here and take the backdrop and card from `ui::modal_shell`.
 
 use gpui::{
     App, BoxShadow, ClickEvent, Div, ElementId, FontWeight, IntoElement, SharedString, Window, div,
@@ -10,7 +14,10 @@ use gpui::{
 use gpui_core::icons::icon;
 use gpui_core::theme::*;
 use gpui_ui::panel_fields::{BLACK, with_alpha};
-use gpui_ui::ui::{IconButtonSize, IconButtonVariant, icon_button};
+use gpui_ui::ui::{
+    ButtonSize, ButtonSpec, ButtonVariant, IconButtonSize, IconButtonVariant, button_with,
+    icon_button,
+};
 
 // The `rounded-*` scale and the `#000000` base come from `theme` / `panel_fields`:
 // `globals.css` overrides `--radius-md`/`--radius-lg` to 10px/14px, so a local
@@ -59,13 +66,21 @@ pub(super) fn mix_b(a: u32, b: u32, weight_b: f32) -> u32 {
     mix(a, b, 1.0 - weight_b)
 }
 
-/// `StructuredDialogModal`'s backdrop: `fixed inset-0 flex items-center
-/// justify-center bg-black/<alpha>` with the caller's horizontal padding.
+/// The shell of the wide debug sheets (`DiagnosticsModal`, `HistoryDebugModal`,
+/// `SliceMetricsDebugModal`).
 ///
-/// Every hand-written dialog in this module tree — the structured shells, the
-/// custom `SceneFileModals` headers and the three wide debug sheets — paints
-/// its scrim through this one function.
-pub(super) fn dialog_backdrop(alpha: u32, padding: f32) -> Div {
+/// `ui::modal_shell` is `StructuredDialogModal`'s backdrop and card with its
+/// scrim alpha, gutter and shadow pinned; the sheets paint the same two
+/// elements at their own alpha/gutter/width and cap the card with `max-h` and
+/// its body with `overflow-y`. They cannot start from `modal_shell`, which
+/// returns backdrop and card as one element, so this helper keeps the sheet's
+/// one shape here and lets the caller decorate and fill the card.
+pub(super) fn debug_sheet<E: IntoElement>(
+    width: f32,
+    alpha: u32,
+    padding: f32,
+    panel: impl FnOnce(Div) -> E,
+) -> Div {
     let mut backdrop = div()
         .absolute()
         .top(px(0.0))
@@ -78,15 +93,7 @@ pub(super) fn dialog_backdrop(alpha: u32, padding: f32) -> Div {
     if padding > 0.0 {
         backdrop = backdrop.px(px(padding));
     }
-    backdrop
-}
-
-/// `StructuredDialogModal`'s panel: `w-full rounded-xl border` on `surface-0`,
-/// as a `flex-col`. The caller adds its overflow mode and its drop shadow, so
-/// the scrolling debug sheets and the clipped custom dialogs share the same
-/// frame.
-pub(super) fn dialog_panel(width: f32) -> Div {
-    div()
+    let card = div()
         .w_full()
         .max_w(px(width))
         .rounded(px(ROUNDED_XL))
@@ -94,26 +101,19 @@ pub(super) fn dialog_panel(width: f32) -> Div {
         .border_color(rgb(BORDER_SUBTLE))
         .bg(rgb(SURFACE_0))
         .flex()
-        .flex_col()
-}
-
-/// The custom dialogs in `SceneFileModals` / `MeshRepairModals` repeat the
-/// `StructuredDialogModal` shell by hand (`fixed inset-0 z-[220] … max-w-lg`),
-/// so they share the backdrop and panel above.
-pub(super) fn custom_dialog(width: f32, header: Div, body: Div) -> Div {
-    dialog_backdrop(0x8c, 12.0).child(
-        dialog_panel(width)
-            .overflow_hidden()
-            .shadow(vec![shadow(0.0, 24.0, 46.0, 0.0, with_alpha(BLACK, 0x6b))])
-            .child(header)
-            .child(body),
-    )
+        .flex_col();
+    backdrop.child(panel(card))
 }
 
 /// The hand-written header of the custom dialogs: `flex items-center
 /// justify-between gap-4 border-b px-5 py-4`, a 36px `IconChip` with the
 /// caller's tint, `text-base font-semibold leading-tight` over `text-[11px]
 /// leading-snug`, and a `surface` `IconButton`.
+///
+/// `ui::dialog_modal`'s header is the same layout but takes one of the four
+/// `IconTone`s; the hand-rolled modals in `SceneFileModals` / `MeshRepairModals`
+/// tint their chip with a per-dialog `color-mix` (green, accent, amber), so
+/// they keep the source's tint and take only the shell from `ui::modal_shell`.
 pub(super) fn custom_dialog_header(
     id: &'static str,
     icon_name: &str,
@@ -122,6 +122,33 @@ pub(super) fn custom_dialog_header(
     icon_foreground: u32,
     title: impl Into<SharedString>,
     subtitle: impl Into<SharedString>,
+    on_close: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> Div {
+    custom_dialog_header_full(
+        id,
+        icon_name,
+        icon_border,
+        icon_background,
+        icon_foreground,
+        title,
+        subtitle,
+        false,
+        on_close,
+    )
+}
+
+/// [`custom_dialog_header`] with the source's `disabled` close tile: the tile
+/// takes the `.ui-button:disabled` recipe and drops its click handler.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn custom_dialog_header_full(
+    id: &'static str,
+    icon_name: &str,
+    icon_border: u32,
+    icon_background: u32,
+    icon_foreground: u32,
+    title: impl Into<SharedString>,
+    subtitle: impl Into<SharedString>,
+    close_disabled: bool,
     on_close: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> Div {
     div()
@@ -175,15 +202,31 @@ pub(super) fn custom_dialog_header(
                         ),
                 ),
         )
-        .child(
+        .child(if close_disabled {
+            div()
+                .flex()
+                .flex_shrink_0()
+                .items_center()
+                .justify_center()
+                .w(px(36.0))
+                .h(px(36.0))
+                .rounded(px(ROUNDED_MD))
+                .border_1()
+                .border_color(rgb(mix(BORDER_SUBTLE, BLACK, 0.90)))
+                .bg(rgb(mix(SURFACE_1, BLACK, 0.92)))
+                .cursor_not_allowed()
+                .child(icon("x", 16.0, mix(TEXT_MUTED, SURFACE_2, 0.82)))
+                .into_any_element()
+        } else {
             icon_button(
                 ElementId::named_usize(id, 0),
                 "x",
                 IconButtonVariant::Surface,
                 IconButtonSize::Md,
             )
-            .on_click(on_close),
-        )
+            .on_click(on_close)
+            .into_any_element()
+        })
 }
 
 /// A `text-sm leading-relaxed` paragraph in `--text-muted`.
@@ -309,65 +352,36 @@ pub(super) fn action_slot(child: impl IntoElement) -> Div {
     div().flex_1().child(child)
 }
 
-/// The two tinted button tones the dialogs use with a leading glyph.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum TintedTone {
-    Accent,
-    Danger,
+/// The tinted variants' label colour — the same token `ui`'s `button_colors`
+/// uses for the variant's text, and the colour a leading glyph inherits at the
+/// source.
+fn tinted_text(variant: ButtonVariant) -> u32 {
+    match variant {
+        ButtonVariant::TintedAccent => ACCENT,
+        ButtonVariant::TintedDanger => DANGER,
+        ButtonVariant::TintedWarning => AMBER_500,
+        ButtonVariant::TintedSuccess => SUCCESS,
+        _ => TEXT_STRONG,
+    }
 }
 
 /// A `Button` in a tinted variant with an optional 14px glyph before its label.
 ///
-/// `Button.tsx`'s tinted classes are `.ui-button-tint` plus the tone's
-/// declaration in `globals.css`; the values are the ones `ui.rs`'
-/// `button_colors` carries for `TintedAccent` / `TintedDanger`. The source's
+/// The colours are `ui`'s `ButtonVariant::TintedAccent` / `TintedDanger` (the
+/// `.ui-button-tint` declaration in `globals.css`); the source's
 /// `className="inline-flex items-center justify-center gap-1.5"` supplies the
-/// 6px gap, which `button` cannot add because it has already appended its label.
+/// 6px gap.
 pub(super) fn tinted_action(
     id: impl Into<ElementId>,
     label: impl Into<SharedString>,
     glyph: Option<(&str, f32)>,
-    tone: TintedTone,
+    variant: ButtonVariant,
 ) -> gpui::Stateful<Div> {
-    let label: SharedString = label.into();
-    let (background, border, text, hover) = match tone {
-        TintedTone::Accent => (
-            mix(ACCENT, SURFACE_1, 0.14),
-            mix(ACCENT, BORDER_SUBTLE, 0.55),
-            ACCENT,
-            mix(ACCENT, SURFACE_1, 0.24),
-        ),
-        TintedTone::Danger => (
-            mix(DANGER, SURFACE_1, 0.14),
-            mix(DANGER, BORDER_SUBTLE, 0.55),
-            DANGER,
-            mix(DANGER, SURFACE_1, 0.24),
-        ),
-    };
-    let mut el = div()
-        .id(id)
-        .flex()
-        .items_center()
-        .justify_center()
-        .gap(px(6.0))
-        .h(px(36.0))
-        .rounded(px(RADIUS_SM))
-        .border_1()
-        .border_color(rgb(border))
-        .bg(rgb(background))
-        .pt(px(5.0))
-        .pb(px(7.0))
-        .px(px(11.0))
-        .text_size(px(FONT_MD))
-        .font_weight(FontWeight::SEMIBOLD)
-        .line_height(px(FONT_MD))
-        .text_color(rgb(text))
-        .cursor_pointer()
-        .hover(move |style| style.bg(rgb(hover)));
+    let mut spec = ButtonSpec::new(variant, ButtonSize::Md).gap(6.0);
     if let Some((name, size)) = glyph {
-        el = el.child(icon(name, size, text));
+        spec = spec.icon(name, size, tinted_text(variant));
     }
-    el.child(label)
+    button_with(id, label, &spec)
 }
 
 // ── Scene import placement / hollowing ──────────────────────────────────────

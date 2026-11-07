@@ -89,8 +89,9 @@ use gpui::{
 use gpui_core::icons::icon;
 use gpui_core::theme::*;
 use gpui_ui::ui::{
-    IconButtonSize, IconButtonVariant, IconTone, SelectOption, icon_button, icon_button_toned,
-    select_dropdown, spinner,
+    ButtonSize, ButtonSpec, ButtonVariant, IconButtonSize, IconButtonVariant, IconChipSize,
+    IconTone, SettingDensity, SettingSurface, SelectOption, button_with, dialog_modal_full,
+    icon_button, icon_button_toned, icon_chip_with, select_dropdown, setting_row, spinner,
 };
 use crate::DragonFruit;
 
@@ -671,159 +672,79 @@ fn footer(entity: WeakEntity<DragonFruit>) -> Div {
         .border_color(rgb(BORDER_SUBTLE))
         // color-mix(in srgb, surface-1, transparent 10%) over surface-0
         .bg(rgb(mix(SURFACE_1, SURFACE_0, 0.9)))
-        .child(action_button(
-            "settings-restore",
-            "Restore Defaults",
-            Some("rotate-ccw"),
-            14.0,
-            mix(ACCENT_SECONDARY, SURFACE_1, 0.08),
-            mix(ACCENT_SECONDARY, BORDER_SUBTLE, 0.58),
-            ACCENT_SECONDARY,
-            mix(ACCENT_SECONDARY, SURFACE_1, 0.24),
-            move |cx| {
+        .child(
+            button_with(
+                "settings-restore",
+                "Restore Defaults",
+                ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Lg)
+                    .padding_x(14.0)
+                    .padding_y(0.0, 0.0)
+                    .font_size(14.0)
+                    .gap(6.0)
+                    .hover(mix(ACCENT_SECONDARY, SURFACE_1, 0.24))
+                    .icon("rotate-ccw", 16.0, ACCENT_SECONDARY),
+            )
+            // `accentSecondaryActionStyle92`: accent-secondary over surface-1.
+            .border_color(rgb(mix(ACCENT_SECONDARY, BORDER_SUBTLE, 0.58)))
+            .bg(rgb(mix(ACCENT_SECONDARY, SURFACE_1, 0.08)))
+            .text_color(rgb(ACCENT_SECONDARY))
+            .on_click(move |_, _, cx| {
                 // `handleRestoreDefaults` opens the confirmation first.
                 edit_and_notify(&restore_entity, cx, |draft| {
                     draft.show_restore_confirm = true;
                 });
-            },
-        ))
+            }),
+        )
         .child(
             div()
                 .flex()
                 .items_center()
                 .gap(px(8.))
-                .child(action_button(
-                    "settings-cancel",
-                    "Cancel",
-                    None,
-                    16.0,
-                    SURFACE_1,
-                    BORDER_SUBTLE,
-                    TEXT_MUTED,
-                    SURFACE_2,
-                    move |cx| close(&cancel_entity, cx),
-                ))
-                .child(action_button(
-                    "settings-apply",
-                    "Apply",
-                    Some("check"),
-                    16.0,
-                    mix(ACCENT, SURFACE_0, 0.16),
-                    mix(ACCENT, 0xffffff, 0.9),
-                    ACCENT_CONTRAST,
-                    mix(ACCENT, SURFACE_0, 0.28),
-                    move |cx| close(&apply_entity, cx),
-                )),
-        )
-}
-
-/// `StructuredDialogModal` — the shell every settings dialog shares.
-///
-/// `max-w-md` default, `rounded-xl border shadow-2xl` on `--surface-0`, a
-/// `px-5 py-4` header with an `IconChip` and a `p-5` body, and the action row
-/// on the right.
-fn dialog_shell(
-    width: f32,
-    icon_slug: &'static str,
-    icon_tone: (u32, u32, u32),
-    title: impl Into<SharedString>,
-    subtitle: Option<SharedString>,
-    body: Div,
-    actions: Div,
-) -> Div {
-    let (icon_fg, icon_border, icon_bg) = icon_tone;
-    div()
-        .absolute()
-        .top(px(0.))
-        .left(px(0.))
-        .size_full()
-        .flex()
-        .items_center()
-        .justify_center()
-        .px(px(12.))
-        .bg(rgba(0x0000008c)) // bg-black/55
-        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-        .child(
-            div()
-                .w(px(width))
-                .max_w(relative(1.0))
-                .flex()
-                .flex_col()
-                .overflow_hidden()
-                .rounded(px(12.)) // rounded-xl
-                .border_1()
-                .border_color(rgb(BORDER_SUBTLE))
-                .bg(rgb(SURFACE_0))
                 .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(12.))
-                        .px(px(20.))
-                        .py(px(16.))
-                        .border_b_1()
-                        .border_color(rgb(BORDER_SUBTLE))
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .w(px(40.))
-                                .h(px(40.))
-                                .flex_shrink_0()
-                                .rounded(px(10.))
-                                .border_1()
-                                .border_color(rgb(icon_border))
-                                .bg(rgb(icon_bg))
-                                .child(icon(icon_slug, 18., icon_fg)),
-                        )
-                        .child(
-                            div()
-                                .min_w(px(0.))
-                                .flex_1()
-                                .child(
-                                    div()
-                                        .text_size(px(16.))
-                                        .font_weight(FontWeight::SEMIBOLD)
-                                        .line_height(relative(1.2))
-                                        .text_color(rgb(TEXT_STRONG))
-                                        .child(title.into()),
-                                )
-                                .when_some(subtitle, |this, subtitle| {
-                                    this.child(
-                                        div()
-                                            .mt(px(2.))
-                                            .text_size(px(12.))
-                                            .line_height(relative(1.2))
-                                            .text_color(rgb(TEXT_MUTED))
-                                            .child(subtitle),
-                                    )
-                                }),
-                        ),
+                    button_with(
+                        "settings-cancel",
+                        "Cancel",
+                        ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Lg)
+                            .padding_x(16.0)
+                            .padding_y(0.0, 0.0)
+                            .font_size(14.0),
+                    )
+                    .text_color(rgb(TEXT_MUTED))
+                    .on_click(move |_, _, cx| close(&cancel_entity, cx)),
                 )
-                .child(div().p(px(20.)).child(body))
                 .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .justify_end()
-                        .gap(px(8.))
-                        .px(px(20.))
-                        .pb(px(20.))
-                        .child(actions),
+                    button_with(
+                        "settings-apply",
+                        "Apply",
+                        ButtonSpec::new(ButtonVariant::Primary, ButtonSize::Lg)
+                            .padding_x(16.0)
+                            .padding_y(0.0, 0.0)
+                            .font_size(14.0)
+                            .gap(6.0)
+                            .hover(mix(ACCENT, SURFACE_0, 0.28))
+                            .icon("check", 16.0, ACCENT_CONTRAST),
+                    )
+                    // The source overrides the primary fill with the accent mix.
+                    .border_color(rgb(mix(ACCENT, 0xffffff, 0.9)))
+                    .bg(rgb(mix(ACCENT, SURFACE_0, 0.16)))
+                    .text_color(rgb(ACCENT_CONTRAST))
+                    .on_click(move |_, _, cx| close(&apply_entity, cx)),
                 ),
         )
 }
 
+
 fn restore_defaults_dialog(entity: WeakEntity<DragonFruit>) -> Div {
     let cancel_entity = entity.clone();
-    let confirm_entity = entity;
-    dialog_shell(
+    let confirm_entity = entity.clone();
+    let close_entity = entity;
+    dialog_modal_full(
         448.0, // max-w-md
-        "rotate-ccw",
-        (0xf59e0b, mix(0xf59e0b, BORDER_SUBTLE, 0.45), mix(0xf59e0b, SURFACE_1, 0.9)),
         "Restore Defaults?",
         Some("This resets settings in this dialog to their default values.".into()),
+        Some("rotate-ccw"),
+        IconTone::Warning,
+        false,
         div().child(
             div()
                 .flex()
@@ -844,36 +765,43 @@ fn restore_defaults_dialog(entity: WeakEntity<DragonFruit>) -> Div {
             .flex()
             .items_center()
             .gap(px(8.))
-            .child(action_button(
-                "restore-cancel",
-                "Keep Current",
-                None,
-                16.0,
-                SURFACE_1,
-                BORDER_SUBTLE,
-                TEXT_STRONG,
-                SURFACE_2,
-                move |cx| {
+            .child(
+                button_with(
+                    "restore-cancel",
+                    "Keep Current",
+                    ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Lg)
+                        .padding_x(16.0)
+                        .padding_y(0.0, 0.0)
+                        .font_size(14.0),
+                )
+                .on_click(move |_, _, cx| {
                     edit_and_notify(&cancel_entity, cx, |draft| {
                         draft.show_restore_confirm = false;
                     });
-                },
-            ))
-            .child(action_button(
-                "restore-confirm",
-                "Restore Defaults",
-                Some("rotate-ccw"),
-                16.0,
-                mix(ACCENT, SURFACE_1, 0.14),
-                mix(ACCENT, BORDER_SUBTLE, 0.55),
-                ACCENT,
-                mix(ACCENT, SURFACE_1, 0.24),
-                move |cx| {
+                }),
+            )
+            .child(
+                button_with(
+                    "restore-confirm",
+                    "Restore Defaults",
+                    ButtonSpec::new(ButtonVariant::TintedAccent, ButtonSize::Lg)
+                        .padding_x(16.0)
+                        .padding_y(0.0, 0.0)
+                        .font_size(14.0)
+                        .gap(6.0)
+                        .icon("rotate-ccw", 16.0, ACCENT),
+                )
+                .on_click(move |_, _, cx| {
                     edit_and_notify(&confirm_entity, cx, |draft| {
                         draft.restore_defaults();
                         draft.show_restore_confirm = false;
                     });
-                },
-            )),
+                }),
+            ),
+        move |_, _, cx| {
+            edit_and_notify(&close_entity, cx, |draft| {
+                draft.show_restore_confirm = false;
+            });
+        },
     )
 }

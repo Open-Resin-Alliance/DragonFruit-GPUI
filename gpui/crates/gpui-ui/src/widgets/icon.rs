@@ -1,6 +1,9 @@
 //! Icon tones (`iconTone.ts`) and the `IconChip` square.
 
-use gpui::{Div, FontWeight, IntoElement, div, prelude::*, px, rgb};
+use gpui::{
+    App, ClickEvent, Div, ElementId, FontWeight, IntoElement, Stateful, Window, div, prelude::*, px,
+    rgb,
+};
 
 use gpui_core::icons::icon;
 use gpui_core::theme::*;
@@ -103,4 +106,40 @@ pub fn icon_chip_with(size: IconChipSize, tone: IconTone, content: impl IntoElem
         chip = chip.font_weight(FontWeight::BOLD).line_height(px(10.0));
     }
     chip
+}
+
+// ── IconButton tile ─────────────────────────────────────────────────────────
+
+/// `IconButton`'s `solid` tile at a call site that pins its own padding
+/// (`className="!p-0.5"`): the `.ui-button-secondary` box — `rounded-sm`, the
+/// variant's `surface-1` fill, `border-subtle` edge and `text-muted` glyph —
+/// made interactive.
+///
+/// [`super::button::icon_button_toned`] owns the size-class paddings; this is
+/// the one variant the class list cannot express, because the source overrides
+/// the padding per call site with an `!p-*` utility.
+pub fn icon_button_tile(
+    id: impl Into<ElementId>,
+    icon_name: &str,
+    icon_size: f32,
+    tone: IconTone,
+    pad: f32,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> Stateful<Div> {
+    let (border, background, foreground) = icon_tone_colors(tone);
+    div()
+        .id(id)
+        .flex()
+        .flex_shrink_0()
+        .items_center()
+        .justify_center()
+        .rounded(px(RADIUS_SM))
+        .border_1()
+        .border_color(rgb(border))
+        .bg(rgb(background))
+        .p(px(pad))
+        .cursor_pointer()
+        .hover(|style| style.bg(rgb(SURFACE_2)))
+        .child(icon(icon_name, icon_size, foreground))
+        .on_click(on_click)
 }

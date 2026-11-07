@@ -114,6 +114,60 @@ pub fn setting_row(
     row.child(div().flex().items_center().gap(px(8.0)).child(control))
 }
 
+// ── Section headers ─────────────────────────────────────────────────────────
+
+/// `SectionHeader` (`TransformControls.tsx`, `MeshSmoothingSettingsPanel.tsx`):
+/// `py-0.5 text-center text-xs font-semibold uppercase tracking-wide` in
+/// `--text-strong`. `tracking-wide` has no GPUI equivalent; the label is
+/// upper-cased in the string, as the `uppercase` utility would.
+pub fn section_header(title: impl Into<SharedString>) -> Div {
+    let title: SharedString = title.into();
+    div()
+        .py(px(2.0))
+        .text_center()
+        .text_size(px(FONT_XS))
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(rgb(TEXT_STRONG))
+        .child(title.to_uppercase())
+}
+
+/// [`section_header`] between two `flex-1` slots: the Transform panel's centred
+/// section title with a control at either end (`Move`'s Local toggle on the
+/// right, `Rotate`'s Group pill on the left).
+pub fn section_row(title: impl Into<SharedString>, leading: Option<Div>, trailing: Option<Div>) -> Div {
+    div()
+        .flex()
+        .items_center()
+        .child(div().flex_1().when_some(leading, |this, leading| {
+            this.flex().justify_start().child(leading)
+        }))
+        .child(section_header(title))
+        .child(div().flex_1().when_some(trailing, |this, trailing| {
+            this.flex().justify_end().child(trailing)
+        }))
+}
+
+/// The muted `ui-meta` caption above a control group (`Cut Mode`, `Layout
+/// Mode`, `Arrange Distance`, `Placement Anchor`): 13px in `--text-muted`.
+pub fn section_label(text: impl Into<SharedString>) -> Div {
+    div()
+        .text_size(px(FONT_SM))
+        .text_color(rgb(TEXT_MUTED))
+        .child(text.into())
+}
+
+/// The `text-[10px] uppercase tracking-wide` column caption of a grid
+/// (`ArrangePanel`'s Count/Gap row), centred in its column, in `--text-muted`.
+pub fn column_heading(text: impl Into<SharedString>) -> Div {
+    let text: SharedString = text.into();
+    div()
+        .flex_1()
+        .text_center()
+        .text_size(px(10.0))
+        .text_color(rgb(TEXT_MUTED))
+        .child(text.to_uppercase())
+}
+
 // ── PanelCollapseToggle ─────────────────────────────────────────────────────
 
 /// `PanelCollapseToggle.tsx`: the chevron that expands and collapses a panel.

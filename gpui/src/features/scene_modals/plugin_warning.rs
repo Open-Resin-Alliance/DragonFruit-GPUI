@@ -3,32 +3,15 @@
 use std::rc::Rc;
 
 use gpui::{App, ClickEvent, Div, FontWeight, SharedString, Window, div, prelude::*, px, rgb};
-use gpui_core::icons::icon;
 use gpui_core::theme::*;
-use gpui_ui::panel_fields::BLACK;
-use gpui_ui::ui::{ButtonSize, ButtonVariant, IconTone, button, dialog_modal};
+use gpui_ui::ui::{
+    ButtonSize, ButtonVariant, CheckboxSize, CheckboxTone, IconTone, button, checkbox_with,
+    dialog_modal,
+};
 
 use super::chrome::{AMBER_200, AMBER_500, DIALOG_LG, mix_b, muted_small_paragraph};
 
 // ── Plugin import warning ───────────────────────────────────────────────────
-
-/// A 14px checkbox: `h-3.5 w-3.5 rounded border` with `accentColor: #f59e0b`.
-fn warning_checkbox(checked: bool) -> Div {
-    let mut box_ = div()
-        .flex()
-        .flex_shrink_0()
-        .items_center()
-        .justify_center()
-        .w(px(14.0))
-        .h(px(14.0))
-        .rounded(px(4.0))
-        .border_1()
-        .border_color(rgb(BORDER_SUBTLE));
-    if checked {
-        box_ = box_.bg(rgb(AMBER_500)).child(icon("check", 10.0, BLACK));
-    }
-    box_
-}
 
 /// `showPluginImportWarningModal` — `SceneFileModals.tsx`.
 ///
@@ -64,7 +47,12 @@ pub fn plugin_import_warning_modal(
         .gap(px(8.0))
         .cursor_pointer()
         .on_click(move |event, window, cx| on_toggle_skip(event, window, cx))
-        .child(warning_checkbox(skip_future))
+        .child(checkbox_with(
+            skip_future,
+            CheckboxSize::Sm,
+            CheckboxTone::Warning,
+            false,
+        ))
         .child(
             div()
                 .text_size(px(12.0))

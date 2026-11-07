@@ -59,11 +59,12 @@ use gpui::{
 };
 
 use gpui_core::icons::icon;
-use gpui_ui::panel_fields::{format_number, with_alpha};
+use gpui_ui::panel_fields::{disabled_action_style, format_number, with_alpha};
 use gpui_core::theme::*;
 use gpui_ui::ui::{
-    IconButtonSize, IconButtonVariant, SelectOption, SelectOptionTone, icon_button, input_box,
-    select_dropdown, tooltip,
+    ButtonSize, ButtonSpec, ButtonVariant, IconButtonSize, IconButtonVariant, SelectOption,
+    SelectOptionTone, ToggleSize, button_with, icon_button, input_box, labeled_number_field,
+    select_dropdown, toggle_sized, tooltip,
 };
 use crate::DragonFruit;
 
@@ -123,13 +124,10 @@ fn shadow(x: f32, y: f32, blur: f32, spread: f32, color: u32) -> gpui::BoxShadow
         .spread_radius(px(spread))
 }
 
-/// The disabled `.ui-button` recipe.
-fn disabled_button() -> (u32, u32, u32) {
-    (
-        mix(SURFACE_1, BLACK, 0.92),
-        mix(BORDER_SUBTLE, BLACK, 0.90),
-        mix(TEXT_MUTED, SURFACE_2, 0.82),
-    )
+/// The `.ui-button:disabled` foreground (`button:disabled` in `globals.css`),
+/// for the icons `ButtonSpec` cannot inherit the disabled colour into.
+fn disabled_foreground() -> u32 {
+    disabled_action_style().2
 }
 
 // ── The settings block ──────────────────────────────────────────────────────
@@ -996,55 +994,8 @@ fn help_text(text: &'static str) -> Div {
     div().w(px(240.0)).child(text)
 }
 
-/// The two 12px chevrons of `LabeledNumberInput`'s stepper:
-/// `absolute inset-y-0 right-1 flex w-4 flex-col items-center justify-center
-/// gap-0.5`.
-fn field_stepper(
-    id: &str,
-    enabled: bool,
-    on_up: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_down: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-) -> Div {
-    let button = |index: usize,
-                  name: &'static str,
-                  enabled: bool,
-                  callback: std::rc::Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>| {
-        let mut el = div()
-            .id(ElementId::named_usize(SharedString::from(id.to_string()), index))
-            .flex()
-            .items_center()
-            .justify_center()
-            .w(px(12.0))
-            .h(px(12.0))
-            .rounded(px(ROUNDED_BARE))
-            .child(icon(name, 10.0, FOREGROUND));
-        if enabled {
-            el = el
-                .cursor_pointer()
-                .hover(|style| style.bg(rgba(with_alpha(WHITE, 0x1a))))
-                .on_click(move |event, window, cx| callback(event, window, cx));
-        } else {
-            el = el.opacity(0.5).cursor_not_allowed();
-        }
-        el
-    };
-
-    div()
-        .absolute()
-        .right(px(4.0))
-        .top(px(0.0))
-        .bottom(px(0.0))
-        .flex()
-        .flex_col()
-        .items_center()
-        .justify_center()
-        .gap(px(2.0))
-        .w(px(16.0))
-        .child(button(0, "chevron-up", enabled, std::rc::Rc::new(on_up)))
-        .child(button(1, "chevron-down", enabled, std::rc::Rc::new(on_down)))
-}
-
-/// `NumberField` — a labelled field with the stepper, never a slider.
+/// `NumberField` — `LabeledNumberInput`'s labelled field with the default
+/// stepper, never a slider.
 fn number_field(
     def: &'static KnobDef,
     value: f32,
@@ -1069,44 +1020,25 @@ fn number_field(
         edit_and_notify(&down_entity, cx, |state| state.draft.set_knob(key, next));
     };
 
-    let mut field = input_box(ElementId::Name(id.clone().into()), false)
-        .h(px(36.0))
-        // `pr-14` (56px): the unit sits at `right-6` inside it.
-        .pr(px(56.0))
-        .child(SharedString::from(format_number(value)));
-    if locked {
-        field = field.opacity(0.55).cursor_not_allowed();
-    }
-
-    let mut wrapper = div()
-        .relative()
-        .w_full()
-        .min_w(px(0.0))
-        .child(field)
-        .child(field_stepper(&id, !locked, up, down));
-    if let Some(unit) = def.unit {
-        wrapper = wrapper.child(
-            div()
-                .absolute()
-                .right(px(24.0))
-                .top(px(0.0))
-                .bottom(px(0.0))
-                .flex()
-                .items_center()
-                .text_size(px(11.0))
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(rgb(TEXT_MUTED))
-                .child(unit),
-        );
-    }
-
     let field = div()
         .flex()
         .flex_col()
         .gap(px(4.0))
         .w_full()
         .child(label_row(def.label, hint, &id))
-        .child(wrapper);
+        .child(
+            labeled_number_field(
+                id.clone(),
+                format_number(value),
+                def.unit,
+                locked,
+                !locked,
+                !locked,
+                up,
+                down,
+            )
+            .w_full(),
+        );
 
     if locked {
         tooltip(
@@ -1122,6 +1054,11 @@ fn number_field(
 
 /// The switch a `LabeledToggleInput` renders: a 36px `.ui-input` row whose right
 /// side is the pill.
+///
+/// The row keeps `.ui-input`'s 10px padding and its 13px / 1.3 type (the
+/// source's `px-2.5 leading-tight text-sm` all lose to the unlayered rule). The
+/// pill is `Toggle`'s `sm` track (`h-5 w-9 px-0.5`, 16px knob) repainted with
+/// the source's `--accent-secondary` / disabled fill.
 fn toggle_switch_row(on: bool, disabled: bool) -> Div {
     let (border, background, text) = if disabled {
         (
@@ -1160,19 +1097,7 @@ fn toggle_switch_row(on: bool, disabled: bool) -> Div {
         .items_center()
         .justify_between()
         .child(if on { "Enabled" } else { "Disabled" })
-        .child(
-            div()
-                .flex()
-                .items_center()
-                .rounded_full()
-                .p(px(2.0))
-                .w(px(36.0))
-                .h(px(20.0))
-                .bg(rgb(track))
-                .when(on, |el| el.justify_end())
-                .when(!on, |el| el.justify_start())
-                .child(div().rounded_full().bg(rgb(WHITE)).w(px(16.0)).h(px(16.0))),
-        )
+        .child(toggle_sized(on, ToggleSize::Sm).bg(rgb(track)))
 }
 
 #[derive(Clone, Copy)]
@@ -1510,7 +1435,12 @@ fn sizing_tier_field(
 
 // ── Preset strip ────────────────────────────────────────────────────────────
 
-/// `STRIP_BUTTON`: `!h-8 !px-2.5 !py-0 text-[11px] inline-flex items-center gap-1`.
+/// `STRIP_BUTTON`: `Button variant="secondary" size="auto"` with
+/// `!h-8 !px-2.5 !py-0 text-[11px] inline-flex items-center gap-1
+/// disabled:opacity-45`.
+///
+/// `.ui-button` is unlayered, so the `!`-marked height, horizontal padding and
+/// zero vertical padding apply while `text-[11px]` loses to its 14px type.
 fn strip_button(
     id: &'static str,
     icon_name: &'static str,
@@ -1518,30 +1448,28 @@ fn strip_button(
     enabled: bool,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> Stateful<Div> {
-    let mut el = div()
-        .id(id)
-        .flex()
-        .items_center()
-        .gap(px(4.0))
-        .h(px(32.0))
-        .px(px(10.0))
-        .rounded(px(RADIUS_SM))
-        .border_1()
-        .border_color(rgb(BORDER_SUBTLE))
-        .bg(rgb(SURFACE_1))
-        .text_size(px(11.0))
-        .text_color(rgb(TEXT_STRONG))
-        .child(icon(icon_name, 14.0, TEXT_STRONG))
-        .child(label);
-    if enabled {
-        el = el
-            .cursor_pointer()
-            .hover(|style| style.bg(rgb(SURFACE_2)))
-            .on_click(on_click);
-    } else {
-        el = el.opacity(0.45).cursor_not_allowed();
+    let mut spec = ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Sm)
+        .padding_x(10.0)
+        .padding_y(0.0, 0.0)
+        .gap(4.0)
+        .icon(
+            icon_name,
+            14.0,
+            if enabled {
+                TEXT_STRONG
+            } else {
+                disabled_foreground()
+            },
+        );
+    if !enabled {
+        spec = spec.disabled();
     }
-    el
+    let el = button_with(id, label, &spec);
+    if enabled {
+        el.on_click(on_click)
+    } else {
+        el.opacity(0.45)
+    }
 }
 
 fn preset_strip(
@@ -1706,90 +1634,63 @@ fn preset_strip(
 // ── Footer ──────────────────────────────────────────────────────────────────
 
 fn footer_delete_button(enabled: bool, entity: &WeakEntity<DragonFruit>) -> Stateful<Div> {
-    let (background, border, text, hover) = if enabled {
-        (
-            mix(DANGER, SURFACE_1, 0.14),
-            mix(DANGER, BORDER_SUBTLE, 0.55),
-            DANGER,
-            mix(DANGER, SURFACE_1, 0.24),
-        )
-    } else {
-        let (background, border, text) = disabled_button();
-        (background, border, text, background)
-    };
-    let mut el = div()
-        .id("as-footer-delete")
-        .flex()
-        .items_center()
-        .justify_center()
-        .gap(px(6.0))
-        .h(px(36.0))
-        .px(px(11.0))
-        .rounded(px(RADIUS_SM))
-        .border_1()
-        .border_color(rgb(border))
-        .bg(rgb(background))
-        .text_size(px(FONT_MD))
-        .font_weight(FontWeight::SEMIBOLD)
-        .line_height(px(FONT_MD))
-        .text_color(rgb(text))
-        .child(icon("trash-2", 14.0, text))
-        .child("Delete");
+    // `Button variant="tinted-danger" size="md"`, whose `.ui-button:disabled`
+    // recipe `ButtonSpec::disabled` already paints.
+    let mut spec = ButtonSpec::new(ButtonVariant::TintedDanger, ButtonSize::Md)
+        .gap(6.0)
+        .icon(
+            "trash-2",
+            14.0,
+            if enabled { DANGER } else { disabled_foreground() },
+        );
+    if !enabled {
+        spec = spec.disabled();
+    }
+    let el = button_with("as-footer-delete", "Delete", &spec);
     if enabled {
         let click_entity = entity.clone();
-        el = el
-            .cursor_pointer()
-            .hover(move |style| style.bg(rgb(hover)))
-            .on_click(move |_, _, cx| {
-                edit_and_notify(&click_entity, cx, |state| state.pending_delete = true);
-            });
+        el.on_click(move |_, _, cx| {
+            edit_and_notify(&click_entity, cx, |state| state.pending_delete = true);
+        })
     } else {
-        el = el.cursor_not_allowed();
+        el
     }
-    el
 }
 
 fn footer_reset_button(enabled: bool, entity: &WeakEntity<DragonFruit>) -> Stateful<Div> {
-    let (background, border, text, hover) = if enabled {
-        (SURFACE_1, BORDER_SUBTLE, TEXT_STRONG, SURFACE_2)
-    } else {
-        let (background, border, text) = disabled_button();
-        (background, border, text, background)
-    };
-    let mut el = div()
-        .id("as-footer-reset")
-        .flex()
-        .items_center()
-        .gap(px(6.0))
-        .h(px(36.0))
-        .px(px(12.0))
-        .rounded(px(RADIUS_SM))
-        .border_1()
-        .border_color(rgb(border))
-        .bg(rgb(background))
-        .text_size(px(12.0))
-        .text_color(rgb(text))
-        .child(icon("rotate-ccw", 14.0, text))
-        .child("Reset");
+    // `FOOTER_BUTTON`: `Button variant="secondary" size="auto"` with `!h-9
+    // px-3 text-[12px] disabled:opacity-45`; the unlayered `.ui-button` keeps
+    // its 11px padding and 14px type, so only the 36px height applies.
+    let mut spec = ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Md)
+        .gap(6.0)
+        .icon(
+            "rotate-ccw",
+            14.0,
+            if enabled {
+                TEXT_STRONG
+            } else {
+                disabled_foreground()
+            },
+        );
+    if !enabled {
+        spec = spec.disabled();
+    }
+    let el = button_with("as-footer-reset", "Reset", &spec);
     if enabled {
         let click_entity = entity.clone();
-        el = el
-            .cursor_pointer()
-            .hover(move |style| style.bg(rgb(hover)))
-            .on_click(move |_, _, cx| {
-                edit(|state| {
-                    let restored = state.active_preset().map(|preset| preset.settings);
-                    if let Some(restored) = restored {
-                        state.live = restored;
-                    }
-                    state.draft = state.live;
-                });
-                apply_live_to_app(&click_entity, cx);
+        el.on_click(move |_, _, cx| {
+            edit(|state| {
+                let restored = state.active_preset().map(|preset| preset.settings);
+                if let Some(restored) = restored {
+                    state.live = restored;
+                }
+                state.draft = state.live;
             });
+            apply_live_to_app(&click_entity, cx);
+        })
     } else {
-        el = el.cursor_not_allowed();
+        el.opacity(0.45)
     }
-    el
 }
 
 fn footer_save_button(
@@ -1797,41 +1698,34 @@ fn footer_save_button(
     saved: bool,
     entity: &WeakEntity<DragonFruit>,
 ) -> Stateful<Div> {
-    let (background, border, text, hover) = if saved {
-        (saved_background(), saved_border(), SUCCESS, saved_background())
-    } else if enabled {
-        (save_background(), save_border(), ACCENT_SECONDARY, save_background())
-    } else {
-        let (background, border, text) = disabled_button();
-        (background, border, text, background)
-    };
-    let mut el = div()
-        .id("as-footer-save")
-        .flex()
-        .items_center()
-        .justify_center()
-        .gap(px(6.0))
-        .h(px(36.0))
-        .px(px(11.0))
-        .rounded(px(RADIUS_SM))
-        .border_1()
-        .border_color(rgb(border))
-        .bg(rgb(background))
-        .text_size(px(FONT_MD))
-        .font_weight(FontWeight::SEMIBOLD)
-        .line_height(px(FONT_MD))
-        .text_color(rgb(text));
+    // `Button size="md"` (secondary) with the source's inline `SAVE_STYLE` /
+    // `SAVED_STYLE`; `.ui-button:disabled` stays the base while disabled.
+    let mut spec = ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Md).gap(6.0);
     if saved {
-        el = el.child(icon("check", 14.0, text)).child("Saved!");
-    } else {
-        el = el.child("Save");
+        spec = spec.icon("check", 14.0, SUCCESS);
     }
+    if !enabled {
+        spec = spec.disabled();
+    }
+    let el = button_with(
+        "as-footer-save",
+        if saved { "Saved!" } else { "Save" },
+        &spec,
+    );
+    let el = if saved {
+        el.border_color(rgb(saved_border()))
+            .bg(rgb(saved_background()))
+            .text_color(rgb(SUCCESS))
+    } else if enabled {
+        el.border_color(rgb(save_border()))
+            .bg(rgb(save_background()))
+            .text_color(rgb(ACCENT_SECONDARY))
+    } else {
+        el
+    };
     if enabled && !saved {
         let click_entity = entity.clone();
-        el = el
-            .cursor_pointer()
-            .hover(move |style| style.bg(rgb(hover)))
-            .on_click(move |_, _, cx| {
+        el.on_click(move |_, _, cx| {
                 edit(|state| {
                     // `commitAutoSupportSettings`: the draft becomes the live
                     // block, and the active preset is written with it when the
@@ -1866,11 +1760,10 @@ fn footer_save_button(
                         .detach();
                     })
                     .ok();
-            });
+        })
     } else {
-        el = el.cursor_not_allowed();
+        el.cursor_not_allowed()
     }
-    el
 }
 
 fn footer(
@@ -1907,31 +1800,19 @@ fn footer(
 
 fn dialog_cancel_button(entity: &WeakEntity<DragonFruit>, action: &'static str) -> Stateful<Div> {
     let click_entity = entity.clone();
-    let mut el = div()
-        .id(ElementId::Name(format!("as-{action}-cancel").into()))
-        .flex()
-        .items_center()
-        .justify_center()
-        .h(px(36.0))
-        .px(px(11.0))
-        .rounded(px(RADIUS_SM))
-        .border_1()
-        .border_color(rgb(BORDER_SUBTLE))
-        .bg(rgb(SURFACE_1))
-        .text_size(px(FONT_MD))
-        .font_weight(FontWeight::SEMIBOLD)
-        .line_height(px(FONT_MD))
-        .text_color(rgb(TEXT_STRONG))
-        .cursor_pointer()
-        .hover(|style| style.bg(rgb(SURFACE_2)))
-        .child("Cancel");
-    el = el.on_click(move |_, _, cx| {
+    // `Button variant="secondary" size="md"` — the base `.ui-button` recipe.
+    let spec = ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Md);
+    button_with(
+        ElementId::Name(format!("as-{action}-cancel").into()),
+        "Cancel",
+        &spec,
+    )
+    .on_click(move |_, _, cx| {
         edit_and_notify(&click_entity, cx, |state| {
             state.name_dialog = None;
             state.pending_delete = false;
         });
-    });
-    el
+    })
 }
 
 fn delete_dialog(preset_name: &str, entity: &WeakEntity<DragonFruit>) -> Div {

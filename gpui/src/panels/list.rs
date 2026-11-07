@@ -94,11 +94,10 @@
 //!   caller that knows better passes [`panel_stack_with`].
 //! - **Panel measurement.** `offsetWidth`/`offsetHeight` become the prepaint
 //!   bounds of the item wrapper (`on_children_prepainted`).
-//! - **`ui::card` radius.** `Card.tsx` uses Tailwind's `rounded-lg` (8px);
-//!   `ui::card()` paints `theme::RADIUS_LG` (14px, the CSS custom property).
-//!   This module overrides it to 8px. `ui::card_header` and `ui::menu_item`
-//!   are no longer used by this module (`card_header` has no leading slot for
-//!   the collapse toggle; the menu is `ui::context_menu`).
+//! - **`ui::card` / `ui::card_header_with`.** `Card.tsx`'s `rounded-lg` reads
+//!   the app's `--radius-lg` (14px), which is what `ui::card()` paints; the
+//!   header is the shared `card_header_with` with the collapse toggle in its
+//!   leading slot.
 //!
 //! # Content shape
 //!
@@ -115,7 +114,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use gpui::{
-    AnyElement, App, Bounds, BoxShadow, ClickEvent, Div, FontWeight, Hsla, IntoElement, MouseButton,
+    AnyElement, App, Bounds, BoxShadow, ClickEvent, Div, Hsla, IntoElement, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, SharedString, WeakEntity, Window, div,
     prelude::*, px, rgba, rgb,
 };
@@ -125,7 +124,10 @@ use gpui_core::icons::icon;
 use gpui_core::theme::*;
 pub use gpui_core::panel_layout::{PanelDef, PanelDock, PanelKind, PanelLayout};
 use gpui_core::panel_layout::*;
-use gpui_ui::ui::{ContextMenuEntry, card, context_menu};
+use gpui_ui::ui::{
+    ButtonSize, ButtonSpec, ButtonVariant, ContextMenuEntry, button_with_content, card,
+    card_header_with, context_menu,
+};
 
 /// `PANEL_MARGIN` in the source.
 pub const PANEL_MARGIN: f32 = 6.0;
@@ -161,8 +163,6 @@ const RIGHT_DRAG_THRESHOLD_SQ: f32 = 36.0;
 const MENU_EDGE_MARGIN: f32 = 8.0;
 /// `w-48` in `ContextMenu.tsx`.
 const MENU_WIDTH: f32 = 192.0;
-/// `Card`'s `rounded-lg`, which reads the app's `--radius-lg` (14px).
-const CARD_RADIUS: f32 = 14.0;
 /// `ui-button !p-2` around a 12px chevron plus its 1px borders.
 const COLLAPSE_TOGGLE: f32 = 30.0;
 /// `h-3 w-3` on the collapse chevron.
@@ -177,19 +177,25 @@ fn collapse_toggle(
 ) -> impl IntoElement {
     let toggle_layout = layout.clone();
     let toggle_entity = entity.clone();
-    div()
-        .id(format!("panel-collapse-{id}"))
-        .w(px(COLLAPSE_TOGGLE))
-        .h(px(COLLAPSE_TOGGLE))
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded(px(RADIUS_SM))
-        .border_1()
-        .border_color(rgb(BORDER_SUBTLE))
-        .bg(rgb(SURFACE_1))
-        .hover(|style| style.bg(rgb(SURFACE_2)))
-        .cursor_pointer()
+    // `PanelCollapseToggle`: the solid `IconButton` at `!p-2` around a 12px
+    // chevron; its `!p-2` is why the tile is 30px, not 18.
+    let spec = ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Auto)
+        .padding_x(8.0)
+        .padding_y(8.0, 8.0)
+        .width(COLLAPSE_TOGGLE);
+    button_with_content(
+        format!("panel-collapse-{id}"),
+        &spec,
+        icon(
+            if collapsed {
+                "chevron-right"
+            } else {
+                "chevron-down"
+            },
+            COLLAPSE_ICON,
+            if collapsed { TEXT_MUTED } else { ACCENT },
+        ),
+    )
         // The header starts a drag on mouse-down; a chevron click is not a
         // drag (the source blocks drags that start on a button).
         .on_mouse_down(
@@ -210,15 +216,6 @@ fn collapse_toggle(
             toggle_layout.save();
             notify(&toggle_entity, cx);
         })
-        .child(icon(
-            if collapsed {
-                "chevron-right"
-            } else {
-                "chevron-down"
-            },
-            COLLAPSE_ICON,
-            if collapsed { TEXT_MUTED } else { ACCENT },
-        ))
 }
 
 /// `Card` + `CardHeader` + the collapse toggle, with the header as drag handle
@@ -242,79 +239,45 @@ fn panel_card(
     let drag_layout = layout.clone();
     let drag_entity = entity.clone();
 
-    // `CardHeader`: `relative px-2.5 py-2.5 flex items-center`, the title in a
-    // `flex items-center gap-2.5 pr-8` block with the toggle first.
-    let header = div()
-        .relative()
-        .px(px(10.0))
-        .py(px(10.0))
-        .flex()
-        .items_center()
-        .on_mouse_down(
-            MouseButton::Left,
-            move |event: &MouseDownEvent, _: &mut Window, cx: &mut App| {
-                if is_locked(id, insets.rail_is_column) {
-                    return;
-                }
-                {
-                    let mut state = drag_layout.state.borrow_mut();
-                    state.menu = None;
-                    state.drop = None;
-                    let grab = state
-                        .bounds
-                        .get(id)
-                        .map(|bounds| {
-                            (
-                                event.position.x.0 - bounds.origin.x.0,
-                                event.position.y.0 - bounds.origin.y.0,
-                            )
-                        })
-                        .unwrap_or((12.0, 12.0));
-                    state.drag = Some(DragState {
-                        id,
-                        start: (event.position.x.0, event.position.y.0),
-                        grab,
-                        moved: false,
-                        offset: (0.0, 0.0),
-                    });
-                }
-                notify(&drag_entity, cx);
-            },
-        )
-        .child(
-            div()
-                .flex()
-                .items_center()
-                .gap(px(10.0))
-                .pr(px(32.0))
-                .child(collapse_toggle(id, collapsed, layout, entity))
-                .child(
-                    div()
-                        .text_size(px(FONT_MD))
-                        .line_height(px(FONT_MD * LINE_HEIGHT_TIGHT))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(rgb(TEXT_STRONG))
-                        .child(title),
-                ),
-        )
-        .when_some(header_right, |this, right| {
-            this.child(
-                div()
-                    .absolute()
-                    .right(px(10.0))
-                    .top(px(0.0))
-                    .bottom(px(0.0))
-                    .flex()
-                    .items_center()
-                    .child(right),
-            )
-        });
+    let header = card_header_with(
+        title,
+        Some(collapse_toggle(id, collapsed, layout, entity)),
+        header_right,
+    )
+    .on_mouse_down(
+        MouseButton::Left,
+        move |event: &MouseDownEvent, _: &mut Window, cx: &mut App| {
+            if is_locked(id, insets.rail_is_column) {
+                return;
+            }
+            {
+                let mut state = drag_layout.state.borrow_mut();
+                state.menu = None;
+                state.drop = None;
+                let grab = state
+                    .bounds
+                    .get(id)
+                    .map(|bounds| {
+                        (
+                            event.position.x.0 - bounds.origin.x.0,
+                            event.position.y.0 - bounds.origin.y.0,
+                        )
+                    })
+                    .unwrap_or((12.0, 12.0));
+                state.drag = Some(DragState {
+                    id,
+                    start: (event.position.x.0, event.position.y.0),
+                    grab,
+                    moved: false,
+                    offset: (0.0, 0.0),
+                });
+            }
+            notify(&drag_entity, cx);
+        },
+    );
 
     // `Card`: `ui-panel rounded-lg shadow-lg border` on `--border-subtle`.
-    let mut card_element = card()
-        .rounded(px(CARD_RADIUS))
-        .w(px(width))
-        .child(header);
+    let mut card_element = card().w(px(width)).child(header);
 
     if !collapsed {
         if let Some(content) = content {
@@ -706,7 +669,7 @@ pub fn panel_stack_with(
                 .top(px(drop.slot_top))
                 .w(px(width))
                 .h(px(drop.height))
-                .rounded(px(CARD_RADIUS))
+                .rounded(px(ROUNDED_LG))
                 .border(px(2.0))
                 .border_dashed()
                 .border_color(rgb(border))

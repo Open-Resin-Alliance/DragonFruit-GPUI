@@ -93,17 +93,18 @@ pub(crate) fn updates_tab(_state: &SettingsState, entity: WeakEntity<DragonFruit
                                     ),
                             ),
                     )
-                    .child(action_button(
-                        "updates-check-again",
-                        "Check Again",
-                        Some("rotate-ccw"),
-                        32.0, // px-8
-                        SURFACE_1,
-                        BORDER_SUBTLE,
-                        TEXT_STRONG,
-                        SURFACE_2,
-                        |_| {},
-                    )),
+                    .child(
+                        button_with(
+                            "updates-check-again",
+                            "Check Again",
+                            ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Lg)
+                                .padding_x(32.0) // px-8
+                                .padding_y(0.0, 0.0)
+                                .font_size(14.0)
+                                .gap(6.0)
+                                .icon("rotate-ccw", 16.0, TEXT_STRONG),
+                        ),
+                    ),
             ),
         );
 
@@ -128,7 +129,8 @@ pub(crate) fn updates_overlay(state: &SettingsState, entity: WeakEntity<DragonFr
     let cancel_entity = entity.clone();
     let apply_entity = entity.clone();
     let stable_entity = entity.clone();
-    let dev_entity = entity;
+    let dev_entity = entity.clone();
+    let close_entity = entity;
 
     let channel_card = |id: &'static str,
                         active: bool,
@@ -248,84 +250,77 @@ pub(crate) fn updates_overlay(state: &SettingsState, entity: WeakEntity<DragonFr
         );
     }
 
-    Some(dialog_shell(
+    Some(dialog_modal_full(
         512.0, // max-w-lg
-        "settings",
-        (TEXT_MUTED, BORDER_SUBTLE, SURFACE_1),
         "Release Channel",
         Some("Choose which update feed to check for new versions.".into()),
+        Some("settings"),
+        IconTone::Neutral,
+        false,
         body,
         div()
             .flex()
             .items_center()
             .gap(px(8.))
-            .child(action_button(
-                "updates-channel-cancel",
-                "Cancel",
-                None,
-                16.0,
-                SURFACE_1,
-                BORDER_SUBTLE,
-                TEXT_STRONG,
-                SURFACE_2,
-                move |cx| {
+            .child(
+                button_with(
+                    "updates-channel-cancel",
+                    "Cancel",
+                    ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Lg)
+                        .padding_x(16.0)
+                        .padding_y(0.0, 0.0)
+                        .font_size(14.0),
+                )
+                .on_click(move |_, _, cx| {
                     edit_and_notify(&cancel_entity, cx, |draft| {
                         draft.updates.show_channel_settings = false;
                     });
-                },
-            ))
-            .child(
-                action_button(
+                }),
+            )
+            .child({
+                let mut spec = ButtonSpec::new(
+                    if pending == updates.channel {
+                        ButtonVariant::Secondary
+                    } else if is_pending_dev_switch {
+                        ButtonVariant::TintedWarning
+                    } else {
+                        ButtonVariant::TintedAccent
+                    },
+                    ButtonSize::Lg,
+                )
+                .padding_x(16.0)
+                .padding_y(0.0, 0.0)
+                .font_size(14.0);
+                if is_pending_dev_switch {
+                    spec = spec.gap(6.0).icon("flask-conical", 14.0, 0xf59e0b);
+                }
+                if pending == updates.channel {
+                    // The source dims the current channel's Apply to 60%.
+                    spec = spec.disabled();
+                }
+                button_with(
                     "updates-channel-apply",
                     if is_pending_dev_switch {
                         "Switch to Previews"
                     } else {
                         "Apply"
                     },
-                    if is_pending_dev_switch {
-                        Some("flask-conical")
-                    } else {
-                        None
-                    },
-                    16.0,
-                    if pending == updates.channel {
-                        SURFACE_1
-                    } else if is_pending_dev_switch {
-                        mix(0xf59e0b, SURFACE_1, 0.86)
-                    } else {
-                        mix(ACCENT, SURFACE_1, 0.14)
-                    },
-                    if pending == updates.channel {
-                        BORDER_SUBTLE
-                    } else if is_pending_dev_switch {
-                        mix(0xf59e0b, BORDER_SUBTLE, 0.45)
-                    } else {
-                        mix(ACCENT, BORDER_SUBTLE, 0.55)
-                    },
-                    if pending == updates.channel {
-                        TEXT_MUTED
-                    } else if is_pending_dev_switch {
-                        0xf59e0b
-                    } else {
-                        ACCENT
-                    },
-                    if pending == updates.channel {
-                        SURFACE_2
-                    } else if is_pending_dev_switch {
-                        mix(0xf59e0b, SURFACE_1, 0.76)
-                    } else {
-                        mix(ACCENT, SURFACE_1, 0.24)
-                    },
-                    move |cx| {
-                        edit_and_notify(&apply_entity, cx, |draft| {
-                            if draft.updates.pending_channel != draft.updates.channel {
-                                draft.updates.channel = draft.updates.pending_channel;
-                            }
-                            draft.updates.show_channel_settings = false;
-                        });
-                    },
+                    &spec,
                 )
-                .when(pending == updates.channel, |this| this.opacity(0.6)),
-            ),
+                .when(pending == updates.channel, |this| this.opacity(0.6))
+                .on_click(move |_, _, cx| {
+                    edit_and_notify(&apply_entity, cx, |draft| {
+                        if draft.updates.pending_channel != draft.updates.channel {
+                            draft.updates.channel = draft.updates.pending_channel;
+                        }
+                        draft.updates.show_channel_settings = false;
+                    });
+                })
+            }),
+        move |_, _, cx| {
+            edit_and_notify(&close_entity, cx, |draft| {
+                draft.updates.show_channel_settings = false;
+            });
+        },
     ))
 }

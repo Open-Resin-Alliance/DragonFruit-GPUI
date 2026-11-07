@@ -15,7 +15,11 @@ pub(crate) fn multi_plate_tab(state: &SettingsState, entity: WeakEntity<DragonFr
         .child(
             setting_row(
                 "Follow the plate a model lands on",
-                "A model dropped on another bed makes that bed the one you work on.",
+                Some("A model dropped on another bed makes that bed the one you work on.".into()),
+                SettingDensity::Compact,
+                true,
+                SettingSurface::Sunken,
+                false,
                 segmented(
                     "multi-plate-follow",
                     &["ON", "OFF"],
@@ -33,7 +37,11 @@ pub(crate) fn multi_plate_tab(state: &SettingsState, entity: WeakEntity<DragonFr
         .child(
             setting_row(
                 "Plate Ordering",
-                "Growing grid, or a fixed row length.",
+                Some("Growing grid, or a fixed row length.".into()),
+                SettingDensity::Compact,
+                true,
+                SettingSurface::Sunken,
+                false,
                 segmented(
                     "multi-plate-ordering",
                     &["FIXED", "DYNAMIC"],
@@ -60,7 +68,11 @@ pub(crate) fn multi_plate_tab(state: &SettingsState, entity: WeakEntity<DragonFr
         body = body.child(
             setting_row(
                 "Beds per row",
-                "1-2-3-4 across, then the next row. Adding a bed never moves the ones already placed.",
+                Some("1-2-3-4 across, then the next row. Adding a bed never moves the ones already placed.".into()),
+                SettingDensity::Compact,
+                true,
+                SettingSurface::Sunken,
+                false,
                 number_input(
                     "multi-plate-columns",
                     plate.fixed_plate_columns,

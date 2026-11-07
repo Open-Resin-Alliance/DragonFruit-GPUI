@@ -1,10 +1,12 @@
 //! Toggles and segmented controls.
 
 use gpui::{
-    App, Div, ElementId, FontWeight, SharedString, Stateful, Window, div, prelude::*, px, rgb,
+    AnyElement, App, BoxShadow, Div, ElementId, FontWeight, SharedString, Stateful, Window, div,
+    prelude::*, px, rgb, rgba,
 };
 
 use declarative_gpui::ui;
+use gpui_core::icons::icon;
 use gpui_core::theme::*;
 
 use std::rc::Rc;
@@ -186,4 +188,239 @@ pub fn segmented_control(
         row = row.child(pill);
     }
     row
+}
+
+// ── Checkbox ────────────────────────────────────────────────────────────────
+
+/// The boxes `.ui-checkbox` is rendered at: 15px, `!w-3.5 !h-3.5` (14px) and
+/// `!w-4 !h-4` (16px).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum CheckboxSize {
+    Sm,
+    Md,
+    Lg,
+}
+
+/// The accent of the box.
+///
+/// `Accent` is `.ui-checkbox`'s `--accent` recipe. The other tones stand for a
+/// native `<input type="checkbox">` that the source tints with `accent-color`
+/// (the plugin warning passes `#f59e0b`): the browser fills the box with the
+/// accent and draws the tick in its contrast colour, with none of
+/// `.ui-checkbox`'s hover/ring rules.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum CheckboxTone {
+    Accent,
+    Warning,
+}
+
+/// `.ui-checkbox` — `display: inline-grid; place-items: center`, `rounded`
+/// (4px), `1px solid var(--border-subtle)` on `var(--surface-1)`.
+///
+/// Checked: border `color-mix(accent, white 12%)`, fill `color-mix(accent,
+/// surface-0 18%)`, ring `0 0 0 3px color-mix(accent, transparent 82%)` and the
+/// `::after` tick (8×5, 2px, `--accent-contrast`, `rotate(-45deg)`). GPUI
+/// cannot rotate a bordered pseudo element, so the tick is the `check` glyph.
+/// Hover (unchecked): border `color-mix(accent, border-subtle 55%)` on
+/// `color-mix(surface-2, transparent 6%)`.
+fn checkbox_box(checked: bool, size: CheckboxSize, tone: CheckboxTone, disabled: bool) -> Div {
+    let box_size = match size {
+        CheckboxSize::Sm => 14.0,
+        CheckboxSize::Md => 15.0,
+        CheckboxSize::Lg => 16.0,
+    };
+    let accent = match tone {
+        CheckboxTone::Accent => ACCENT,
+        CheckboxTone::Warning => 0xf59e0b,
+    };
+    let ui_checkbox = tone == CheckboxTone::Accent;
+
+    let mut box_ = div()
+        .flex()
+        .flex_shrink_0()
+        .items_center()
+        .justify_center()
+        .w(px(box_size))
+        .h(px(box_size))
+        .rounded(px(4.0))
+        .border_1()
+        .border_color(rgb(BORDER_SUBTLE))
+        .bg(rgb(SURFACE_1));
+
+    if checked {
+        box_ = if ui_checkbox {
+            box_.border_color(rgb(mix(accent, WHITE, 0.88)))
+                .bg(rgb(mix(accent, SURFACE_0, 0.82)))
+                .shadow(vec![
+                    BoxShadow::new(px(0.0), px(0.0), rgba(with_alpha(accent, 0x2e)).into())
+                        .blur_radius(px(0.0))
+                        .spread_radius(px(3.0)),
+                ])
+                .child(icon("check", 10.0, ACCENT_CONTRAST))
+        } else {
+            box_.border_color(rgb(accent))
+                .bg(rgb(accent))
+                .child(icon("check", 10.0, BLACK))
+        };
+    }
+
+    if disabled {
+        box_
+    } else if !checked && ui_checkbox {
+        box_.cursor_pointer().hover(|style| {
+            style
+                .border_color(rgb(mix(ACCENT, BORDER_SUBTLE, 0.45)))
+                // `color-mix(surface-2, transparent 6%)` leaves 94% surface-2.
+                .bg(rgba(with_alpha(SURFACE_2, 0xf0)))
+        })
+    } else {
+        box_.cursor_pointer()
+    }
+}
+
+/// [`checkbox_box`] for a caller that renders its own label and hit target:
+/// disabled boxes take `.ui-checkbox:disabled` (`opacity: 0.5`,
+/// `cursor: not-allowed`).
+pub fn checkbox_with(checked: bool, size: CheckboxSize, tone: CheckboxTone, disabled: bool) -> Div {
+    let block = checkbox_box(checked, size, tone, disabled);
+    if disabled {
+        block.opacity(0.5).cursor_not_allowed()
+    } else {
+        block
+    }
+}
+
+/// The label treatment of [`checkbox`] — the two the sources use.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum CheckboxLabel {
+    /// The island list's `ui-meta` row: `gap-1.5 px-0.5 py-0.5` around the
+    /// default 15px `.ui-checkbox`, the label at 13px `--indicator`.
+    Meta,
+    /// The island dialog's `!w-4 !h-4` box: `gap-2`, the label at 11px
+    /// `font-medium` in `--text-strong`.
+    Field,
+}
+
+/// `.ui-checkbox` with its label: `flex items-center gap-2 cursor-pointer
+/// select-none`.
+///
+/// `.ui-checkbox` is 15px with a 4px radius; `!w-4 !h-4` (the dialog's) is
+/// 16px. The box itself is [`checkbox_box`], so the checked ring, the tick and
+/// the hover state are the shared recipe.
+pub fn checkbox(
+    id: impl Into<ElementId>,
+    label: &'static str,
+    checked: bool,
+    disabled: bool,
+    label_style: CheckboxLabel,
+    on_change: impl Fn(bool, &mut Window, &mut App) + 'static,
+) -> Stateful<Div> {
+    let (box_size, gap, meta) = match label_style {
+        CheckboxLabel::Meta => (CheckboxSize::Md, 6.0, true),
+        CheckboxLabel::Field => (CheckboxSize::Lg, 8.0, false),
+    };
+    let mut el = div()
+        .id(id)
+        .flex()
+        .items_center()
+        .gap(px(gap))
+        .when(meta, |this| this.py(px(2.0)).px(px(2.0)))
+        .cursor_pointer()
+        .child(checkbox_box(
+            checked,
+            box_size,
+            CheckboxTone::Accent,
+            disabled,
+        ))
+        .child(
+            div()
+                .text_size(px(if meta { FONT_SM } else { 11.0 }))
+                .font_weight(if meta {
+                    FontWeight::NORMAL
+                } else {
+                    FontWeight::MEDIUM
+                })
+                .text_color(rgb(if meta { INDICATOR } else { TEXT_STRONG }))
+                .child(label),
+        );
+    if disabled {
+        // `.ui-checkbox:disabled`: `opacity: 0.5; cursor: not-allowed`.
+        el = el.opacity(0.5).cursor_not_allowed();
+    } else {
+        el = el.on_click(move |_, window, cx| on_change(!checked, window, cx));
+    }
+    el
+}
+
+// ── Toggle row ──────────────────────────────────────────────────────────────
+
+/// `LabeledToggleInput`: the `ui-label` name with its help affordance over the
+/// 36px `.ui-input` switch row — `Enabled` / `Disabled` on the left, the `sm`
+/// track on the right.
+///
+/// `help` is the caller's `FieldHelpTooltip` tile; the row only places it.
+pub fn toggle_row(
+    id: impl Into<ElementId>,
+    label: &'static str,
+    help: Option<AnyElement>,
+    checked: bool,
+    disabled: bool,
+    on_change: impl Fn(bool, &mut Window, &mut App) + 'static,
+) -> Div {
+    let (border, background, text) = if disabled {
+        (BORDER_SUBTLE, mix(SURFACE_2, BLACK, 0.92), TEXT_MUTED)
+    } else if checked {
+        (
+            mix(ACCENT_SECONDARY, BORDER_SUBTLE, 0.64),
+            mix(ACCENT_SECONDARY, SURFACE_1, 0.10),
+            TEXT_STRONG,
+        )
+    } else {
+        (BORDER_SUBTLE, SURFACE_1, TEXT_MUTED)
+    };
+
+    let mut row = div()
+        .id(id)
+        .w_full()
+        .h(px(36.0))
+        .px(px(10.0))
+        .rounded(px(RADIUS_SM))
+        .border_1()
+        .border_color(rgb(border))
+        .bg(rgb(background))
+        .text_size(px(FONT_MD))
+        .line_height(px(FONT_MD))
+        .text_color(rgb(text))
+        .flex()
+        .items_center()
+        .justify_between()
+        .child(if checked { "Enabled" } else { "Disabled" })
+        .child(toggle_sized(checked, ToggleSize::Sm));
+    if disabled {
+        row = row.opacity(0.55).cursor_not_allowed();
+    } else {
+        row = row
+            .cursor_pointer()
+            .on_click(move |_, window, cx| on_change(!checked, window, cx));
+    }
+
+    let mut label_row = div()
+        .flex()
+        .items_center()
+        .gap(px(6.0))
+        .text_size(px(FONT_SM))
+        .text_color(rgb(INDICATOR))
+        .font_weight(FontWeight::MEDIUM)
+        .child(label);
+    if let Some(help) = help {
+        label_row = label_row.child(help);
+    }
+
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(4.0))
+        .min_w(px(0.0))
+        .child(label_row)
+        .child(row)
 }

@@ -3,12 +3,14 @@ use gpui::{FontWeight, IntoElement, WeakEntity, div, prelude::*, px, rgb};
 use gpui_core::icons::icon;
 use gpui_core::support_state::{MAX_INFILL_DIAMETER_MM, MIN_INFILL_DIAMETER_MM, *};
 use gpui_core::theme::*;
-use gpui_ui::panel_fields::{BLACK, WHITE};
-use gpui_ui::ui::{SelectOption, select_dropdown, spinner_colored};
+use gpui_ui::panel_fields::format_number;
+use gpui_ui::ui::{
+    self, ButtonSize, ButtonSpec, ButtonVariant, SelectOption, select_dropdown, spinner_colored,
+};
 
 use super::shared::{
-    accent_card, accent_secondary_action_bg, accent_secondary_action_border, clamp_float,
-    flat_button, labeled_section_card, mode_pill, notify, panel_body, scroll_field, ui_meta,
+    accent_secondary_action_border, clamp_float, labeled_section_card, mode_pill, notify,
+    panel_body, ui_meta,
 };
 use crate::DragonFruit;
 
@@ -63,16 +65,9 @@ pub fn hollowing_body(
     // Mode card (or the voxel-edit hint): `rounded-md border p-2 space-y-1.5
     // min-h-[4.5rem] box-border`.
     let mode_card = if is_edit_mode {
-        div()
-            .rounded(px(ROUNDED_MD))
-            .border_1()
+        ui::sub_card_with(Some((ACCENT_SECONDARY, 0.08)), 8.0)
             .border_color(rgb(accent_secondary_action_border()))
-            .bg(rgb(accent_secondary_action_bg()))
-            .p(px(8.0))
             .min_h(px(72.0))
-            .flex()
-            .flex_col()
-            .gap(px(6.0))
             .text_center()
             .child(
                 div()
@@ -93,11 +88,8 @@ pub fn hollowing_body(
         let cavity_entity = entity.clone();
         let infill_state = state.clone();
         let infill_entity = entity.clone();
-        accent_card()
+        ui::sub_card_with(Some((ACCENT, 0.05)), 8.0)
             .min_h(px(72.0))
-            .flex()
-            .flex_col()
-            .gap(px(6.0))
             .child(ui_meta("Mode"))
             .child(
                 div()
@@ -127,44 +119,54 @@ pub fn hollowing_body(
     };
 
     // Voxel Size: `clampFloat(value, 0.2, 10, 2)`.
-    let voxel_card = labeled_section_card("Voxel Size")
-        .child(scroll_field(
-            "hollow-voxel-size",
-            voxel_size_mm,
-            Some("mm"),
-            0.1,
-            0.2,
-            10.0,
-            is_applying,
-            {
-                let state = state.clone();
-                let entity = entity.clone();
-                move |next, _, cx| {
-                    state.model_mut().voxel_size_mm = clamp_float(next, 0.2, 10.0, 2);
-                    notify(&entity, cx);
-                }
-            },
-        ));
+    let voxel_down_state = state.clone();
+    let voxel_down_entity = entity.clone();
+    let voxel_up_state = state.clone();
+    let voxel_up_entity = entity.clone();
+    let voxel_card = labeled_section_card("Voxel Size").child(ui::scrollable_number_field(
+        "hollow-voxel-size",
+        format_number(voxel_size_mm),
+        Some("mm"),
+        false,
+        is_applying,
+        voxel_size_mm < 10.0,
+        voxel_size_mm > 0.2,
+        move |_, _, cx| {
+            voxel_down_state.model_mut().voxel_size_mm =
+                clamp_float((voxel_size_mm - 0.1).max(0.2), 0.2, 10.0, 2);
+            notify(&voxel_down_entity, cx);
+        },
+        move |_, _, cx| {
+            voxel_up_state.model_mut().voxel_size_mm =
+                clamp_float((voxel_size_mm + 0.1).min(10.0), 0.2, 10.0, 2);
+            notify(&voxel_up_entity, cx);
+        },
+    ));
 
     // Shell Thickness: `clampFloat(value, 0.2, 10, 1)`.
-    let shell_card = labeled_section_card("Shell Thickness")
-        .child(scroll_field(
-            "hollow-shell-thickness",
-            shell_thickness_mm,
-            Some("mm"),
-            0.1,
-            0.2,
-            10.0,
-            is_applying,
-            {
-                let state = state.clone();
-                let entity = entity.clone();
-                move |next, _, cx| {
-                    state.model_mut().shell_thickness_mm = clamp_float(next, 0.2, 10.0, 1);
-                    notify(&entity, cx);
-                }
-            },
-        ));
+    let shell_down_state = state.clone();
+    let shell_down_entity = entity.clone();
+    let shell_up_state = state.clone();
+    let shell_up_entity = entity.clone();
+    let shell_card = labeled_section_card("Shell Thickness").child(ui::scrollable_number_field(
+        "hollow-shell-thickness",
+        format_number(shell_thickness_mm),
+        Some("mm"),
+        false,
+        is_applying,
+        shell_thickness_mm < 10.0,
+        shell_thickness_mm > 0.2,
+        move |_, _, cx| {
+            shell_down_state.model_mut().shell_thickness_mm =
+                clamp_float((shell_thickness_mm - 0.1).max(0.2), 0.2, 10.0, 1);
+            notify(&shell_down_entity, cx);
+        },
+        move |_, _, cx| {
+            shell_up_state.model_mut().shell_thickness_mm =
+                clamp_float((shell_thickness_mm + 0.1).min(10.0), 0.2, 10.0, 1);
+            notify(&shell_up_entity, cx);
+        },
+    ));
 
     // Infill Type: Lattice / Pillar.
     let lattice_state = state.clone();
@@ -203,48 +205,61 @@ pub fn hollowing_body(
     } else {
         "Infill Density"
     };
-    let density_card = labeled_section_card(density_label)
-        .child(scroll_field(
-            "hollow-infill-density",
-            infill_density_pct,
-            Some("%"),
-            1.0,
-            1.0,
-            100.0,
-            is_applying,
-            {
-                let state = state.clone();
-                let entity = entity.clone();
-                move |next, _, cx| {
-                    state.model_mut().infill_cell_mm = HollowingModel::density_pct_to_cell_mm(next);
-                    notify(&entity, cx);
-                }
-            },
-        ));
+    let density_down_state = state.clone();
+    let density_down_entity = entity.clone();
+    let density_up_state = state.clone();
+    let density_up_entity = entity.clone();
+    let density_card = labeled_section_card(density_label).child(ui::scrollable_number_field(
+        "hollow-infill-density",
+        format_number(infill_density_pct),
+        Some("%"),
+        false,
+        is_applying,
+        infill_density_pct < 100.0,
+        infill_density_pct > 1.0,
+        move |_, _, cx| {
+            density_down_state.model_mut().infill_cell_mm =
+                HollowingModel::density_pct_to_cell_mm((infill_density_pct - 1.0).max(1.0));
+            notify(&density_down_entity, cx);
+        },
+        move |_, _, cx| {
+            density_up_state.model_mut().infill_cell_mm =
+                HollowingModel::density_pct_to_cell_mm((infill_density_pct + 1.0).min(100.0));
+            notify(&density_up_entity, cx);
+        },
+    ));
 
-    let diameter_card = labeled_section_card("Infill Diameter")
-        .child(scroll_field(
-            "hollow-infill-diameter",
-            infill_diameter_mm,
-            Some("mm"),
-            0.1,
-            MIN_INFILL_DIAMETER_MM,
-            MAX_INFILL_DIAMETER_MM,
-            is_applying,
-            {
-                let state = state.clone();
-                let entity = entity.clone();
-                move |next, _, cx| {
-                    state.model_mut().infill_beam_radius_mm = clamp_float(
-                        next / 2.0,
-                        MIN_INFILL_DIAMETER_MM / 2.0,
-                        MAX_INFILL_DIAMETER_MM / 2.0,
-                        2,
-                    );
-                    notify(&entity, cx);
-                }
-            },
-        ));
+    let diameter_down_state = state.clone();
+    let diameter_down_entity = entity.clone();
+    let diameter_up_state = state.clone();
+    let diameter_up_entity = entity.clone();
+    let diameter_card = labeled_section_card("Infill Diameter").child(ui::scrollable_number_field(
+        "hollow-infill-diameter",
+        format_number(infill_diameter_mm),
+        Some("mm"),
+        false,
+        is_applying,
+        infill_diameter_mm < MAX_INFILL_DIAMETER_MM,
+        infill_diameter_mm > MIN_INFILL_DIAMETER_MM,
+        move |_, _, cx| {
+            diameter_down_state.model_mut().infill_beam_radius_mm = clamp_float(
+                (infill_diameter_mm - 0.1).max(MIN_INFILL_DIAMETER_MM) / 2.0,
+                MIN_INFILL_DIAMETER_MM / 2.0,
+                MAX_INFILL_DIAMETER_MM / 2.0,
+                2,
+            );
+            notify(&diameter_down_entity, cx);
+        },
+        move |_, _, cx| {
+            diameter_up_state.model_mut().infill_beam_radius_mm = clamp_float(
+                (infill_diameter_mm + 0.1).min(MAX_INFILL_DIAMETER_MM) / 2.0,
+                MIN_INFILL_DIAMETER_MM / 2.0,
+                MAX_INFILL_DIAMETER_MM / 2.0,
+                2,
+            );
+            notify(&diameter_up_entity, cx);
+        },
+    ));
 
     // Open Face — `Select className="mt-1 w-full !h-8 px-2 text-xs"`.
     let face_options: Vec<SelectOption> = [
@@ -311,146 +326,146 @@ pub fn hollowing_body(
         let clear_entity = entity.clone();
         let done_state = state.clone();
         let done_entity = entity.clone();
+        let clear_enabled = !(is_applying || is_previewing);
+        let done_enabled = !(is_applying || is_previewing || is_applying_blockers);
+        let mut clear_spec = ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Sm).full();
+        if !clear_enabled {
+            clear_spec = clear_spec.disabled();
+        }
+        let mut done_spec = ButtonSpec::new(ButtonVariant::Accent, ButtonSize::Sm).full();
+        if !done_enabled {
+            done_spec = done_spec.disabled();
+        }
+        let mut clear = ui::button_with("hollow-edit-clear", "Clear", &clear_spec);
+        if clear_enabled {
+            clear = clear.on_click(move |_, _, cx| {
+                // PORT GAP: no voxel-edit engine — the flags are the port.
+                clear_state.model_mut().is_edit_mode = false;
+                notify(&clear_entity, cx);
+            });
+        }
+        let mut done = ui::button_with_content(
+            "hollow-edit-done",
+            &done_spec,
+            div()
+                .flex()
+                .items_center()
+                .justify_center()
+                .gap(px(6.0))
+                .when(is_applying_blockers, |this| {
+                    this.child(spinner_colored(12.0, ACCENT_SECONDARY_CONTRAST))
+                })
+                .child(if is_applying_blockers {
+                    "Applying Solid Areas"
+                } else {
+                    "Done"
+                }),
+        );
+        if done_enabled {
+            done = done.on_click(move |_, _, cx| {
+                let mut model = done_state.model_mut();
+                model.is_edit_mode = false;
+                model.is_hollowing_applied = true;
+                drop(model);
+                notify(&done_entity, cx);
+            });
+        }
         div()
             .flex()
             .gap(px(8.0))
-            .child(div().flex_1().child(flat_button(
-                "hollow-edit-clear",
-                "Clear",
-                32.0,
-                SURFACE_1,
-                BORDER_SUBTLE,
-                TEXT_STRONG,
-                Some(SURFACE_2),
-                !(is_applying || is_previewing),
-                move |_, _, cx| {
-                    // PORT GAP: no voxel-edit engine — the flags are the port.
-                    clear_state.model_mut().is_edit_mode = false;
-                    notify(&clear_entity, cx);
-                },
-            )))
-            .child(div().flex_1().child(flat_button(
-                "hollow-edit-done",
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .gap(px(6.0))
-                    .when(is_applying_blockers, |this| {
-                        this.child(spinner_colored(12.0, ACCENT_SECONDARY_CONTRAST))
-                    })
-                    .child(if is_applying_blockers {
-                        "Applying Solid Areas"
-                    } else {
-                        "Done"
-                    }),
-                32.0,
-                SECONDARY_BUTTON_SURFACE,
-                mix(SECONDARY_BUTTON_SURFACE, WHITE, 0.86),
-                ACCENT_SECONDARY_CONTRAST,
-                Some(mix(SECONDARY_BUTTON_SURFACE, BLACK, 0.91)),
-                !(is_applying || is_previewing || is_applying_blockers),
-                move |_, _, cx| {
-                    let mut model = done_state.model_mut();
-                    model.is_edit_mode = false;
-                    model.is_hollowing_applied = true;
-                    drop(model);
-                    notify(&done_entity, cx);
-                },
-            )))
+            .child(div().flex_1().child(clear))
+            .child(div().flex_1().child(done))
     } else if is_hollowing_applied {
         let reset_state = state.clone();
         let reset_entity = entity.clone();
         let remove_state = state.clone();
         let remove_entity = entity.clone();
+        let reset_enabled = !(is_applying || is_previewing);
+        let remove_enabled = !(is_applying || is_previewing);
+        let mut reset_spec = ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Sm).full();
+        if !reset_enabled {
+            reset_spec = reset_spec.disabled();
+        }
+        let mut remove_spec = ButtonSpec::new(ButtonVariant::Accent, ButtonSize::Sm).full();
+        if !remove_enabled {
+            remove_spec = remove_spec.disabled();
+        }
+        let mut reset = ui::button_with("hollow-reset-settings", "Reset", &reset_spec);
+        if reset_enabled {
+            reset = reset.on_click(move |_, _, cx| {
+                reset_state.model_mut().reset_settings();
+                notify(&reset_entity, cx);
+            });
+        }
+        let mut remove = ui::button_with("hollow-remove", "Remove Hollowing", &remove_spec);
+        if remove_enabled {
+            remove = remove.on_click(move |_, _, cx| {
+                let mut model = remove_state.model_mut();
+                model.is_hollowing_applied = false;
+                drop(model);
+                notify(&remove_entity, cx);
+            });
+        }
         div()
             .flex()
             .gap(px(8.0))
-            .when(can_apply, |this| {
-                this.child(div().flex_1().child(flat_button(
-                    "hollow-reset-settings",
-                    "Reset",
-                    32.0,
-                    SURFACE_1,
-                    BORDER_SUBTLE,
-                    TEXT_STRONG,
-                    Some(SURFACE_2),
-                    !(is_applying || is_previewing),
-                    move |_, _, cx| {
-                        reset_state.model_mut().reset_settings();
-                        notify(&reset_entity, cx);
-                    },
-                )))
-            })
-            .child(div().flex_1().child(flat_button(
-                "hollow-remove",
-                "Remove Hollowing",
-                32.0,
-                SECONDARY_BUTTON_SURFACE,
-                mix(SECONDARY_BUTTON_SURFACE, WHITE, 0.86),
-                ACCENT_SECONDARY_CONTRAST,
-                Some(mix(SECONDARY_BUTTON_SURFACE, BLACK, 0.91)),
-                !(is_applying || is_previewing),
-                move |_, _, cx| {
-                    let mut model = remove_state.model_mut();
-                    model.is_hollowing_applied = false;
-                    drop(model);
-                    notify(&remove_entity, cx);
-                },
-            )))
+            .when(can_apply, |this| this.child(div().flex_1().child(reset)))
+            .child(div().flex_1().child(remove))
     } else {
         let edit_state = state.clone();
         let edit_entity = entity.clone();
         let apply_state = state.clone();
         let apply_entity = entity.clone();
+        let edit_enabled = !(is_applying || is_previewing || !can_edit);
+        let apply_enabled = !(is_applying || is_previewing || !can_apply);
+        let mut edit_spec = ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Sm).full();
+        if !edit_enabled {
+            edit_spec = edit_spec.disabled();
+        }
+        let mut apply_spec = ButtonSpec::new(ButtonVariant::Accent, ButtonSize::Sm).full();
+        if !apply_enabled {
+            apply_spec = apply_spec.disabled();
+        }
+        let mut edit = ui::button_with("hollow-solid-areas", "Solid Areas", &edit_spec);
+        if edit_enabled {
+            edit = edit.on_click(move |_, _, cx| {
+                edit_state.model_mut().is_edit_mode = true;
+                notify(&edit_entity, cx);
+            });
+        }
+        let mut apply = ui::button_with_content(
+            "hollow-apply",
+            &apply_spec,
+            div()
+                .flex()
+                .items_center()
+                .justify_center()
+                .gap(px(6.0))
+                .when(is_previewing, |this| {
+                    this.child(spinner_colored(12.0, ACCENT_SECONDARY_CONTRAST))
+                })
+                .child(if is_applying {
+                    "Applying…".to_owned()
+                } else if is_previewing {
+                    "Updating".to_owned()
+                } else {
+                    "Apply".to_owned()
+                }),
+        );
+        if apply_enabled {
+            apply = apply.on_click(move |_, _, cx| {
+                // PORT GAP: no hollowing engine — the flag is the port.
+                let mut model = apply_state.model_mut();
+                model.is_hollowing_applied = true;
+                drop(model);
+                notify(&apply_entity, cx);
+            });
+        }
         div()
             .flex()
             .gap(px(8.0))
-            .child(div().flex_1().child(flat_button(
-                "hollow-solid-areas",
-                "Solid Areas",
-                32.0,
-                SURFACE_1,
-                BORDER_SUBTLE,
-                TEXT_STRONG,
-                Some(SURFACE_2),
-                !(is_applying || is_previewing || !can_edit),
-                move |_, _, cx| {
-                    edit_state.model_mut().is_edit_mode = true;
-                    notify(&edit_entity, cx);
-                },
-            )))
-            .child(div().flex_1().child(flat_button(
-                "hollow-apply",
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .gap(px(6.0))
-                    .when(is_previewing, |this| {
-                        this.child(spinner_colored(12.0, ACCENT_SECONDARY_CONTRAST))
-                    })
-                    .child(if is_applying {
-                        "Applying…".to_owned()
-                    } else if is_previewing {
-                        "Updating".to_owned()
-                    } else {
-                        "Apply".to_owned()
-                    }),
-                32.0,
-                SECONDARY_BUTTON_SURFACE,
-                mix(SECONDARY_BUTTON_SURFACE, WHITE, 0.86),
-                ACCENT_SECONDARY_CONTRAST,
-                Some(mix(SECONDARY_BUTTON_SURFACE, BLACK, 0.91)),
-                !(is_applying || is_previewing || !can_apply),
-                move |_, _, cx| {
-                    // PORT GAP: no hollowing engine — the flag is the port.
-                    let mut model = apply_state.model_mut();
-                    model.is_hollowing_applied = true;
-                    drop(model);
-                    notify(&apply_entity, cx);
-                },
-            )))
+            .child(div().flex_1().child(edit))
+            .child(div().flex_1().child(apply))
     };
 
     // `px-2 pb-2 space-y-2 sm:px-2.5 sm:pb-2.5`.

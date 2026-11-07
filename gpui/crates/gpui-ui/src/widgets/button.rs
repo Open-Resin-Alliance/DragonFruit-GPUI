@@ -344,6 +344,11 @@ pub struct ButtonSpec {
     pub disabled: bool,
     /// Explicit hover fill; `None` uses the variant's.
     pub hover: Option<u32>,
+    /// `(background, border-color, text-color)` — the sources' inline `style`
+    /// triples, which outrank the variant's class. Inline styles also outrank
+    /// the class's `:hover`, so [`ButtonSpec::fill`] pins the hover fill to the
+    /// background unless [`ButtonSpec::hover`] says otherwise.
+    pub fill: Option<(u32, u32, u32)>,
     /// `(icon name, px)` drawn before the label.
     pub icon: Option<(SharedString, f32)>,
     /// Icon colour; defaults to the variant's text colour.
@@ -364,6 +369,7 @@ impl ButtonSpec {
             gap: None,
             disabled: false,
             hover: None,
+            fill: None,
             icon: None,
             icon_color: None,
         }
@@ -409,6 +415,18 @@ impl ButtonSpec {
         self
     }
 
+    /// The sources' inline `style` triple: fill, border and label colour.
+    pub fn fill(mut self, background: u32, border: u32, text: u32) -> Self {
+        self.fill = Some((background, border, text));
+        self
+    }
+
+    /// Explicit hover fill, overriding both the variant's and the fill's.
+    pub fn hover(mut self, background: u32) -> Self {
+        self.hover = Some(background);
+        self
+    }
+
     pub fn icon(mut self, name: &str, size: f32, color: u32) -> Self {
         self.icon = Some((name.into(), size));
         self.icon_color = Some(color);
@@ -420,7 +438,7 @@ impl ButtonSpec {
 pub fn button_with(
     id: impl Into<ElementId>,
     label: impl Into<SharedString>,
-    spec: &ButtonSpec,
+    spec: impl std::borrow::Borrow<ButtonSpec>,
 ) -> Stateful<Div> {
     let label: SharedString = label.into();
     button_with_content(id, spec, label)
@@ -429,10 +447,20 @@ pub fn button_with(
 /// [`button_with`] for a button whose content is not a plain label.
 pub fn button_with_content(
     id: impl Into<ElementId>,
-    spec: &ButtonSpec,
+    spec: impl std::borrow::Borrow<ButtonSpec>,
     content: impl IntoElement,
 ) -> Stateful<Div> {
-    let (background, border, text, hover) = button_colors(spec.variant);
+    let spec = spec.borrow();
+    let (mut background, mut border, mut text, mut hover) = button_colors(spec.variant);
+    if let Some((fill_background, fill_border, fill_text)) = spec.fill {
+        // An inline `style` triple beats the variant class — and, because
+        // `:hover` cannot outrank an inline declaration either, it pins the
+        // hover fill to the same background.
+        background = fill_background;
+        border = fill_border;
+        text = fill_text;
+        hover = fill_background;
+    }
     let height = button_height(spec.size);
     let (pad_top, pad_bottom) = spec.padding_y.unwrap_or((5.0, 7.0));
     let font = spec.font_size.unwrap_or(FONT_MD);
@@ -468,10 +496,14 @@ pub fn button_with_content(
 
     if spec.disabled {
         // `.ui-button:disabled` — the same overrides `button_disabled` applies.
+        // `text` is reassigned so a spec icon inherits the disabled colour.
+        border = mix(BORDER_SUBTLE, BLACK, 0.90);
+        background = mix(SURFACE_1, BLACK, 0.92);
+        text = mix(TEXT_MUTED, SURFACE_2, 0.82);
         el = el
-            .border_color(rgb(mix(BORDER_SUBTLE, BLACK, 0.90)))
-            .bg(rgb(mix(SURFACE_1, BLACK, 0.92)))
-            .text_color(rgb(mix(TEXT_MUTED, SURFACE_2, 0.82)))
+            .border_color(rgb(border))
+            .bg(rgb(background))
+            .text_color(rgb(text))
             .cursor_not_allowed();
     } else {
         let hover = spec.hover.unwrap_or(hover);

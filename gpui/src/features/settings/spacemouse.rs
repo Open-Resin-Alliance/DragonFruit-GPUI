@@ -96,7 +96,11 @@ pub(crate) fn spacemouse_tab(state: &SettingsState, entity: WeakEntity<DragonFru
         .child(
             setting_row(
                 "Enable 3D Mouse",
-                "Uses browser gamepad input from supported 3D mouse devices.",
+                Some("Uses browser gamepad input from supported 3D mouse devices.".into()),
+                SettingDensity::Compact,
+                true,
+                SettingSurface::Sunken,
+                false,
                 segmented(
                     "spacemouse-enabled",
                     &["OFF", "ON"],
@@ -161,7 +165,11 @@ pub(crate) fn spacemouse_tab(state: &SettingsState, entity: WeakEntity<DragonFru
         .child(
             setting_row(
                 "Dominant axis mode",
-                "Prioritize strongest axis per translation/rotation group for steadier input.",
+                Some("Prioritize strongest axis per translation/rotation group for steadier input.".into()),
+                SettingDensity::Compact,
+                true,
+                SettingSurface::Sunken,
+                false,
                 segmented(
                     "spacemouse-dominant",
                     &["OFF", "ON"],

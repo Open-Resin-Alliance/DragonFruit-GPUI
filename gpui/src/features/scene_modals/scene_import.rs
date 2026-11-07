@@ -4,11 +4,10 @@ use std::rc::Rc;
 
 use gpui::{App, ClickEvent, Div, FontWeight, SharedString, Window, div, prelude::*, px, rgb};
 use gpui_core::theme::*;
-use gpui_ui::ui::{ButtonSize, ButtonVariant, button};
+use gpui_ui::ui::{ButtonSize, ButtonVariant, button, modal_shell};
 
 use super::chrome::{
-    DIALOG_LG, LEADING_RELAXED, Run, custom_dialog, custom_dialog_header, mix_b, rich_paragraph,
-    two_button_row,
+    DIALOG_LG, LEADING_RELAXED, Run, custom_dialog_header, mix_b, rich_paragraph, two_button_row,
 };
 use super::format::{grouped};
 
@@ -124,7 +123,7 @@ pub fn scene_import_placement_modal(
         .child(explanation)
         .child(two_button_row(load_as_is, auto_arrange));
 
-    custom_dialog(DIALOG_LG, header, body)
+    modal_shell(DIALOG_LG).child(header).child(body)
 }
 
 /// `sceneImportHollowingPrompt` — `SceneFileModals.tsx`'s inline dialog.
@@ -242,6 +241,6 @@ pub fn scene_import_hollowing_modal(
         .child(explanation)
         .child(two_button_row(import_solid, keep_hollow));
 
-    custom_dialog(DIALOG_LG, header, body)
+    modal_shell(DIALOG_LG).child(header).child(body)
 }
 

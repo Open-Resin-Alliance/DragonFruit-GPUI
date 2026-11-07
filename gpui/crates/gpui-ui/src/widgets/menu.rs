@@ -103,6 +103,38 @@ pub fn context_menu(
     context_menu_sized(entries, title, 192.0, on_select)
 }
 
+/// `ContextMenu`'s surface: `rounded-lg border p-1.5 shadow-xl` on
+/// `color-mix(surface-0, #000 10%)` with `border-subtle`.
+///
+/// Exposed for a menu whose rows are not [`ContextMenuEntry`] values — the
+/// top bar's fleet-unit quick menu draws printer rows inside the same surface.
+pub fn menu_surface(width: f32) -> Div {
+    div()
+        .w(px(width))
+        .rounded(px(ROUNDED_LG))
+        .border_1()
+        .border_color(rgb(BORDER_SUBTLE))
+        .bg(rgb(mix(SURFACE_0, BLACK, 0.90)))
+        .p(px(6.0))
+        .shadow_xl()
+        .flex()
+        .flex_col()
+}
+
+/// `ContextMenu`'s heading row: `mb-1 px-2 py-1 text-[10px] font-semibold
+/// uppercase tracking-wide`, uppercased at build time.
+pub fn menu_title(title: impl Into<SharedString>) -> Div {
+    let title: SharedString = title.into();
+    div()
+        .mb(px(4.0))
+        .px(px(8.0))
+        .py(px(4.0))
+        .text_size(px(10.0))
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(rgb(TEXT_MUTED))
+        .child(title.to_uppercase())
+}
+
 /// [`context_menu`] with the source's `widthClassName` resolved to pixels.
 pub fn context_menu_sized(
     entries: &[ContextMenuEntry],
@@ -113,28 +145,10 @@ pub fn context_menu_sized(
     let on_select = Rc::new(on_select);
     let base = SharedString::from("context-menu");
 
-    let mut menu = div()
-        .w(px(width))
-        .rounded(px(ROUNDED_LG))
-        .border_1()
-        .border_color(rgb(BORDER_SUBTLE))
-        .bg(rgb(mix(SURFACE_0, BLACK, 0.90)))
-        .p(px(6.0))
-        .shadow_xl()
-        .flex()
-        .flex_col();
+    let mut menu = menu_surface(width);
 
     if let Some(title) = title {
-        menu = menu.child(
-            div()
-                .mb(px(4.0))
-                .px(px(8.0))
-                .py(px(4.0))
-                .text_size(px(10.0))
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(rgb(TEXT_MUTED))
-                .child(title.to_uppercase()),
-        );
+        menu = menu.child(menu_title(title));
     }
 
     let mut rows = div().flex().flex_col().gap(px(2.0));

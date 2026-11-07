@@ -21,8 +21,9 @@ use super::input::input_box;
 /// disabled:opacity-50` and a 10px (`h-2.5 w-2.5`) chevron each.
 ///
 /// GPUI has no text editing on a `div`, so the port renders the field's frame
-/// and steppers; the caller owns the text and the commit.
-fn number_stepper(
+/// and steppers; the caller owns the text and the commit. The overlay is
+/// absolutely positioned, so the caller places it in a `relative` parent.
+pub fn number_stepper(
     id: &SharedString,
     can_increment: bool,
     can_decrement: bool,
@@ -119,6 +120,63 @@ pub fn number_input_with_stepper(
             on_up,
             on_down,
         ))
+}
+
+/// `LabeledNumberInput`'s field (`profileFormAtoms.tsx`): `ui-input h-[36px]`
+/// with the unit inside the right edge and the default stepper.
+///
+/// The input is `ui-input w-full h-[36px] pl-2.5 pr-14 leading-tight text-sm
+/// no-spinners` — of which only `h-[36px]` survives, because `.ui-input` is
+/// unlayered and keeps its own padding and type (see the module note). The unit
+/// sits at `absolute inset-y-0 right-6 z-10`, 11px semibold in `--text-muted`,
+/// left of the 16px stepper gutter. The label above the field belongs to the
+/// caller (it carries the help tile).
+pub fn labeled_number_field(
+    id: impl Into<SharedString>,
+    display: impl Into<SharedString>,
+    unit: Option<&str>,
+    disabled: bool,
+    can_increment: bool,
+    can_decrement: bool,
+    on_up: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_down: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> Stateful<Div> {
+    let id: SharedString = id.into();
+    let mut field = input_box(id.clone(), false)
+        .h(px(36.0))
+        .child(display.into());
+    if disabled {
+        field = field.opacity(0.55).cursor_not_allowed();
+    }
+
+    let mut wrapper = div()
+        .id(ElementId::named_usize(id.clone(), 8))
+        .relative()
+        .min_w(px(0.0))
+        .child(field)
+        .child(number_stepper(
+            &id,
+            can_increment && !disabled,
+            can_decrement && !disabled,
+            on_up,
+            on_down,
+        ));
+    if let Some(unit) = unit {
+        wrapper = wrapper.child(
+            div()
+                .absolute()
+                .right(px(24.0))
+                .top(px(0.0))
+                .bottom(px(0.0))
+                .flex()
+                .items_center()
+                .text_size(px(11.0))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(rgb(TEXT_MUTED))
+                .child(unit.to_string()),
+        );
+    }
+    wrapper
 }
 
 /// `compactNumberField.tsx` — a labelled number field, two per row.

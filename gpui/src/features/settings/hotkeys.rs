@@ -414,28 +414,20 @@ pub(crate) fn hotkeys_overlay(state: &SettingsState, entity: WeakEntity<DragonFr
                     )
                     .child(
                         div().mt(px(16.)).flex().justify_end().child(
-                            div()
-                                .id("hotkeys-cancel-recording")
-                                .h(px(32.))
-                                .px(px(12.))
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .rounded(px(6.))
-                                .border_1()
-                                .border_color(rgb(BORDER_SUBTLE))
-                                .bg(rgb(SURFACE_1))
-                                .text_size(px(12.))
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(rgb(TEXT_STRONG))
-                                .cursor_pointer()
-                                .hover(|style| style.bg(rgb(SURFACE_2)))
-                                .on_click(move |_, _, cx| {
-                                    edit_and_notify(&cancel_entity, cx, |draft| {
-                                        draft.hotkeys.recording = None;
-                                    });
-                                })
-                                .child("Cancel"),
+                            button_with(
+                                "hotkeys-cancel-recording",
+                                "Cancel",
+                                ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Sm)
+                                    .padding_x(12.0)
+                                    .padding_y(0.0, 0.0)
+                                    .font_size(12.0)
+                                    .radius(ROUNDED_MD),
+                            )
+                            .on_click(move |_, _, cx| {
+                                edit_and_notify(&cancel_entity, cx, |draft| {
+                                    draft.hotkeys.recording = None;
+                                });
+                            }),
                         ),
                     ),
             ),

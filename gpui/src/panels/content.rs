@@ -114,7 +114,9 @@ use gpui::{
 use gpui_core::icons::icon;
 use gpui_core::theme::*;
 use gpui_ui::ui::{
-    ContextMenuEntry, SettingDensity, SettingSurface, context_menu, setting_row, toggle,
+    ButtonSize, ButtonSpec, ButtonVariant, ContextMenuEntry, IconButtonSize, IconButtonVariant,
+    IconTone, SettingDensity, SettingSurface, button_with, button_with_content, context_menu,
+    icon_button_toned, setting_row, sub_card, sub_card_with, toggle,
 };
 use crate::DragonFruit;
 use gpui_core::stl;
@@ -181,56 +183,22 @@ fn hint(
 /// The source's row buttons all `stopPropagation` so pressing one never selects
 /// the model; these are inert, so the click is swallowed and nothing else.
 fn ghost_icon(id: &'static str, icon_name: &'static str, size: f32) -> Stateful<Div> {
-    div()
-        .id(id)
-        .flex()
-        .flex_shrink_0()
-        .items_center()
-        .justify_center()
-        .rounded(px(RADIUS_BARE))
-        .p(px(4.))
-        .cursor_pointer()
-        .hover(|style| style.bg(rgba(0xffffff1a)))
-        .child(icon(icon_name, size, TEXT_MUTED))
-        .on_click(|_, _, cx| cx.stop_propagation())
+    icon_button_toned(
+        id,
+        icon_name,
+        size,
+        IconButtonVariant::Ghost,
+        IconButtonSize::Sm,
+        IconTone::Neutral,
+        false,
+    )
+    .on_click(|_, _, cx| cx.stop_propagation())
 }
 
-/// `IconButton` at its default `solid` variant: the `.ui-button-secondary` tile
-/// (surface-1 fill, subtle border, `rounded-sm`) in the `h-8 w-8 !p-0` box the
-/// Models header's plus uses.
-fn solid_icon(
-    id: &'static str,
-    icon_name: &'static str,
-    size: f32,
-    box_size: f32,
-) -> Stateful<Div> {
-    div()
-        .id(id)
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded(px(RADIUS_SM))
-        .border_1()
-        .border_color(rgb(BORDER_SUBTLE))
-        .bg(rgb(SURFACE_1))
-        .w(px(box_size))
-        .h(px(box_size))
-        .cursor_pointer()
-        .hover(|style| style.bg(rgb(SURFACE_2)))
-        .child(icon(icon_name, size, TEXT_MUTED))
-}
-
-/// `rounded-md border p-2` with the panels' shared inset fill.
+/// `rounded-md border p-2` on `--border-subtle` / `--surface-1` — the neutral
+/// sub-card (`panelCardStyle` in the React panels).
 fn section_card() -> Div {
-    div()
-        .rounded(px(ROUNDED_MD))
-        .border_1()
-        .border_color(rgb(BORDER_SUBTLE))
-        .bg(rgb(SURFACE_1))
-        .p(px(8.))
-        .flex()
-        .flex_col()
-        .gap(px(6.))
+    sub_card().border_color(rgb(BORDER_SUBTLE))
 }
 
 /// `grid grid-cols-2 gap-1.5`.
@@ -293,7 +261,12 @@ pub fn models_add_button(entity: WeakEntity<DragonFruit>) -> impl IntoElement {
     let add_entity = entity;
     hint(
         "models-add-tip",
-        solid_icon("models-add", "plus", 14., 32.).on_click(move |_, _, cx| {
+        button_with_content(
+            "models-add",
+            &ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Sm).width(32.0),
+            icon("plus", 14.0, TEXT_MUTED),
+        )
+        .on_click(move |_, _, cx| {
             add_entity.update(cx, |this, cx| this.open_stl(cx)).ok();
         }),
         "Add models to the plate",
@@ -630,24 +603,12 @@ pub fn supports_body(count: usize, entity: WeakEntity<DragonFruit>) -> impl Into
     //
     // PORT GAP: no busy flag, so the label never becomes "Running…", and no
     // `hasGeometry` / `activeModelId`, so `canRun` cannot disable it.
-    let run_button = div()
-        .id("supports-generate")
-        .w_full()
-        .h(px(32.))
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded(px(RADIUS_SM))
-        .border_1()
+    let mut run_spec = ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Sm).full();
+    run_spec.hover = Some(mix(ACCENT, SURFACE_0, 0.14));
+    let run_button = button_with("supports-generate", "Generate Supports", &run_spec)
         .border_color(rgb(ACCENT))
         .bg(rgb(mix(ACCENT, SURFACE_0, 0.14)))
-        .px(px(11.))
-        .text_size(px(11.))
-        .font_weight(FontWeight::SEMIBOLD)
-        .line_height(px(11.))
         .text_color(rgb(ACCENT))
-        .cursor_pointer()
-        .child("Generate Supports")
         .on_click(move |_, _, cx| {
             generate_entity
                 .update(cx, |this, cx| {
@@ -706,25 +667,14 @@ pub fn supports_body(count: usize, entity: WeakEntity<DragonFruit>) -> impl Into
             // `Button variant="secondary" size="auto"` at
             // `min-w-0 flex-1 !h-8 px-2 text-[11px]` with OFF_STYLE
             // (`background: var(--surface-1)`).
-            div()
-                .id("supports-auto-lift")
-                .flex_1()
-                .min_w(px(0.))
-                .h(px(32.))
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded(px(RADIUS_SM))
-                .border_1()
-                .border_color(rgb(BORDER_SUBTLE))
-                .bg(rgb(SURFACE_1))
-                .px(px(8.))
-                .text_size(px(11.))
-                .font_weight(FontWeight::SEMIBOLD)
-                .line_height(px(11.))
-                .text_color(rgb(TEXT_STRONG))
-                .truncate()
-                .child("Auto-Lift OFF"),
+            {
+                let mut lift_spec = ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Sm);
+                lift_spec.hover = Some(SURFACE_1);
+                button_with("supports-auto-lift", "Auto-Lift OFF", &lift_spec)
+                    .flex_1()
+                    .min_w(px(0.))
+                    .truncate()
+            },
             "Lift the selected models to this distance so a support can stand under \
              them; off returns them to the height they were at.",
         )));
@@ -1112,28 +1062,27 @@ fn option_button(
         (SURFACE_0, BORDER_SUBTLE, TEXT_STRONG, 1.0)
     };
 
-    div()
-        .id(id)
+    // The inline fill the source puts on every one of these wins over the
+    // variant's hover fill, so none of them changes on hover: the spec's hover
+    // is pinned to the resting fill.
+    //
+    // Inside a panel `.ui-panel .ui-button { font-size: 14px }` is unlayered
+    // CSS, so the source's `text-[11px]` never applies — only `!h-8` does.
+    let mut spec = ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Sm);
+    spec.hover = Some(background);
+    if disabled {
+        spec = spec.disabled();
+    }
+
+    button_with(id, label, &spec)
         .flex_1()
         .min_w(px(0.))
-        .h(px(32.))
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded(px(RADIUS_SM))
-        .border_1()
-        .border_color(rgb(border))
         .bg(rgb(background))
-        .px(px(6.))
-        .opacity(opacity)
-        .text_size(px(11.))
-        .font_weight(FontWeight::SEMIBOLD)
-        .line_height(px(11.))
+        .border_color(rgb(border))
         .text_color(rgb(text))
+        .opacity(opacity)
         .whitespace_nowrap()
         .when(disabled, |this| this.cursor_not_allowed())
-        .when(!disabled, |this| this.cursor_pointer())
-        .child(label)
 }
 
 // ---------------------------------------------------------------------------
@@ -1148,15 +1097,9 @@ fn option_button(
 pub fn printing_body(_entity: WeakEntity<DragonFruit>) -> impl IntoElement {
     // `rounded-md border p-2.5 space-y-1`: flat label/value pairs, with `mt-1`
     // on every label after the first.
-    let settings = div()
-        .rounded(px(ROUNDED_MD))
-        .border_1()
+    let settings = sub_card_with(None, 10.0)
         .border_color(rgb(BORDER_SUBTLE))
-        .bg(rgb(SURFACE_1))
-        .p(px(10.))
-        .flex()
-        .flex_col()
-        .gap(px(4.))
+        .gap(px(4.0))
         .child(print_label("Printer", false))
         .child(print_value("No printer selected"))
         .child(print_label("Resin", true))
@@ -1167,15 +1110,9 @@ pub fn printing_body(_entity: WeakEntity<DragonFruit>) -> impl IntoElement {
         .child(print_value("—"));
 
     // `rounded-md border p-2.5 space-y-1`.
-    let generated = div()
-        .rounded(px(ROUNDED_MD))
-        .border_1()
+    let generated = sub_card_with(None, 10.0)
         .border_color(rgb(BORDER_SUBTLE))
-        .bg(rgb(SURFACE_1))
-        .p(px(10.))
-        .flex()
-        .flex_col()
-        .gap(px(4.))
+        .gap(px(4.0))
         .child(print_label("Generated file", false))
         .child(
             div()
@@ -1254,62 +1191,34 @@ fn disabled_accent_action(
     icon_name: &'static str,
     label: &'static str,
 ) -> Stateful<Div> {
-    let text = mix(TEXT_MUTED, SURFACE_2, 0.82);
-    div()
-        .id(id)
-        .w_full()
-        .h(px(36.))
-        .flex()
-        .items_center()
-        .justify_center()
-        .gap(px(6.))
-        .rounded(px(RADIUS_SM))
-        .border_1()
-        .border_color(rgb(mix(BORDER_SUBTLE, BLACK, 0.90)))
-        .bg(rgb(mix(SURFACE_1, BLACK, 0.92)))
-        .px(px(11.))
-        .text_size(px(FONT_XS))
-        .font_weight(FontWeight::SEMIBOLD)
-        .line_height(px(FONT_XS))
-        .text_color(rgb(text))
-        .cursor_not_allowed()
-        .child(icon(icon_name, 16., text))
-        .child(label)
+    let spec = ButtonSpec::new(ButtonVariant::Accent, ButtonSize::Md)
+        .full()
+        .gap(6.0)
+        .disabled()
+        .icon(icon_name, 16.0, mix(TEXT_MUTED, SURFACE_2, 0.82));
+    button_with(id, label, &spec)
 }
 
 /// `.ui-button:disabled` with the secondary variant's geometry: `!h-9 flex-1`,
-/// `text-[12px]`, the glyph and the label at `gap-1.5`.
+/// the glyph and the label at `gap-1.5`.
 fn disabled_secondary_action(
     id: &'static str,
     icon_name: &'static str,
     label: &'static str,
 ) -> Stateful<Div> {
-    let text = mix(TEXT_MUTED, SURFACE_2, 0.82);
-    div()
-        .id(id)
-        .flex_1()
-        .min_w(px(0.))
-        .h(px(36.))
-        .flex()
-        .items_center()
-        .justify_center()
-        .gap(px(6.))
-        .rounded(px(RADIUS_SM))
-        .border_1()
-        .border_color(rgb(mix(BORDER_SUBTLE, BLACK, 0.90)))
-        .bg(rgb(mix(SURFACE_1, BLACK, 0.92)))
-        .px(px(11.))
-        .text_size(px(12.))
-        .font_weight(FontWeight::SEMIBOLD)
-        .line_height(px(12.))
-        .text_color(rgb(text))
-        .cursor_not_allowed()
-        .child(icon(icon_name, 16., text))
-        .child(
-            div()
-                .min_w(px(0.))
-                .truncate()
-                .whitespace_nowrap()
-                .child(label),
-        )
+    let spec = ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Md)
+        .gap(6.0)
+        .disabled()
+        .icon(icon_name, 16.0, mix(TEXT_MUTED, SURFACE_2, 0.82));
+    button_with_content(
+        id,
+        &spec,
+        div()
+            .min_w(px(0.))
+            .truncate()
+            .whitespace_nowrap()
+            .child(label),
+    )
+    .flex_1()
+    .min_w(px(0.))
 }

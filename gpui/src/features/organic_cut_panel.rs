@@ -33,6 +33,7 @@ use gpui::{Div, FontWeight, IntoElement, SharedString, div, prelude::*, px, rgb,
 
 use gpui_core::icons::icon;
 use gpui_ui::panel_fields::*;
+use gpui_ui::ui::section_label;
 use gpui_core::theme::*;
 
 /// `OrganicCutMode`.
@@ -326,12 +327,7 @@ pub fn organic_cut_body(view: &OrganicCutView, actions: &OrganicCutActions) -> i
             .flex()
             .flex_col()
             .gap(px(6.0))
-            .child(
-                div()
-                    .text_size(px(FONT_SM))
-                    .text_color(rgb(TEXT_MUTED))
-                    .child("Cut Mode"),
-            )
+            .child(section_label("Cut Mode"))
             .child(
                 div()
                     .flex()

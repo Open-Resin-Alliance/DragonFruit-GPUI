@@ -2,15 +2,16 @@ use gpui::{
     Div, FontWeight, IntoElement, SharedString, WeakEntity, div, prelude::*, px, rgb, rgba,
 };
 
-use gpui_core::icons::icon;
 use gpui_core::support_state::{NO_ACTIVE_PRESET_LABEL, field_help_text, *};
 use gpui_core::theme::*;
 use gpui_ui::panel_fields::with_alpha;
-use gpui_ui::ui::{SelectOption, select_dropdown};
+use gpui_ui::ui::{
+    self, ButtonSize, ButtonSpec, ButtonVariant, SelectOption, select_dropdown,
+};
 
 use super::shared::{
-    accent_secondary_action_bg, accent_secondary_action_border, flat_button, labeled_number_field,
-    labeled_toggle_field, normalize_value, notify,
+    accent_secondary_action_bg, accent_secondary_action_border, field_help,
+    labeled_number_field, normalize_value, notify,
 };
 use crate::DragonFruit;
 
@@ -112,56 +113,51 @@ pub fn support_settings_body(
         div().w_full().child(selector)
     };
 
-    let strip_button = |id: &'static str, icon_name: &'static str, label: &'static str, enabled: bool| {
-        flat_button(
-            id,
-            div()
-                .flex()
-                .items_center()
-                .gap(px(4.0))
-                .child(icon(icon_name, 14.0, if enabled { TEXT_STRONG } else { TEXT_MUTED }))
-                .child(label),
-            32.0,
-            SURFACE_1,
-            BORDER_SUBTLE,
-            TEXT_STRONG,
-            Some(SURFACE_2),
-            enabled,
-            |_, _, _| {},
-        )
+    // `STRIP_BUTTON`: `!h-8 !px-2.5 !py-0`, gap 1 (4px), the glyph in the
+    // button's own colour.
+    let strip_button = |id: &'static str, icon_name: &str, label: &'static str, enabled: bool| {
+        let mut spec = ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Sm)
+            .padding_x(10.0)
+            .padding_y(0.0, 0.0)
+            .gap(4.0)
+            .icon(icon_name, 14.0, if enabled { TEXT_STRONG } else { TEXT_MUTED });
+        if !enabled {
+            spec = spec.disabled();
+        }
+        ui::button_with(id, label, &spec)
     };
     let has_preset = preset.is_some();
     // `Duplicate` is the way out of a locked built-in: the copy is a custom
     // profile, so the policy fields unlock and Save can write it.
     let duplicate_state = state.clone();
     let duplicate_entity = entity.clone();
-    let duplicate = flat_button(
-        "support-preset-duplicate",
-        div()
-            .flex()
-            .items_center()
-            .gap(px(4.0))
-            .child(icon(
-                "copy",
-                14.0,
-                if has_preset { TEXT_STRONG } else { TEXT_MUTED },
-            ))
-            .child("Duplicate"),
-        32.0,
-        SURFACE_1,
-        BORDER_SUBTLE,
-        TEXT_STRONG,
-        Some(SURFACE_2),
-        has_preset,
-        move |_, _, cx| {
+    let mut duplicate_spec = ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Sm)
+        .padding_x(10.0)
+        .padding_y(0.0, 0.0)
+        .gap(4.0)
+        .icon(
+            "copy",
+            14.0,
+            if has_preset {
+                TEXT_STRONG
+            } else {
+                TEXT_MUTED
+            },
+        );
+    if !has_preset {
+        duplicate_spec = duplicate_spec.disabled();
+    }
+    let mut duplicate = ui::button_with("support-preset-duplicate", "Duplicate", &duplicate_spec);
+    if has_preset {
+        duplicate = duplicate.on_click(move |_, _, cx| {
             let mut model = duplicate_state.model_mut();
             model.preset = None;
             model.baseline = model.draft;
             model.modified = false;
             drop(model);
             notify(&duplicate_entity, cx);
-        },
-    );
+        });
+    }
     let strip = div()
         .rounded(px(ROUNDED_XL))
         .border_1()
@@ -355,10 +351,14 @@ pub fn support_settings_body(
                     }
                 },
             ),
-            labeled_toggle_field(
+            ui::toggle_row(
                 "support-stabilization",
                 "Stabilization Anchors",
-                field_help_text(locked, "Add contacts along the edge or corner a pose bears on, so a leaning part is held against toppling and peel (default on)"),
+                Some(field_help(
+                    "support-stabilization-help",
+                    field_help_text(locked, "Add contacts along the edge or corner a pose bears on, so a leaning part is held against toppling and peel (default on)"),
+                )
+                .into_any_element()),
                 draft.stabilization_enabled,
                 locked,
                 {
@@ -373,10 +373,14 @@ pub fn support_settings_body(
                     }
                 },
             ),
-            labeled_toggle_field(
+            ui::toggle_row(
                 "support-minima-reinforcement",
                 "Minima Reinforcement",
-                field_help_text(locked, "Ring each mesh minima with contacts on its own flank, so a section starts on a base instead of a needle (default on)"),
+                Some(field_help(
+                    "support-minima-reinforcement-help",
+                    field_help_text(locked, "Ring each mesh minima with contacts on its own flank, so a section starts on a base instead of a needle (default on)"),
+                )
+                .into_any_element()),
                 draft.minima_reinforcement_enabled,
                 locked,
                 {
@@ -397,69 +401,58 @@ pub fn support_settings_body(
     // ── Footer ──────────────────────────────────────────────────────────────
     // `Button variant="tinted-danger" size="md"`: the `.ui-button-tint-danger`
     // fill, with the trash glyph before the label.
-    let delete = flat_button(
-        "support-preset-delete",
-        div()
-            .flex()
-            .items_center()
-            .gap(px(6.0))
-            .child(icon("trash-2", 14.0, DANGER))
-            .child("Delete"),
-        36.0,
-        mix(DANGER, SURFACE_1, 0.14),
-        mix(DANGER, BORDER_SUBTLE, 0.55),
-        DANGER,
-        Some(mix(DANGER, SURFACE_1, 0.24)),
+    let delete_spec = ButtonSpec::new(ButtonVariant::TintedDanger, ButtonSize::Md)
+        .gap(6.0)
+        .icon("trash-2", 14.0, DANGER)
         // `disabled={!activePreset || isBuiltIn}`: every preset here is a
         // built-in, so Delete is always greyed.
-        false,
-        |_, _, _| {},
-    );
+        .disabled();
+    let delete = ui::button_with("support-preset-delete", "Delete", &delete_spec);
 
     let reset_state = state.clone();
     let reset_entity = entity.clone();
-    let reset = flat_button(
-        "support-preset-reset",
-        div()
-            .flex()
-            .items_center()
-            .gap(px(6.0))
-            .child(icon("rotate-ccw", 14.0, TEXT_STRONG))
-            .child("Reset"),
-        36.0,
-        SURFACE_1,
-        BORDER_SUBTLE,
-        TEXT_STRONG,
-        Some(SURFACE_2),
-        modified,
-        move |_, _, cx| {
+    let mut reset_spec = ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Md)
+        .gap(6.0)
+        .icon("rotate-ccw", 14.0, TEXT_STRONG);
+    if !modified {
+        reset_spec = reset_spec.disabled();
+    }
+    let mut reset = ui::button_with("support-preset-reset", "Reset", &reset_spec);
+    if modified {
+        reset = reset.on_click(move |_, _, cx| {
             let mut model = reset_state.model_mut();
             model.draft = model.baseline;
             model.modified = false;
             drop(model);
             notify(&reset_entity, cx);
-        },
-    );
+        });
+    }
 
     let save_state = state.clone();
     let save_entity = entity.clone();
-    let save = flat_button(
-        "support-preset-save",
-        "Save",
-        36.0,
-        accent_secondary_action_bg(),
-        accent_secondary_action_border(),
-        ACCENT_SECONDARY,
-        None,
-        modified && !has_preset,
-        move |_, _, cx| {
+    // `SAVE_STYLE`: the accent-secondary action token, filled; its inline
+    // `style` also pins the hover fill.
+    let mut save_spec = ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Md)
+        .gap(6.0)
+        .fill(
+            accent_secondary_action_bg(),
+            accent_secondary_action_border(),
+            ACCENT_SECONDARY,
+        );
+    let save_enabled = modified && !has_preset;
+    if !save_enabled {
+        save_spec = save_spec.disabled();
+    }
+    let mut save = ui::button_with("support-preset-save", "Save", &save_spec);
+    if save_enabled {
+        save = save.on_click(move |_, _, cx| {
             let mut model = save_state.model_mut();
             model.baseline = model.draft;
             model.modified = false;
             drop(model);
             notify(&save_entity, cx);
-        },
-    );
+        });
+    }
 
     let footer = div()
         .flex()

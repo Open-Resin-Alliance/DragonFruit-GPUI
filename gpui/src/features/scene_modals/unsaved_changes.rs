@@ -10,7 +10,9 @@ use gpui_ui::ui::{
     ButtonSize, ButtonVariant, IconTone, button, button_disabled, dialog_modal_full,
 };
 
-use super::chrome::{LEADING_RELAXED, DIALOG_LG, muted_small_paragraph, action_slot, TintedTone, tinted_action};
+use super::chrome::{
+    DIALOG_LG, LEADING_RELAXED, action_slot, muted_small_paragraph, tinted_action,
+};
 
 // ── UnsavedChangesDialog ────────────────────────────────────────────────────
 
@@ -37,7 +39,7 @@ fn unsaved_changes_dialog(
         ElementId::named_usize(id, 1),
         "Discard Changes",
         Some(("trash-2", 14.0)),
-        TintedTone::Danger,
+        ButtonVariant::TintedDanger,
     )
     .w_full();
     if busy {
@@ -174,4 +176,4 @@ pub fn new_scene_unsaved_changes_modal(
         on_save,
     )
 }
-
+

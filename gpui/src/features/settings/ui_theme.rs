@@ -117,23 +117,34 @@ pub(crate) fn ui_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>) -> 
                         .gap(px(6.))
                         // Theme import/export is not ported; the button keeps the
                         // source layout and reads as disabled.
-                        .child(small_button(
-                            "settings-theme-import",
-                            "Import",
-                            false,
-                            |_| {},
-                        )),
+                        .child(
+                            button_with(
+                                "settings-theme-import",
+                                "Import",
+                                ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Sm)
+                                    .padding_x(10.0)
+                                    .padding_y(0.0, 0.0)
+                                    .font_size(12.0)
+                                    .disabled(),
+                            )
+                            .opacity(0.5),
+                        ),
                 )
                 .child(
                     div()
                         .flex()
                         .items_center()
                         .gap(px(6.))
-                        .child(small_button(
-                            "settings-theme-reset",
-                            "Reset",
-                            true,
-                            move |cx| {
+                        .child(
+                            button_with(
+                                "settings-theme-reset",
+                                "Reset",
+                                ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Sm)
+                                    .padding_x(10.0)
+                                    .padding_y(0.0, 0.0)
+                                    .font_size(12.0),
+                            )
+                            .on_click(move |_, _, cx| {
                                 edit_and_notify(&reset_entity, cx, |draft| {
                                     for section in THEME_COLOR_SECTIONS.iter() {
                                         for row in section.rows {
@@ -143,8 +154,8 @@ pub(crate) fn ui_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>) -> 
                                         }
                                     }
                                 });
-                            },
-                        )),
+                            }),
+                        ),
                 ),
         );
 
