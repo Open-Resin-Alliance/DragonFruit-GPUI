@@ -9,11 +9,28 @@ pub struct Camera {
     pub target: Vec3,
     pub fov_y: f32,
     pub orthographic: bool,
-    /// OrbitControls' damping: input writes the goal, `step` chases it.
-    goal_yaw: f32,
-    goal_pitch: f32,
-    goal_distance: f32,
-    goal_target: Vec3,
+    /// OrbitControls' `sphericalDelta` / `panOffset`: applied in full each
+    /// frame, then decayed, so a drag responds immediately and keeps a little
+    /// inertia after release.
+    pending_yaw: f32,
+    pending_pitch: f32,
+    pending_pan: Vec3,
+    pending_zoom: f32,
+    /// Home / focus tween: (start pose, end pose, elapsed seconds, duration).
+    tween: Option<Tween>,
+}
+
+struct Tween {
+    start_yaw: f32,
+    start_pitch: f32,
+    start_distance: f32,
+    start_target: Vec3,
+    end_yaw: f32,
+    end_pitch: f32,
+    end_distance: f32,
+    end_target: Vec3,
+    elapsed: f32,
+    duration: f32,
 }
 
 // `cameraFeelPreset = 'precise'`: rotateSpeed 0.72, panSpeed 0.82,
@@ -34,10 +51,11 @@ impl Camera {
             target: center,
             fov_y,
             orthographic: true,
-            goal_yaw: -std::f32::consts::FRAC_PI_4,
-            goal_pitch: 0.5,
-            goal_distance: distance,
-            goal_target: center,
+            pending_yaw: 0.0,
+            pending_pitch: 0.0,
+            pending_pan: Vec3::ZERO,
+            pending_zoom: 0.0,
+            tween: None,
         }
     }
 
@@ -83,77 +101,109 @@ impl Camera {
     }
 
     pub fn orbit(&mut self, dx: f32, dy: f32) {
-        self.goal_yaw -= dx * 0.008 * ROTATE_SPEED;
+        self.pending_yaw -= dx * 0.008 * ROTATE_SPEED;
         // OrbitControls leaves the polar range at its default 0..π, so a
         // straight top-down view is reachable; only the look-at singularity
         // (forward parallel to up) is excluded.
         const LIMIT: f32 = std::f32::consts::FRAC_PI_2 - 0.001;
-        self.goal_pitch = (self.goal_pitch + dy * 0.008 * ROTATE_SPEED).clamp(-LIMIT, LIMIT);
+        self.pending_pitch += dy * 0.008 * ROTATE_SPEED;
     }
 
     /// OrbitControls' screen-space pan: `panSpeed * (2 * distance *
     /// tan(fov/2)) / viewportHeight` world units per pixel.
     pub fn pan(&mut self, dx: f32, dy: f32, viewport_height: f32) {
-        let forward = (self.goal_target - self.eye()).normalize();
+        let forward = (self.target - self.eye()).normalize();
         let right = forward.cross(Vec3::Z).normalize();
         let up = right.cross(forward).normalize();
-        let scale = PAN_SPEED * 2.0 * self.goal_distance * (self.fov_y * 0.5).tan()
+        let scale = PAN_SPEED * 2.0 * self.distance * (self.fov_y * 0.5).tan()
             / viewport_height.max(1.0);
-        self.goal_target += right * (-dx * scale) + up * (dy * scale);
+        self.pending_pan += right * (-dx * scale) + up * (dy * scale);
     }
 
     pub fn zoom(&mut self, delta: f32) {
         // OrbitControls' wheel scale: `0.95^zoomSpeed` per wheel step.
-        self.goal_distance = (self.goal_distance * 0.95f32.powf(delta * ZOOM_SPEED))
-            .clamp(0.01, 1.0e6);
+        self.pending_zoom += delta * ZOOM_SPEED;
     }
 
     /// `CameraHomeResetController`: the home pose is the orbit target plus
     /// `(-220, -220, +260)`.
     pub fn home(&mut self, target: Vec3) {
         let offset = Vec3::new(-220.0, -220.0, 260.0);
-        self.goal_target = target;
-        self.goal_distance = offset.length();
-        self.goal_pitch = (offset.z / offset.length()).asin();
-        self.goal_yaw = offset.y.atan2(offset.x);
+        self.begin_tween(
+            target,
+            offset.length(),
+            (offset.z / offset.length()).asin(),
+            offset.y.atan2(offset.x),
+            0.65,
+        );
+    }
+
+    fn begin_tween(&mut self, target: Vec3, distance: f32, pitch: f32, yaw: f32, duration: f32) {
+        self.pending_yaw = 0.0;
+        self.pending_pitch = 0.0;
+        self.pending_pan = Vec3::ZERO;
+        self.tween = Some(Tween {
+            start_yaw: self.yaw,
+            start_pitch: self.pitch,
+            start_distance: self.distance,
+            start_target: self.target,
+            end_yaw: yaw,
+            end_pitch: pitch,
+            end_distance: distance,
+            end_target: target,
+            elapsed: 0.0,
+            duration,
+        });
     }
 
     /// `CameraIntroController`'s prepare framing: fit the sphere at 1.05x the
     /// vertical FOV distance, from the source's `(-sin20°, -cos20°, 1)` view.
     pub fn focus(&mut self, center: Vec3, radius: f32) {
         let radius = radius.max(0.001);
-        let v_fov = self.fov_y;
-        let distance = radius / (v_fov * 0.5).tan() * 1.05;
+        let distance = radius / (self.fov_y * 0.5).tan() * 1.05;
         let yaw = 20f32.to_radians();
         let dir = Vec3::new(-yaw.sin(), -yaw.cos(), 1.0).normalize();
-        self.goal_target = center;
-        self.goal_distance = distance;
-        self.goal_pitch = dir.z.asin();
-        self.goal_yaw = dir.y.atan2(dir.x);
+        self.begin_tween(center, distance, dir.z.asin(), dir.y.atan2(dir.x), 1.0);
     }
 
     /// One frame of OrbitControls-style damping (dampingFactor 0.12). Returns
     /// whether the camera is still moving, so the caller can request a frame.
-    pub fn step(&mut self) -> bool {
-        let mut moving = false;
-        let mut approach = |value: &mut f32, goal: f32| {
-            let delta = goal - *value;
-            if delta.abs() > 1e-4 {
-                *value += delta * DAMPING;
-                moving = true;
-            } else {
-                *value = goal;
+    pub fn step(&mut self, dt: f32) -> bool {
+        if let Some(tween) = self.tween.as_mut() {
+            tween.elapsed += dt;
+            let t = (tween.elapsed / tween.duration).clamp(0.0, 1.0);
+            // `smootherstep`.
+            let eased = t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
+            self.yaw = tween.start_yaw + (tween.end_yaw - tween.start_yaw) * eased;
+            self.pitch = tween.start_pitch + (tween.end_pitch - tween.start_pitch) * eased;
+            self.distance =
+                tween.start_distance + (tween.end_distance - tween.start_distance) * eased;
+            self.target = tween.start_target + (tween.end_target - tween.start_target) * eased;
+            if t >= 1.0 {
+                self.tween = None;
             }
-        };
-        approach(&mut self.yaw, self.goal_yaw);
-        approach(&mut self.pitch, self.goal_pitch);
-        approach(&mut self.distance, self.goal_distance);
-        let target_delta = self.goal_target - self.target;
-        if target_delta.length_squared() > 1e-6 {
-            self.target += target_delta * DAMPING;
+            return true;
+        }
+
+        // OrbitControls applies the whole pending delta, then decays it.
+        let mut moving = false;
+        const LIMIT: f32 = std::f32::consts::FRAC_PI_2 - 0.001;
+        if self.pending_yaw.abs() > 1e-5 || self.pending_pitch.abs() > 1e-5 {
+            self.yaw += self.pending_yaw;
+            self.pitch = (self.pitch + self.pending_pitch).clamp(-LIMIT, LIMIT);
+            self.pending_yaw *= 1.0 - DAMPING;
+            self.pending_pitch *= 1.0 - DAMPING;
             moving = true;
-        } else {
-            self.target = self.goal_target;
+        }
+        if self.pending_zoom.abs() > 1e-5 {
+            self.distance = (self.distance * 0.95f32.powf(self.pending_zoom)).clamp(0.01, 1.0e6);
+            self.pending_zoom *= 1.0 - DAMPING;
+            moving = true;
+        }
+        if self.pending_pan.length_squared() > 1e-8 {
+            self.target += self.pending_pan;
+            self.pending_pan *= 1.0 - DAMPING;
+            moving = true;
         }
         moving
     }

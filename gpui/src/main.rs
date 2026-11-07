@@ -495,7 +495,7 @@ impl Render for DragonFruit {
             eprintln!("window scale factor: {}", window.scale_factor());
         }
 
-        if self.camera.borrow_mut().step() {
+        if self.camera.borrow_mut().step(1.0 / 60.0) {
             window.request_animation_frame();
         }
         let mesh = self.mesh.clone();
