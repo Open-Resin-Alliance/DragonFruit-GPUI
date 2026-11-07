@@ -150,10 +150,11 @@ pub fn section_row(title: impl Into<SharedString>, leading: Option<Div>, trailin
 /// The muted `ui-meta` caption above a control group (`Cut Mode`, `Layout
 /// Mode`, `Arrange Distance`, `Placement Anchor`): 13px in `--text-muted`.
 pub fn section_label(text: impl Into<SharedString>) -> Div {
+    let text: SharedString = text.into();
     div()
         .text_size(px(FONT_SM))
         .text_color(rgb(TEXT_MUTED))
-        .child(text.into())
+        .child(text)
 }
 
 /// The `text-[10px] uppercase tracking-wide` column caption of a grid

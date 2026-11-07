@@ -12,10 +12,13 @@ use fontdue::Font;
 const FACE: (u8, u8, u8) = (0x1a, 0x1b, 0x21);
 const TEXT: (u8, u8, u8) = (0xf8, 0xf8, 0xfb);
 const STROKE: (u8, u8, u8) = (0xba, 0xf7, 0x2e);
-/// `FaceMaterial`: 128x128 canvas, 20px label, `FACE_LABEL_MAX_WIDTH`.
-pub const FACE_SIZE: u32 = 128;
-const LABEL_MAX_WIDTH: f32 = 112.0;
-const LABEL_FONT: f32 = 20.0;
+/// The source paints a 128x128 canvas; the atlas is 2x that so a face drawn at
+/// ~90 device pixels samples a 2px border with sub-texel coverage instead of
+/// aliasing a 1px one.
+pub const FACE_SIZE: u32 = 256;
+const SCALE: f32 = FACE_SIZE as f32 / 128.0;
+const LABEL_MAX_WIDTH: f32 = 112.0 * SCALE;
+const LABEL_FONT: f32 = 20.0 * SCALE;
 
 /// `defaultFaces`, in `ZUpGizmoViewcube`'s box order.
 pub const LABELS: [&str; 6] = ["FRONT", "BACK", "RIGHT", "LEFT", "TOP", "BOTTOM"];
@@ -51,8 +54,12 @@ pub fn atlas() -> (u32, u32, Vec<u8>) {
         for edge in 0..FACE_SIZE {
             for (x, y) in [
                 (edge, 0),
+                (edge, 1),
+                (edge, FACE_SIZE - 2),
                 (edge, FACE_SIZE - 1),
                 (0, edge),
+                (1, edge),
+                (FACE_SIZE - 2, edge),
                 (FACE_SIZE - 1, edge),
             ] {
                 let i = ((y * FACE_SIZE + x) * 4) as usize;
@@ -86,7 +93,16 @@ fn draw_label(buffer: &mut [u8], font: &Font, label: &str) {
         .chars()
         .map(|ch| font.metrics(ch, size).advance_width)
         .sum();
+    // Rasterise into a scratch, measure the covered box, then blit centred:
+    // `textBaseline = middle` centres the *em*, and the port was guessing the
+    // glyph's offset from it, which left long labels sitting low.
+    let mut scratch = vec![0u8; (FACE_SIZE * FACE_SIZE) as usize];
     let mut pen = FACE_SIZE as f32 * 0.5 - advance * 0.5;
+    let left = pen;
+    let mut min_x = FACE_SIZE as i32;
+    let mut min_y = FACE_SIZE as i32;
+    let mut max_x = 0i32;
+    let mut max_y = 0i32;
     for ch in label.chars() {
         let (metrics, bitmap) = font.rasterize(ch, size);
         for row in 0..metrics.height {
@@ -103,16 +119,46 @@ fn draw_label(buffer: &mut [u8], font: &Font, label: &str) {
                 if x < 1 || y < 1 || x >= FACE_SIZE as i32 - 1 || y >= FACE_SIZE as i32 - 1 {
                     continue;
                 }
-                let i = ((y as u32 * FACE_SIZE + x as u32) * 4) as usize;
-                let mix = |base: u8, ink: u8| {
-                    (base as f32 + (ink as f32 - base as f32) * coverage) as u8
-                };
-                buffer[i] = mix(buffer[i], TEXT.0);
-                buffer[i + 1] = mix(buffer[i + 1], TEXT.1);
-                buffer[i + 2] = mix(buffer[i + 2], TEXT.2);
+                scratch[(y as u32 * FACE_SIZE + x as u32) as usize] = (coverage * 255.0) as u8;
+                min_x = min_x.min(x);
+                min_y = min_y.min(y);
+                max_x = max_x.max(x);
+                max_y = max_y.max(y);
             }
         }
         pen += metrics.advance_width;
+    }
+    let _ = left;
+    if max_x < min_x {
+        return;
+    }
+    let width = (max_x - min_x + 1) as f32;
+    let height = (max_y - min_y + 1) as f32;
+    let offset_x = (FACE_SIZE as f32 - width) * 0.5 - min_x as f32;
+    let offset_y = (FACE_SIZE as f32 - height) * 0.5 - min_y as f32;
+    for y in min_y..=max_y {
+        for x in min_x..=max_x {
+            let coverage = scratch[(y as u32 * FACE_SIZE + x as u32) as usize] as f32 / 255.0;
+            if coverage <= 0.0 {
+                continue;
+            }
+            let dst_x = (x as f32 + offset_x).round() as i32;
+            let dst_y = (y as f32 + offset_y).round() as i32;
+            if dst_x < 1
+                || dst_y < 1
+                || dst_x >= FACE_SIZE as i32 - 1
+                || dst_y >= FACE_SIZE as i32 - 1
+            {
+                continue;
+            }
+            let i = ((dst_y as u32 * FACE_SIZE + dst_x as u32) * 4) as usize;
+            let mix = |base: u8, ink: u8| {
+                (base as f32 + (ink as f32 - base as f32) * coverage) as u8
+            };
+            buffer[i] = mix(buffer[i], TEXT.0);
+            buffer[i + 1] = mix(buffer[i + 1], TEXT.1);
+            buffer[i + 2] = mix(buffer[i + 2], TEXT.2);
+        }
     }
 }
 

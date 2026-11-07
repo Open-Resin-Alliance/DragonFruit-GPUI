@@ -29,7 +29,7 @@
 
 use std::rc::Rc;
 
-use gpui::{Div, FontWeight, IntoElement, SharedString, div, prelude::*, px, rgb, rgba};
+use gpui::{Div, IntoElement, SharedString, div, prelude::*, px, rgb, rgba};
 
 use gpui_core::icons::icon;
 use gpui_ui::panel_fields::*;

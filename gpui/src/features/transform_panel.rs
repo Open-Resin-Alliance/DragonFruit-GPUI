@@ -724,71 +724,43 @@ pub fn orientation_body(
     } else {
         let orient = actions.on_orient.clone();
         let toggle = actions.on_toggle_blockers.clone();
+        // `Button size="auto"` with `flex-1 !h-8 text-[11px]
+        // disabled:opacity-50`; the Orient one carries the accent inline style.
+        let orient_enabled = !state.busy && has_model;
+        let orient_spec = ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Sm).fill(
+            mix(ACCENT, SURFACE_0, 0.14),
+            ACCENT,
+            ACCENT,
+        );
+        let orient_button = button_with(
+            "orientation-orient",
+            if state.busy { "Analyzing…" } else { "Orient Model" },
+            &orient_spec,
+        );
+        let orient_button = if orient_enabled {
+            orient_button.on_click(move |_, _, _| orient())
+        } else {
+            orient_button.opacity(0.5).cursor_not_allowed()
+        };
+
+        let blockers_enabled = !state.busy && has_model && state.has_toggle_blockers;
+        let blockers_button = button_with(
+            "orientation-blockers",
+            "Blockers",
+            &ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Sm),
+        );
+        let blockers_button = if blockers_enabled {
+            blockers_button.on_click(move |_, _, _| toggle())
+        } else {
+            blockers_button.opacity(0.5).cursor_not_allowed()
+        };
+
         body = body.child(
             div()
                 .flex()
                 .gap(px(6.0))
-                .child(
-                    div().flex_1().child(
-                        div()
-                            .id("orientation-orient")
-                            .h(px(32.0))
-                            .px(px(11.0))
-                            .pt(px(5.0))
-                            .pb(px(7.0))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .rounded(px(RADIUS_SM))
-                            .border_1()
-                            .border_color(rgb(ACCENT))
-                            .bg(rgb(mix(ACCENT, SURFACE_0, 0.14)))
-                            .text_size(px(FONT_MD))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .line_height(px(FONT_MD))
-                            .text_color(rgb(ACCENT))
-                            .child(if state.busy { "Analyzing…" } else { "Orient Model" })
-                            .when(state.busy || !has_model, |this| {
-                                this.opacity(0.5).cursor_not_allowed()
-                            })
-                            .when(!state.busy && has_model, |this| {
-                                this.cursor_pointer().on_click(move |_, _, _| orient())
-                            }),
-                    ),
-                )
-                .child(
-                    div().flex_1().child(
-                        div()
-                            .id("orientation-blockers")
-                            .h(px(32.0))
-                            .px(px(11.0))
-                            .pt(px(5.0))
-                            .pb(px(7.0))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .rounded(px(RADIUS_SM))
-                            .border_1()
-                            .border_color(rgb(BORDER_SUBTLE))
-                            .bg(rgb(SURFACE_1))
-                            .text_size(px(FONT_MD))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .line_height(px(FONT_MD))
-                            .text_color(rgb(TEXT_STRONG))
-                            .child("Blockers")
-                            .when(state.busy || !has_model || !state.has_toggle_blockers, |this| {
-                                this.opacity(0.5).cursor_not_allowed()
-                            })
-                            .when(
-                                !state.busy && has_model && state.has_toggle_blockers,
-                                |this| {
-                                    this.cursor_pointer()
-                                        .hover(|s| s.bg(rgb(SURFACE_2)))
-                                        .on_click(move |_, _, _| toggle())
-                                },
-                            ),
-                    ),
-                ),
+                .child(div().flex_1().child(orient_button))
+                .child(div().flex_1().child(blockers_button)),
         );
     }
 
