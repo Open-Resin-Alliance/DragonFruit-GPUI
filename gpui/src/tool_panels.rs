@@ -122,9 +122,8 @@ use crate::arrange_panels::{
 use crate::organic_cut_panel::{LoopSummary, OrganicCutActions, OrganicCutView, organic_cut_body};
 use crate::panel_content;
 use crate::smoothing_panel::{SmoothingActions, SmoothingState, smoothing_body};
-use crate::support_panels::{
-    IslandsPanelState, SupportSettingsState, islands_body, support_settings_body,
-};
+use crate::support_panels::{islands_body, support_settings_body};
+use gpui_core::support_state::{IslandsPanelState, SupportSettingsState};
 use crate::transform_panel::{TransformActions, TransformState, transform_body};
 use crate::{DragonFruit, Mode};
 
