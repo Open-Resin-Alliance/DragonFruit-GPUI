@@ -940,6 +940,7 @@ struct Uniforms {
 struct PlateOut {
     @builtin(position) position: vec4<f32>,
     @location(0) normal: vec3<f32>,
+    @location(1) world: vec3<f32>,
 };
 
 @vertex
@@ -947,15 +948,21 @@ fn vs_main(@location(0) position: vec3<f32>, @location(1) normal: vec3<f32>) -> 
     var out: PlateOut;
     out.position = uniforms.view_proj * vec4<f32>(position, 1.0);
     out.normal = normal;
+    out.world = position;
     return out;
 }
 
 @fragment
 fn fs_main(in: PlateOut) -> @location(0) vec4<f32> {
     let n = normalize(in.normal);
-    let key = max(dot(n, normalize(vec3<f32>(0.0, 0.0, 1.0))), 0.0);
+    let view_dir = normalize(uniforms.camera_pos - in.world);
+    let key = max(dot(n, vec3<f32>(0.0, 0.0, 1.0)), 0.0);
+    let fill = max(dot(n, vec3<f32>(0.0, 0.0, -1.0)), 0.0);
+    let head = max(dot(n, view_dir), 0.0);
+    let hemi = mix(vec3<f32>(0.243, 0.255, 0.361), vec3<f32>(0.965, 0.910, 1.0), n.z * 0.5 + 0.5);
+    let lighting = (hemi * 0.28 + key * 1.12 + fill * 0.168 + head * 1.0) / 3.14159265;
     let plate = vec3<f32>(0.032, 0.040, 0.054);
-    return vec4<f32>(plate * (0.35 + 0.65 * key), 1.0);
+    return vec4<f32>(plate * lighting, 1.0);
 }
 "#;
 
@@ -998,7 +1005,10 @@ fn fs_main(in: GridOut) -> @location(0) vec4<f32> {
         1.0,
     );
 
-    let plate = vec3<f32>(0.032, 0.040, 0.054);
+    let view_dir = normalize(uniforms.camera_pos - vec3<f32>(in.world, 0.0));
+    let head = max(view_dir.z, 0.0);
+    let lighting = (vec3<f32>(0.965, 0.910, 1.0) * 0.28 + 1.12 + head * 1.0) / 3.14159265;
+    let plate = vec3<f32>(0.032, 0.040, 0.054) * lighting;
     let minor = vec3<f32>(0.025, 0.031, 0.040);
     let major = vec3<f32>(0.078, 0.090, 0.116);
     var color = mix(plate, minor, line);
@@ -1049,9 +1059,8 @@ fn vs_main(@builtin(vertex_index) index: u32) -> @builtin(position) vec4<f32> {
 @fragment
 fn fs_main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
     let t = clamp(position.y / uniforms.resolution.y, 0.0, 1.0);
-    let top = vec3<f32>(0.0015, 0.0022, 0.0033);
-    let bottom = vec3<f32>(0.0033, 0.0048, 0.0069);
-    return vec4<f32>(mix(top, bottom, t), 1.0);
+    let background = vec3<f32>(0.0033, 0.0048, 0.0069);
+    return vec4<f32>(background, 1.0);
 }
 "#;
 
