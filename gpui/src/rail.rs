@@ -96,9 +96,9 @@
 use std::cell::RefCell;
 
 use gpui::{
-    Anchor, AnchoredPositionMode, AnyElement, App, BoxShadow, FontWeight, IntoElement, MouseButton,
-    MouseDownEvent, Point, Pixels, WeakEntity, Window, anchored, deferred, div, point, prelude::*,
-    px, relative, rgb, rgba,
+    AnyElement, App, BoxShadow, FontWeight, IntoElement, MouseButton, MouseDownEvent, Point,
+    Pixels, WeakEntity, Window, anchored, deferred, div, point, prelude::*, px, relative, rgb,
+    rgba,
 };
 
 use gpui_core::icons::icon;
@@ -592,27 +592,28 @@ fn tooltip_shadows() -> Vec<BoxShadow> {
 /// tile in the column and under it in the bar (`Tooltip.tsx` with
 /// `anchor="trigger"`, `offsetY` 8).
 fn tooltip(entry: &RailEntry, layout: Layout) -> impl IntoElement {
-    let (position, anchor) = match layout {
-        // The column's box goes beside the tile, centred on it.
-        Layout::Vertical => (
-            point(px(TILE_SIZE + 8.0), px(TILE_SIZE / 2.0)),
-            Anchor::LeftCenter,
-        ),
-        // The bar's box goes under the tile, centred on it.
-        Layout::Horizontal => (
-            point(px(TILE_SIZE / 2.0), px(TILE_SIZE + 8.0)),
-            Anchor::TopCenter,
-        ),
+    // `placement="right"` / `"below"` with `anchor="trigger"` and an 8px gap:
+    // beside the tile in the column, under it in the bar. The box is a child of
+    // the tile, so absolute coordinates are relative to it.
+    let mut popover = div();
+    popover = match layout {
+        Layout::Vertical => popover
+            .absolute()
+            .left(px(TILE_SIZE + 8.0))
+            .top(px(0.0))
+            .h(px(TILE_SIZE))
+            .flex()
+            .items_center(),
+        Layout::Horizontal => popover
+            .absolute()
+            .left(px((TILE_SIZE - TOOLTIP_WIDTH) / 2.0))
+            .top(px(TILE_SIZE + 8.0)),
     };
 
     // The popover is portalled above the panels in React; `deferred` is GPUI's
     // equivalent — it keeps the layout here but paints after the rest of the tree.
     deferred(
-        anchored()
-            .position_mode(AnchoredPositionMode::Local)
-            .position(position)
-            .anchor(anchor)
-            .child(
+        popover.child(
                 div()
                     .w(px(TOOLTIP_WIDTH))
                     .rounded(px(4.))
@@ -715,6 +716,7 @@ fn tile(
         // `DISABLED_STYLES` dims the tile rather than its icon.
         tile = tile.opacity(0.45).cursor_not_allowed();
     } else {
+        tile = tile.cursor_pointer();
         let click_entity = entity.clone();
         let menu_entity = entity.clone();
         tile = tile

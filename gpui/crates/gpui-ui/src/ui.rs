@@ -5,14 +5,13 @@
 //! CSS feature (transitions, gradients, `text-overflow: fade`, portals, backdrop
 //! blur) the nearest faithful substitute is used and called out on the item.
 //!
-//! Tailwind's radius scale is **not** overridden by `globals.css`: its
-//! `@theme inline` block only re-declares colours and fonts, so the utilities
-//! keep Tailwind v4's defaults — `rounded-sm` = 4px, `rounded-md` = 6px,
-//! `rounded-lg` = 8px, `rounded-xl` = 12px, bare `rounded` = 4px,
-//! `rounded-[Npx]` = N. The `--radius-sm: 6px` / `--radius-md: 10px` /
-//! `--radius-lg: 14px` custom properties in `:root` are a *separate* scale that
-//! only the hand-written `.ui-input`, `.ui-button` and `.ui-panel` rules read
-//! through `var(--radius-*)`; those keep `theme::RADIUS_*`.
+//! Tailwind v4's `rounded-*` utilities read `--radius-*`, and `globals.css`
+//! overrides those properties in `:root` (`--radius-sm: 6px`,
+//! `--radius-md: 10px`, `--radius-lg: 14px`), so in the running app
+//! `rounded-sm`/`md`/`lg` are 6/10/14 — not Tailwind's stock 4/6/8. `xl` is not
+//! overridden and stays 12. Bare `rounded` is 4 and `rounded-[Npx]` is N.
+//! The hand-written `.ui-input`, `.ui-button` and `.ui-panel` rules read the
+//! same properties through `var(--radius-*)`, so they use `theme::RADIUS_*`.
 //!
 //! ## PORT DEVIATIONS
 //!
@@ -86,12 +85,13 @@ use gpui_core::icons::icon;
 use gpui_core::theme::*;
 pub use gpui_core::state::ToastTone;
 
-/// Tailwind v4's radius scale — what `rounded-*` utilities actually resolve to.
-/// See the module docs for why these are not `theme::RADIUS_*`.
+/// What `rounded-*` resolves to in this app. Tailwind v4's utilities read
+/// `--radius-*` variables, and `globals.css` overrides `sm`/`md`/`lg`
+/// (`6px`/`10px`/`14px`); only `xl` keeps Tailwind's `0.75rem`.
 const ROUNDED: f32 = 4.0;
-const ROUNDED_SM: f32 = 4.0;
-const ROUNDED_MD: f32 = 6.0;
-const ROUNDED_LG: f32 = 8.0;
+const ROUNDED_SM: f32 = 6.0;
+const ROUNDED_MD: f32 = 10.0;
+const ROUNDED_LG: f32 = 14.0;
 const ROUNDED_XL: f32 = 12.0;
 
 /// Tailwind's `leading-tight` (1.25) — distinct from the app's
