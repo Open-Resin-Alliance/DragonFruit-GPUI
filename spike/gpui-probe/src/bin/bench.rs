@@ -136,6 +136,16 @@ impl Render for BenchProbe {
                             match state.surface.view().to_imported_handle() {
                                 Ok(handle) => {
                                     gpu.paint_texture(handle, Corners::default(), 1.0, false);
+                                    // The bench prints its report before this frame; give the
+                                    // window a moment to present it, then leave. A benchmark
+                                    // that waits for a user to close it cannot run unattended.
+                                    if !state.exiting {
+                                        state.exiting = true;
+                                        std::thread::spawn(|| {
+                                            std::thread::sleep(Duration::from_millis(800));
+                                            std::process::exit(0);
+                                        });
+                                    }
                                 }
                                 Err(error) => {
                                     *status.borrow_mut() = format!("import: {error:#}");
@@ -173,6 +183,7 @@ struct BenchState {
     depth_view: wgpu::TextureView,
     angle: f32,
     report: String,
+    exiting: bool,
 }
 
 impl BenchState {
@@ -379,6 +390,7 @@ impl BenchState {
             depth_view,
             angle: 0.0,
             report: String::new(),
+            exiting: false,
         };
 
         // Warm up: first submissions pay pipeline and buffer residency.

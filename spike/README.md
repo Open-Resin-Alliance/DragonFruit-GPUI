@@ -52,7 +52,7 @@ Measured on this Windows box (dev profile, dependencies at `opt-level = 2`),
 | Vertex + index upload | 21 ms (34.6 MB + 34.5 MB) |
 | BVH build | 636 ms |
 | 10,000 ray queries | 28.9 ms (2.9 µs/ray) |
-| 240 frames, GPU-waited | mean 1.27 ms (**787 fps**), p50 1.00 ms, p95 3.40 ms |
+| 240 frames, GPU-waited | mean 1.1–1.3 ms (**790–890 fps**), p50 0.9–1.0 ms, p95 2.9–3.4 ms |
 
 Caveats: one draw call, static mesh, procedural sphere. A real scene has
 several models, instanced supports, overlays and a stencil pass, so treat this
