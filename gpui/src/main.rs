@@ -1142,6 +1142,13 @@ impl Render for DragonFruit {
                     .right(px(72.))
                     .child(overlays::view_cube(camera.clone(), entity.clone())),
             )
+            .child(
+                div()
+                    .absolute()
+                    .bottom(px(20.))
+                    .right(px(196.))
+                    .child(overlays::home_button(camera.clone(), entity.clone())),
+            )
             // `CrossSliderPanel` wrapper: hidden in printing (the source's
             // printing scrubber lives in the unported preview pane).
             .when(has_models && mode != Mode::Printing, |this| {

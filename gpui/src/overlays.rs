@@ -895,14 +895,13 @@ pub fn layer_slider(
 const CUBE_HALF: f32 = 30.0;
 /// The gizmo's HUD footprint; the cube sits inside it with room for the labels.
 const CUBE_WIDGET: f32 = 120.0;
-/// `ZUpGizmoViewcube`'s `colors.bg` (`#f0f0f0`).
-const CUBE_FACE: u32 = 0xf0f0f0;
-/// `colors.text` / `colors.stroke` (`black`).
-const CUBE_TEXT: u32 = 0x000000;
-/// `colors.hover` (`#999`) — the face fill while hovered.
-const CUBE_ACCENT: u32 = 0x999999;
-/// The face/edge stroke (`colors.stroke`).
-const CUBE_STROKE: u32 = 0x000000;
+/// `gizmoColors.face` in `SceneCanvas.tsx`.
+const CUBE_FACE: u32 = 0x1f2937;
+/// `gizmoColors.text`.
+const CUBE_TEXT: u32 = 0xf8fafc;
+/// `gizmoColors.accent`, also the stroke and hover color.
+const CUBE_ACCENT: u32 = 0xbaf72e;
+const CUBE_STROKE: u32 = 0xbaf72e;
 /// `opacity={0.75}` on the face material.
 const CUBE_OPACITY: f32 = 0.75;
 /// `opacity={0.6}` on the edge/corner material.
@@ -921,7 +920,7 @@ const FACE_FONT: f32 = 24.0;
 /// `FACE_LABEL_MAX_WIDTH`.
 const FACE_LABEL_MAX_WIDTH: f32 = 112.0;
 /// `strokeRect(0, 0, 128, 128)` with the canvas default 1px line.
-const FACE_STROKE: f32 = 1.0 * (CUBE_HALF * 2.0 / FACE_TEXTURE);
+const FACE_STROKE: f32 = 1.5;
 /// `polarTilt` in `ZUpGizmoHelper`.
 const POLAR_TILT: f32 = 0.0087;
 
@@ -1515,6 +1514,47 @@ fn paint_cube(bounds: Bounds<Pixels>, camera: &Camera, window: &mut Window, cx: 
             facing,
         );
     }
+}
+
+/// `ZUpGizmoHelper`'s home chip: a rounded button on the cube's bottom-right
+/// diagonal that returns the camera to the home pose.
+pub fn home_button(
+    camera: Rc<std::cell::RefCell<Camera>>,
+    entity: WeakEntity<DragonFruit>,
+) -> impl IntoElement {
+    div()
+        .id("view-cube-home")
+        .w(px(24.0))
+        .h(px(24.0))
+        .rounded(px(6.0))
+        .border_1()
+        .border_color(rgb(BORDER_SUBTLE))
+        .bg(rgb(SURFACE_1))
+        .flex()
+        .items_center()
+        .justify_center()
+        .cursor_pointer()
+        .hover(|style| style.bg(rgb(SURFACE_2)))
+        .on_click(move |_, _, cx| {
+            camera
+                .borrow_mut()
+                .home(glam::Vec3::new(0.0, 0.0, 110.0));
+            entity.update(cx, |_, cx| cx.notify()).ok();
+        })
+        .child(
+            div()
+                .child(
+                    // A filled house: roof plus body.
+                    gpui::svg()
+                        .external_path(format!(
+                            "{}/../../assets/icons/house.svg",
+                            env!("CARGO_MANIFEST_DIR")
+                        ))
+                        .w(px(14.0))
+                        .h(px(14.0))
+                        .text_color(rgb(TEXT_STRONG)),
+                ),
+        )
 }
 
 /// The Z-up orientation cube from `ZUpGizmoViewcube.tsx`, projected and painted
