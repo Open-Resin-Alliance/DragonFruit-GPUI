@@ -94,6 +94,7 @@ struct DragonFruit {
     rotate_z: f32,
     scale: f32,
     support_angle: f32,
+    support_density: f32,
     focus: FocusHandle,
     focused: bool,
     show_printer_menu: bool,
@@ -137,6 +138,7 @@ impl DragonFruit {
             rotate_z: 0.0,
             scale: 1.0,
             support_angle: 45.0,
+            support_density: 0.5,
             focus: cx.focus_handle(),
             focused: false,
             show_printer_menu: false,
@@ -547,6 +549,7 @@ impl Render for DragonFruit {
                 this.child(support_settings_modal(
                     entity.clone(),
                     self.support_angle,
+                    self.support_density,
                 ))
             })
     }
@@ -1224,7 +1227,9 @@ fn support_card(
                                     glam::Vec3::from_array(this.translate),
                                 );
                                 let points = stl::overhang_points(mesh, this.support_angle);
-                                let stride = (points.len() / 300).max(1);
+                                let target =
+                                    (300.0 * this.support_density).max(1.0) as usize;
+                                let stride = (points.len() / target).max(1);
                                 *this.supports.borrow_mut() = points
                                     .into_iter()
                                     .step_by(stride)
@@ -1619,10 +1624,13 @@ fn settings_modal(
 fn support_settings_modal(
     entity: WeakEntity<DragonFruit>,
     angle: f32,
+    density: f32,
 ) -> impl IntoElement {
     let close_entity = entity.clone();
     let minus_entity = entity.clone();
     let plus_entity = entity.clone();
+    let density_minus = entity.clone();
+    let density_plus = entity.clone();
     div()
         .absolute()
         .top(px(0.))
@@ -1678,7 +1686,68 @@ fn support_settings_modal(
                                 }),
                         ),
                 )
-                .child(modal_row("Density", "0.50"))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .h(px(32.))
+                        .px(px(10.))
+                        .rounded(px(6.))
+                        .bg(rgb(SURFACE_1))
+                        .text_size(px(11.))
+                        .text_color(rgb(TEXT_MUTED))
+                        .child("Density")
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(8.))
+                                .child(
+                                    div()
+                                        .id("density-minus")
+                                        .w(px(22.))
+                                        .h(px(22.))
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .rounded(px(4.))
+                                        .bg(rgb(SURFACE_2))
+                                        .child("\u{2212}")
+                                        .on_click(move |_, _, cx| {
+                                            density_minus
+                                                .update(cx, |this, cx| {
+                                                    this.support_density =
+                                                        (this.support_density - 0.05).max(0.05);
+                                                    cx.notify();
+                                                })
+                                                .ok();
+                                        }),
+                                )
+                                .child(format!("{density:.2}"))
+                                .child(
+                                    div()
+                                        .id("density-plus")
+                                        .w(px(22.))
+                                        .h(px(22.))
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .rounded(px(4.))
+                                        .bg(rgb(SURFACE_2))
+                                        .child("+")
+                                        .on_click(move |_, _, cx| {
+                                            density_plus
+                                                .update(cx, |this, cx| {
+                                                    this.support_density =
+                                                        (this.support_density + 0.05).min(1.0);
+                                                    cx.notify();
+                                                })
+                                                .ok();
+                                        }),
+                                ),
+                        ),
+                )
                 .child(
                     div()
                         .flex()
