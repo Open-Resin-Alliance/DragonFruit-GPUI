@@ -3,6 +3,7 @@
 //! installation and the file logger.
 
 pub mod camera;
+pub mod cube;
 pub mod empty_state;
 pub mod fonts;
 pub mod icons;
