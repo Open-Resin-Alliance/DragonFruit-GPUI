@@ -145,8 +145,12 @@ struct GpuMesh {
 struct Targets {
     _scene: wgpu::Texture,
     scene_view: wgpu::TextureView,
+    /// Non-sRGB view of the scene texture, the volume pass's resolve target.
+    scene_unorm_view: wgpu::TextureView,
     _msaa_color: wgpu::Texture,
     msaa_color_view: wgpu::TextureView,
+    /// Non-sRGB view of the MSAA samples, for the sRGB-blended volume box.
+    msaa_color_unorm_view: wgpu::TextureView,
     _msaa_depth: wgpu::Texture,
     msaa_depth_view: wgpu::TextureView,
     final_texture: wgpu::Texture,
@@ -711,7 +715,7 @@ impl Viewport {
             None,
             false,
             wgpu::CompareFunction::LessEqual,
-            WgpuSurface::DEFAULT_FORMAT,
+            wgpu::TextureFormat::Rgba8Unorm,
             wgpu::DepthBiasState::default(),
             SAMPLE_COUNT,
         );
@@ -733,7 +737,7 @@ impl Viewport {
             Some(wgpu::Face::Front),
             false,
             wgpu::CompareFunction::LessEqual,
-            WgpuSurface::DEFAULT_FORMAT,
+            wgpu::TextureFormat::Rgba8Unorm,
             wgpu::DepthBiasState::default(),
             SAMPLE_COUNT,
         );
@@ -1451,16 +1455,6 @@ impl Viewport {
                 pass.set_vertex_buffer(0, self.grid_buffer.slice(..));
                 pass.draw(0..self.grid_vertex_count, 0..1);
             }
-            if layers.volume {
-                pass.set_pipeline(&self.volume_fill);
-                pass.set_bind_group(1, &self.volume_fill_bind, &[]);
-                pass.set_vertex_buffer(0, self.volume_fill_buffer.slice(..));
-                pass.draw(0..self.volume_fill_vertex_count, 0..1);
-                pass.set_pipeline(&self.volume);
-                pass.set_bind_group(1, &self.volume_edge_bind, &[]);
-                pass.set_vertex_buffer(0, self.volume_buffer.slice(..));
-                pass.draw(0..self.volume_vertex_count, 0..1);
-            }
             if layers.grid {
                 pass.set_pipeline(&self.axis_mesh);
                 pass.set_vertex_buffer(0, self.axis_buffer.slice(..));
@@ -1510,6 +1504,45 @@ impl Viewport {
                 pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
                 pass.draw(0..mesh.vertex_count, 0..1);
             }
+        }
+
+        // Build-volume box, after the opaque scene (three.js `renderOrder` 28/29
+        // puts it over the model) and into the non-sRGB view of the MSAA
+        // samples, so its transparency blends in sRGB space like the source's
+        // RGBA8 canvas instead of in linear space.
+        if layers.volume {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("viewport volume"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.targets.msaa_color_unorm_view,
+                    depth_slice: None,
+                    resolve_target: Some(&self.targets.scene_unorm_view),
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.targets.msaa_depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_bind_group(0, &self.scene_bind, &[]);
+            pass.set_pipeline(&self.volume_fill);
+            pass.set_bind_group(1, &self.volume_fill_bind, &[]);
+            pass.set_vertex_buffer(0, self.volume_fill_buffer.slice(..));
+            pass.draw(0..self.volume_fill_vertex_count, 0..1);
+            pass.set_pipeline(&self.volume);
+            pass.set_bind_group(1, &self.volume_edge_bind, &[]);
+            pass.set_vertex_buffer(0, self.volume_buffer.slice(..));
+            pass.draw(0..self.volume_vertex_count, 0..1);
         }
 
         // Composite: scene * AO + mood overlay.
@@ -1634,8 +1667,16 @@ impl Targets {
     ) -> Self {
         let scene = color_target(device, width, height, false);
         let scene_view = scene.create_view(&wgpu::TextureViewDescriptor::default());
+        let scene_unorm_view = scene.create_view(&wgpu::TextureViewDescriptor {
+            format: Some(wgpu::TextureFormat::Rgba8Unorm),
+            ..Default::default()
+        });
         let msaa_color = msaa_color_target(device, width, height);
         let msaa_color_view = msaa_color.create_view(&wgpu::TextureViewDescriptor::default());
+        let msaa_color_unorm_view = msaa_color.create_view(&wgpu::TextureViewDescriptor {
+            format: Some(wgpu::TextureFormat::Rgba8Unorm),
+            ..Default::default()
+        });
         let msaa_depth = msaa_depth_target(device, width, height);
         let msaa_depth_view = msaa_depth.create_view(&wgpu::TextureViewDescriptor::default());
         let final_texture = color_target(device, width, height, true);
@@ -1663,8 +1704,10 @@ impl Targets {
         Self {
             _scene: scene,
             scene_view,
+            scene_unorm_view,
             _msaa_color: msaa_color,
             msaa_color_view,
+            msaa_color_unorm_view,
             _msaa_depth: msaa_depth,
             msaa_depth_view,
             final_texture,
@@ -2526,7 +2569,9 @@ fn color_target(device: &wgpu::Device, width: u32, height: u32, copy: bool) -> w
         dimension: wgpu::TextureDimension::D2,
         format: WgpuSurface::DEFAULT_FORMAT,
         usage,
-        view_formats: &[],
+        // The volume pass resolves sRGB-encoded samples through a non-sRGB
+        // view; the composite still samples the sRGB view.
+        view_formats: &[wgpu::TextureFormat::Rgba8Unorm],
     })
 }
 
@@ -2543,7 +2588,9 @@ fn msaa_color_target(device: &wgpu::Device, width: u32, height: u32) -> wgpu::Te
         dimension: wgpu::TextureDimension::D2,
         format: WgpuSurface::DEFAULT_FORMAT,
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-        view_formats: &[],
+        // The build-volume box is blended in sRGB space, as three.js does on
+        // its RGBA8 canvas; that needs a non-sRGB view of the same samples.
+        view_formats: &[wgpu::TextureFormat::Rgba8Unorm],
     })
 }
 
@@ -2840,13 +2887,20 @@ fn aces_filmic(color: vec3<f32>) -> vec3<f32> {
         -0.53108,  1.10813, -0.07276,
         -0.07367, -0.00605,  1.07602,
     );
-    var c = color * (1.0 / 0.6);
+    var c = color;
     c = input_mat * c;
     let a = c * (c + 0.0245786) - 0.000090537;
     let b = c * (0.983729 * c + 0.4329510) + 0.238081;
     c = a / b;
     c = output_mat * c;
     return saturate(c);
+}
+
+fn linear_to_srgb(c: vec3<f32>) -> vec3<f32> {
+    let cutoff = step(c, vec3<f32>(0.0031308));
+    let low = c * 12.92;
+    let high = 1.055 * pow(c, vec3<f32>(1.0 / 2.4)) - 0.055;
+    return mix(high, low, cutoff);
 }
 
 @vertex
@@ -2856,7 +2910,10 @@ fn vs_main(@location(0) position: vec3<f32>) -> @builtin(position) vec4<f32> {
 
 @fragment
 fn fs_main() -> @location(0) vec4<f32> {
-    return vec4<f32>(aces_filmic(fill.color), fill.opacity);
+    // This pass renders into the non-sRGB view of the MSAA samples so the
+    // transparent box blends in sRGB space, as three.js does on its RGBA8
+    // canvas; the shader therefore writes sRGB-encoded values.
+    return vec4<f32>(linear_to_srgb(aces_filmic(fill.color)), fill.opacity);
 }
 "#;
 
