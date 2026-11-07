@@ -1289,11 +1289,11 @@ fn cube_hit(view: &CubeView, faces: &[FaceProjection], pointer: [f32; 2]) -> Opt
 
 /// `ZUpGizmoHelper`'s quarter-turn arrows: four triangles around the cube, each
 /// turning the camera 90° about the axis it points along.
-const QUARTER_W: f32 = 26.0;
-const QUARTER_H: f32 = 16.0;
+const QUARTER_W: f32 = 32.0;
+const QUARTER_H: f32 = 20.0;
 /// How far each arrow's centre sits from the widget centre. The cube is ~73% of
 /// the widget, so this leaves a small gap rather than a ring at the edge.
-const QUARTER_OFFSET: f32 = CUBE_WIDGET * 0.5 - 12.0;
+const QUARTER_OFFSET: f32 = CUBE_WIDGET * 0.5 - 22.0;
 /// `ARROW_FADE_FULL_DEGREES` / `ARROW_FADE_ZERO_DEGREES`.
 const ARROW_FADE_FULL_COS: f32 = 0.99452;
 const ARROW_FADE_ZERO_COS: f32 = 0.93969;
