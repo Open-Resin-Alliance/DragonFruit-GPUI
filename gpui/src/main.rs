@@ -91,6 +91,8 @@ struct DragonFruit {
     show_printer_menu: bool,
     show_help: bool,
     show_support_settings: bool,
+    show_app_menu: bool,
+    settings_tab: usize,
     active_tool: usize,
     window_width: f32,
 }
@@ -124,6 +126,8 @@ impl DragonFruit {
             show_printer_menu: false,
             show_help: false,
             show_support_settings: false,
+            show_app_menu: false,
+            settings_tab: 0,
             active_tool: 0,
             window_width: 0.0,
         };
@@ -395,18 +399,6 @@ impl Render for DragonFruit {
                     .ok();
             })
             .child(canvas)
-            .child(top_bar(
-                mode,
-                status.clone(),
-                triangles,
-                entity.clone(),
-                loading,
-                camera.clone(),
-                orthographic,
-                selected,
-                show_settings,
-                self.show_printer_menu,
-            ))
             .child(left_rail(entity.clone(), self.active_tool))
             .child(left_panel(
                 mesh_name.clone(),
@@ -434,8 +426,21 @@ impl Render for DragonFruit {
                     .text_color(rgb(TEXT_MUTED))
                     .child(status.clone()),
             )
+            .child(top_bar(
+                mode,
+                status.clone(),
+                triangles,
+                entity.clone(),
+                loading,
+                camera.clone(),
+                orthographic,
+                selected,
+                show_settings,
+                self.show_printer_menu,
+                self.show_app_menu,
+            ))
             .when(show_settings, |this| {
-                this.child(settings_modal(entity.clone()))
+                this.child(settings_modal(entity.clone(), self.settings_tab))
             })
             .when(self.show_help, |this| {
                 this.child(help_modal(entity.clone()))
@@ -501,6 +506,7 @@ fn top_bar(
     selected: bool,
     show_settings: bool,
     show_printer_menu: bool,
+    show_app_menu: bool,
 ) -> impl IntoElement {
     let selection_entity = entity.clone();
     let selection = div()
@@ -654,8 +660,10 @@ fn top_bar(
         .flex()
         .items_center()
         .gap(px(12.))
-        .child(
+        .child({
+            let logo_entity = entity.clone();
             div()
+                .id("logo-menu")
                 .w(px(24.))
                 .h(px(24.))
                 .rounded(px(6.))
@@ -665,8 +673,16 @@ fn top_bar(
                 .justify_center()
                 .text_size(px(13.))
                 .text_color(rgb(ACCENT_CONTRAST))
-                .child("D"),
-        )
+                .child("D")
+                .on_click(move |_, _, cx| {
+                    logo_entity
+                        .update(cx, |this, cx| {
+                            this.show_app_menu = !this.show_app_menu;
+                            cx.notify();
+                        })
+                        .ok();
+                })
+        })
         .child(
             div()
                 .text_size(px(15.))
@@ -692,6 +708,66 @@ fn top_bar(
         .child(settings)
         .child(help)
         .child(button)
+        .child(if show_app_menu {
+            let import_entity = entity.clone();
+            let close_entity = entity.clone();
+            div()
+                .absolute()
+                .top(px(44.))
+                .left(px(8.))
+                .w(px(220.))
+                .rounded(px(10.))
+                .border_1()
+                .border_color(rgb(BORDER_SUBTLE))
+                .bg(rgb(SURFACE_0))
+                .p(px(6.))
+                .flex()
+                .flex_col()
+                .gap(px(2.))
+                .child(menu_row("New scene", false, None))
+                .child(menu_row("Save scene", false, None))
+                .child(menu_row("Open scene…", false, None))
+                .child(
+                    div()
+                        .id("menu-import")
+                        .h(px(28.))
+                        .px(px(8.))
+                        .flex()
+                        .items_center()
+                        .rounded(px(6.))
+                        .text_size(px(11.))
+                        .text_color(rgb(TEXT_MUTED))
+                        .hover(|style| style.bg(rgb(SURFACE_1)))
+                        .child("Import mesh…")
+                        .on_click(move |_, _, cx| {
+                            import_entity
+                                .update(cx, |this, cx| {
+                                    this.show_app_menu = false;
+                                    this.open_stl(cx);
+                                })
+                                .ok();
+                        }),
+                )
+                .child(
+                    div()
+                        .id("menu-close")
+                        .h(px(28.))
+                        .px(px(8.))
+                        .flex()
+                        .items_center()
+                        .rounded(px(6.))
+                        .text_size(px(11.))
+                        .text_color(rgb(0xe45454))
+                        .hover(|style| style.bg(rgb(SURFACE_1)))
+                        .child("Close program")
+                        .on_click(move |_, _, cx| {
+                            let _ = close_entity;
+                            cx.quit();
+                        }),
+                )
+        } else {
+            div()
+        })
         .child(if show_printer_menu {
             div()
                 .absolute()
@@ -722,6 +798,18 @@ fn top_bar(
         } else {
             div()
         })
+}
+
+fn menu_row(label: &'static str, enabled: bool, _action: Option<()>) -> impl IntoElement {
+    div()
+        .h(px(28.))
+        .px(px(8.))
+        .flex()
+        .items_center()
+        .rounded(px(6.))
+        .text_size(px(11.))
+        .text_color(rgb(if enabled { TEXT_MUTED } else { 0x5a5f6a }))
+        .child(label)
 }
 
 fn left_rail(entity: WeakEntity<DragonFruit>, active_tool: usize) -> impl IntoElement {
@@ -1231,7 +1319,7 @@ fn layer_bar(layer: f32, entity: WeakEntity<DragonFruit>, window_width: f32) -> 
         )
 }
 
-fn settings_modal(entity: WeakEntity<DragonFruit>) -> impl IntoElement {
+fn settings_modal(entity: WeakEntity<DragonFruit>, tab: usize) -> impl IntoElement {
     let close_entity = entity.clone();
     div()
         .absolute()
@@ -1292,25 +1380,33 @@ fn settings_modal(entity: WeakEntity<DragonFruit>) -> impl IntoElement {
                     div()
                         .flex()
                         .gap(px(6.))
-                        .child(modal_tab("Appearance", true))
-                        .child(modal_tab("Mesh", false))
-                        .child(modal_tab("Performance", false)),
+                        .child(modal_tab("Appearance", tab == 0, entity.clone(), 0))
+                        .child(modal_tab("Mesh", tab == 1, entity.clone(), 1))
+                        .child(modal_tab("Performance", tab == 2, entity.clone(), 2)),
                 )
-                .child(
-                    div()
-                        .text_size(px(11.))
-                        .text_color(rgb(TEXT_MUTED))
-                        .child("Appearance settings will live here."),
-                )
-                .child(
-                    div()
+                .child(match tab {
+                    1 => div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(8.))
+                        .child(modal_row("Selected colour", "#ec2a77"))
+                        .child(modal_row("Unselected colour", "#a3a3a3"))
+                        .child(modal_row("Roughness", "0.45")),
+                    2 => div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(8.))
+                        .child(modal_row("MSAA", "4×"))
+                        .child(modal_row("AO rays", "32"))
+                        .child(modal_row("Refine threshold", "2% of diagonal")),
+                    _ => div()
                         .flex()
                         .flex_col()
                         .gap(px(8.))
                         .child(modal_row("Theme", "Dark"))
                         .child(modal_row("Accent", "#ec2a77"))
                         .child(modal_row("Build plate", "Rectangle")),
-                ),
+                }),
         )
 }
 
@@ -1443,8 +1539,14 @@ fn help_modal(entity: WeakEntity<DragonFruit>) -> impl IntoElement {
         )
 }
 
-fn modal_tab(label: &'static str, active: bool) -> impl IntoElement {
+fn modal_tab(
+    label: &'static str,
+    active: bool,
+    entity: WeakEntity<DragonFruit>,
+    index: usize,
+) -> impl IntoElement {
     div()
+        .id(format!("settings-tab-{index}"))
         .h(px(28.))
         .px(px(10.))
         .flex()
@@ -1455,6 +1557,14 @@ fn modal_tab(label: &'static str, active: bool) -> impl IntoElement {
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(rgb(if active { TEXT_STRONG } else { TEXT_MUTED }))
         .child(label)
+        .on_click(move |_, _, cx| {
+            entity
+                .update(cx, |this, cx| {
+                    this.settings_tab = index;
+                    cx.notify();
+                })
+                .ok();
+        })
 }
 
 fn modal_row(label: &'static str, value: &'static str) -> impl IntoElement {
