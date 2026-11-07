@@ -14,8 +14,8 @@ use camera::Camera;
 use gpui::{
     App, Bounds, Context, Corners, FocusHandle, FontWeight, IntoElement, MouseButton, Render,
     ScrollDelta, TitlebarOptions, WeakEntity, Window, WindowBounds, WindowControlArea,
-    WindowOptions, div, gpu_canvas, linear_color_stop, linear_gradient, prelude::*, px, rgb, rgba,
-    size, svg,
+    WindowOptions, div, gpu_canvas, img, linear_color_stop, linear_gradient, prelude::*, px, rgb,
+    rgba, size, svg,
 };
 use gpui_interop::attach;
 use gpui_wgpu::{ImportedTextureExt as _, WgpuRenderer};
@@ -158,6 +158,7 @@ struct DragonFruit {
     panel_dock: std::collections::HashMap<&'static str, PanelDock>,
     floating_pos: std::collections::HashMap<&'static str, (f32, f32)>,
     panel_menu: Option<&'static str>,
+    logo: Option<PathBuf>,
     translate: [f32; 3],
     rotate_z: f32,
     scale: f32,
@@ -208,6 +209,7 @@ impl DragonFruit {
             panel_dock: std::collections::HashMap::new(),
             floating_pos: std::collections::HashMap::new(),
             panel_menu: None,
+            logo: rasterize_logo(),
             translate: [0.0; 3],
             rotate_z: 0.0,
             scale: 1.0,
@@ -638,6 +640,7 @@ impl Render for DragonFruit {
                 self.show_printer_menu,
                 self.show_app_menu,
                 self.overhang_view,
+                self.logo.clone(),
             ))
             .when(show_settings, |this| {
                 this.child(settings_modal(
@@ -782,6 +785,7 @@ fn top_bar(
     show_printer_menu: bool,
     show_app_menu: bool,
     overhang_view: bool,
+    logo_path: Option<PathBuf>,
 ) -> impl IntoElement {
     let logo_entity = entity.clone();
     let logo = div()
@@ -793,8 +797,9 @@ fn top_bar(
         .justify_center()
         .rounded(px(6.))
         .when(show_app_menu, |this| this.bg(rgb(mix(ACCENT, SURFACE_0, 0.2))))
-        .child(
-            div()
+        .child(match logo_path {
+            Some(path) => img(path).w(px(28.)).h(px(28.)).into_any_element(),
+            None => div()
                 .w(px(28.))
                 .h(px(28.))
                 .rounded(px(7.))
@@ -805,8 +810,9 @@ fn top_bar(
                 .text_size(px(14.))
                 .font_weight(FontWeight::BOLD)
                 .text_color(rgb(ACCENT_CONTRAST))
-                .child("D"),
-        )
+                .child("D")
+                .into_any_element(),
+        })
         .on_click(move |_, _, cx| {
             logo_entity
                 .update(cx, |this, cx| {
@@ -2506,6 +2512,25 @@ fn mesh_color(selected: bool) -> [f32; 3] {
     } else {
         [srgb_to_linear(0xa3), srgb_to_linear(0xa3), srgb_to_linear(0xa3)]
     }
+}
+
+fn rasterize_logo() -> Option<PathBuf> {
+    let svg = std::fs::read_to_string(
+        "../public/dragonfruit_assets/branding/simple_icon.svg",
+    )
+    .ok()?;
+    let tree = resvg::usvg::Tree::from_str(&svg, &resvg::usvg::Options::default()).ok()?;
+    let size = tree.size();
+    let scale = 112.0 / size.width().max(size.height());
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(112, 112)?;
+    resvg::render(
+        &tree,
+        resvg::tiny_skia::Transform::from_scale(scale, scale),
+        &mut pixmap.as_mut(),
+    );
+    let path = std::env::temp_dir().join("dragonfruit-logo.png");
+    pixmap.save_png(&path).ok()?;
+    Some(path)
 }
 
 fn main() {
