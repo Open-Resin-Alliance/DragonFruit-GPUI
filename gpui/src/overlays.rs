@@ -895,12 +895,14 @@ pub fn layer_slider(
 const CUBE_HALF: f32 = 30.0;
 /// The gizmo's HUD footprint; the cube sits inside it with room for the labels.
 const CUBE_WIDGET: f32 = 120.0;
-/// `gizmoColors.face` in `SceneCanvas.tsx`.
-const CUBE_FACE: u32 = 0x1f2937;
-/// `gizmoColors.text`.
-const CUBE_TEXT: u32 = 0xf8fafc;
-/// `gizmoColors.accent`, also the stroke and hover color.
-const CUBE_ACCENT: u32 = 0xbaf72e;
+/// `ZUpGizmoViewcube`'s `colors.bg` (`#f0f0f0`).
+const CUBE_FACE: u32 = 0xf0f0f0;
+/// `colors.text` / `colors.stroke` (`black`).
+const CUBE_TEXT: u32 = 0x000000;
+/// `colors.hover` (`#999`) — the face fill while hovered.
+const CUBE_ACCENT: u32 = 0x999999;
+/// The face/edge stroke (`colors.stroke`).
+const CUBE_STROKE: u32 = 0x000000;
 /// `opacity={0.75}` on the face material.
 const CUBE_OPACITY: f32 = 0.75;
 /// `opacity={0.6}` on the edge/corner material.
@@ -1382,7 +1384,7 @@ fn paint_box(window: &mut Window, view: &CubeView, box_: &GizmoBox) {
         }
         builder.close();
         if let Ok(path) = builder.build() {
-            window.paint_path(path, rgb(CUBE_ACCENT).alpha(EDGE_OPACITY));
+            window.paint_path(path, rgb(CUBE_STROKE).alpha(EDGE_OPACITY));
         }
     }
 }
@@ -1483,11 +1485,7 @@ fn paint_cube(bounds: Bounds<Pixels>, camera: &Camera, window: &mut Window, cx: 
         } else {
             CUBE_FACE
         };
-        let stroke = if hovered {
-            multiply(CUBE_ACCENT, CUBE_ACCENT)
-        } else {
-            CUBE_ACCENT
-        };
+        let stroke = CUBE_STROKE;
         paint_quad(window, &face.polygon, fill, stroke);
     }
 
