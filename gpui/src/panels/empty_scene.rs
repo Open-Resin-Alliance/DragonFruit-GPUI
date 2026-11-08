@@ -595,11 +595,19 @@ fn actions_and_recents(
                 .child(".stl • .obj • .3mf"),
         );
 
-    // ── Import Scene (`PORT GAP:`) ──────────────────────────────────────────
-    // The source imports `.voxl` / `.lys` scenes through
-    // `onImportSceneChange`; the port has no scene importer.
+    // ── Import Scene ────────────────────────────────────────────────────────
+    // `onImportSceneChange`: the same dialog as Load Mesh, filtered to scenes.
+    // `load_path` routes `.voxl` through `gpui-voxl`; `.lys` still raises the
+    // source's unsupported-scene toast.
+    let import_entity = entity.clone();
     let import_scene = div()
         .id("empty-scene-import-scene")
+        .cursor_pointer()
+        .on_click(move |_, _, cx| {
+            import_entity
+                .update(cx, |this, cx| this.open_stl(cx))
+                .ok();
+        })
         .rounded(px(ROUNDED_MD))
         .border_1()
         .border_color(rgb(mix(SECONDARY_BUTTON_SURFACE, WHITE, 0.84)))
