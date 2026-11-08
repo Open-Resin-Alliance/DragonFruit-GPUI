@@ -29,15 +29,17 @@ use std::ops::Range;
 use std::rc::Rc;
 
 use gpui::{
-    App, Bounds, ClipboardItem, Context, EntityInputHandler, FocusHandle, KeyDownEvent, Pixels,
-    Point, ShapedLine, TextInputAction, TextInputConfiguration, UTF16Selection, Window, px,
-    prelude::*,
+    App, Bounds, ClipboardItem, Context, EntityInputHandler, FocusHandle, Focusable, KeyDownEvent,
+    Pixels, Point, ShapedLine, TextInputAction, TextInputConfiguration, UTF16Selection, Window,
 };
 
 /// A change hook installed by a field element on every prepaint.
 ///
 /// The closure owns the value string, so it may update panel state through
-/// `App` (a `cx.listener(..)` composes directly).
+/// `App` (a `cx.listener(..)` composes directly). It runs while the
+/// [`TextInput`] entity is being updated, so it must not read that same
+/// entity — update the panel's own state instead; the new text is handed to
+/// you as the argument.
 pub type FieldChangeCallback = Rc<dyn Fn(&str, &mut Window, &mut App)>;
 
 /// The editing model: text, selection and IME composition range in byte
@@ -158,14 +160,12 @@ impl TextModel {
             .unwrap_or(0)
     }
 
-    /// The character after `offset`.
+    /// The start of the character after `offset`.
     pub fn next_boundary(&self, offset: usize) -> usize {
         let offset = self.clamp_offset(offset);
         self.content
             .char_indices()
-            .find_map(|(index, character)| {
-                (index > offset).then_some(index + character.len_utf8())
-            })
+            .find_map(|(index, _)| (index > offset).then_some(index))
             .unwrap_or(self.content.len())
     }
 
@@ -176,10 +176,7 @@ impl TextModel {
         let mut index = self.clamp_offset(offset);
         while index > 0 {
             let previous = self.previous_boundary(index);
-            let character = self.content[previous..index]
-                .chars()
-                .next()
-                .unwrap_or(' ');
+            let character = self.content[previous..index].chars().next().unwrap_or(' ');
             if character.is_whitespace() {
                 index = previous;
             } else {
@@ -188,10 +185,7 @@ impl TextModel {
         }
         while index > 0 {
             let previous = self.previous_boundary(index);
-            let character = self.content[previous..index]
-                .chars()
-                .next()
-                .unwrap_or(' ');
+            let character = self.content[previous..index].chars().next().unwrap_or(' ');
             if !character.is_whitespace() {
                 index = previous;
             } else {
@@ -241,7 +235,7 @@ impl TextModel {
         self.selected_range = caret..caret;
         self.selection_reversed = false;
         self.marked_range = None;
-        caret
+        start
     }
 
     /// Inserts at the selection (or at the marked range while composing).
@@ -345,7 +339,9 @@ impl TextModel {
 
     /// A UTF-16 range as UTF-8 offsets.
     pub fn range_from_utf16(&self, range: &Range<usize>) -> Range<usize> {
-        self.offset_from_utf16(range.start)..self.offset_from_utf16(range.end)
+        let start = self.offset_from_utf16(range.start);
+        let end = self.offset_from_utf16(range.end);
+        start..end.max(start)
     }
 
     fn clamp_offset(&self, offset: usize) -> usize {
@@ -372,14 +368,19 @@ pub fn offset_to_utf16(text: &str, offset: usize) -> usize {
 }
 
 /// UTF-16 index to a UTF-8 byte offset, never splitting a character.
+///
+/// An index that falls inside a surrogate pair (between a character's two
+/// UTF-16 code units) stops at that character's start, so the returned offset is
+/// always a character boundary and never past the requested index's character.
 pub fn offset_from_utf16(text: &str, offset: usize) -> usize {
     let mut utf8_offset = 0;
     let mut utf16_count = 0;
     for character in text.chars() {
-        if utf16_count >= offset {
+        let next = utf16_count + character.len_utf16();
+        if next > offset {
             break;
         }
-        utf16_count += character.len_utf16();
+        utf16_count = next;
         utf8_offset += character.len_utf8();
     }
     utf8_offset
@@ -441,9 +442,15 @@ impl TextInput {
     /// already painting this field (the number field's format sync).
     pub fn set_display_value(&mut self, value: impl Into<String>) {
         let value = value.into();
-        if self.model.content() != value {
+        if self.model.content() != value.as_str() {
             self.model.set_content(value);
         }
+    }
+
+    /// Moves the caret to `offset`, collapsing any selection (a click).
+    pub fn set_caret(&mut self, offset: usize, cx: &mut Context<Self>) {
+        self.model.move_to(offset);
+        cx.notify();
     }
 
     /// Installs the hook a field element wants called after every edit.
@@ -520,8 +527,9 @@ impl TextInput {
             }
             "left" => {
                 if shift {
-                    self.model.select_to(self.model.previous_boundary(self.model.caret_offset()));
-                } else if !self.model.selected_range().is_empty() && !shift {
+                    self.model
+                        .select_to(self.model.previous_boundary(self.model.caret_offset()));
+                } else if !self.model.selected_range().is_empty() {
                     self.model.move_to(self.model.selected_range().start);
                 } else {
                     self.model
@@ -532,7 +540,8 @@ impl TextInput {
             }
             "right" => {
                 if shift {
-                    self.model.select_to(self.model.next_boundary(self.model.caret_offset()));
+                    self.model
+                        .select_to(self.model.next_boundary(self.model.caret_offset()));
                 } else if !self.model.selected_range().is_empty() {
                     self.model.move_to(self.model.selected_range().end);
                 } else {
@@ -571,8 +580,9 @@ impl TextInput {
                 true
             }
             "x" if primary => {
-                self.copy(cx);
-                if self.model.delete_backward() {
+                if !self.model.selected_range().is_empty() {
+                    self.copy(cx);
+                    self.model.delete_backward();
                     self.after_edit(window, cx);
                 }
                 true
@@ -627,7 +637,9 @@ impl TextInput {
 /// A single-line field cannot hold a line break; the source `Input` is an
 /// `<input>`, which does the same sanitisation on paste.
 fn single_line(text: &str) -> String {
-    text.replace("\r\n", " ").replace(['\r', '\n'], " ")
+    text.replace("\r\n", " ")
+        .replace('\r', " ")
+        .replace('\n', " ")
 }
 
 impl EntityInputHandler for TextInput {
@@ -726,10 +738,7 @@ impl EntityInputHandler for TextInput {
         let line = self.last_layout.as_ref()?;
         let range = self.model.range_from_utf16(&range_utf16);
         Some(Bounds::from_corners(
-            Point::new(
-                bounds.left() + line.x_for_index(range.start),
-                bounds.top(),
-            ),
+            Point::new(bounds.left() + line.x_for_index(range.start), bounds.top()),
             Point::new(bounds.left() + line.x_for_index(range.end), bounds.bottom()),
         ))
     }
@@ -772,20 +781,20 @@ impl Focusable for TextInput {
 mod tests {
     use super::*;
 
-    fn model(text: &str) -> TextModel {
+    fn text_model(text: &str) -> TextModel {
         TextModel::with_content(text)
     }
 
     #[test]
     fn new_model_puts_the_caret_at_the_end() {
-        let model = model("abc");
+        let model = text_model("abc");
         assert_eq!(model.caret_offset(), 3);
         assert!(model.selected_range().is_empty());
     }
 
     #[test]
     fn insert_at_caret_lands_before_the_trailing_text() {
-        let mut model = model("ac");
+        let mut model = text_model("ac");
         model.move_to(1);
         model.insert("b");
         assert_eq!(model.content(), "abc");
@@ -794,7 +803,7 @@ mod tests {
 
     #[test]
     fn insert_replaces_the_selection() {
-        let mut model = model("hello world");
+        let mut model = text_model("hello world");
         model.set_selection(0..5);
         model.insert("goodbye");
         assert_eq!(model.content(), "goodbye world");
@@ -803,7 +812,7 @@ mod tests {
 
     #[test]
     fn delete_backward_removes_the_character_before_the_caret() {
-        let mut model = model("abc");
+        let mut model = text_model("abc");
         assert!(model.delete_backward());
         assert_eq!(model.content(), "ab");
         assert_eq!(model.caret_offset(), 2);
@@ -811,7 +820,7 @@ mod tests {
 
     #[test]
     fn delete_forward_removes_the_character_after_the_caret() {
-        let mut model = model("abc");
+        let mut model = text_model("abc");
         model.move_to(1);
         assert!(model.delete_forward());
         assert_eq!(model.content(), "ac");
@@ -819,7 +828,7 @@ mod tests {
 
     #[test]
     fn delete_selection_replaces_the_whole_selection() {
-        let mut model = model("abcdef");
+        let mut model = text_model("abcdef");
         model.set_selection(2..5);
         assert!(model.delete_backward());
         assert_eq!(model.content(), "abf");
@@ -828,7 +837,7 @@ mod tests {
 
     #[test]
     fn arrows_walk_character_boundaries() {
-        let mut model = model("héllo");
+        let mut model = text_model("héllo");
         // h=0, é=1..3, l=3, l=4, o=5
         model.move_to(3);
         assert_eq!(model.previous_boundary(model.caret_offset()), 1);
@@ -842,7 +851,7 @@ mod tests {
 
     #[test]
     fn select_left_moves_the_anchor_and_reverses_past_it() {
-        let mut model = model("abcd");
+        let mut model = text_model("abcd");
         model.move_to(2);
         model.select_to(1);
         assert_eq!(model.selected_range(), 1..2);
@@ -854,7 +863,7 @@ mod tests {
 
     #[test]
     fn home_and_end_collapse_the_selection() {
-        let mut model = model("abc");
+        let mut model = text_model("abc");
         model.move_to(2);
         model.select_to(0);
         model.move_to(0);
@@ -866,7 +875,7 @@ mod tests {
 
     #[test]
     fn select_all_then_replace() {
-        let mut model = model("old name");
+        let mut model = text_model("old name");
         model.select_all();
         assert_eq!(model.selected_range(), 0..8);
         model.insert("new");
@@ -876,7 +885,7 @@ mod tests {
 
     #[test]
     fn paste_at_selection_keeps_the_surroundings() {
-        let mut model = model("a[]c");
+        let mut model = text_model("a[]c");
         model.set_selection(1..3);
         model.insert("b");
         assert_eq!(model.content(), "abc");
@@ -885,23 +894,27 @@ mod tests {
 
     #[test]
     fn word_delete_stops_at_whitespace() {
-        let mut model = model("bottle price ");
+        let mut model = text_model("bottle price ");
         assert_eq!(model.previous_word_boundary(13), 7);
         assert!(model.delete_word_backward());
         assert_eq!(model.content(), "bottle ");
         assert_eq!(model.caret_offset(), 7);
 
-        let mut model = model("one two three");
-        model.move_to(9);
-        assert_eq!(model.previous_word_boundary(9), 4);
+        let mut model = text_model("one two three");
+        model.move_to(7);
+        // The caret sits directly after "two", so the word starts at 4; the
+        // spaces on either side are kept.
+        assert_eq!(model.previous_word_boundary(7), 4);
         let mut model2 = model.clone();
         assert!(model2.delete_word_backward());
-        assert_eq!(model2.content(), "one three");
+        assert_eq!(model2.content(), "one  three");
+        // A caret inside a word deletes to that word's start.
+        assert_eq!(model.previous_word_boundary(9), 8);
     }
 
     #[test]
     fn word_delete_forward_stops_after_the_word() {
-        let mut model = model("one two");
+        let mut model = text_model("one two");
         model.move_to(0);
         assert_eq!(model.next_word_boundary(0), 3);
         assert!(model.delete_word_forward());
@@ -910,9 +923,11 @@ mod tests {
 
     #[test]
     fn word_boundaries_handle_punctuation_and_edges() {
-        let mut model = model("  spaced  ");
+        let mut model = text_model("  spaced  ");
         assert_eq!(model.previous_word_boundary(10), 2);
-        assert_eq!(model.next_word_boundary(0), 2);
+        // Ctrl+Delete from leading whitespace removes the whitespace and the
+        // following word, landing on the next one.
+        assert_eq!(model.next_word_boundary(0), 8);
         assert_eq!(model.previous_word_boundary(0), 0);
         assert_eq!(model.next_word_boundary(10), 10);
         model.select_all();
@@ -922,7 +937,7 @@ mod tests {
 
     #[test]
     fn utf16_conversions_round_trip_non_ascii() {
-        let model = model("aé𝄞");
+        let model = text_model("aé𝄞");
         assert_eq!(model.offset_to_utf16(0), 0);
         assert_eq!(model.offset_to_utf16(1), 1);
         assert_eq!(model.offset_to_utf16(3), 2);
@@ -935,7 +950,7 @@ mod tests {
 
     #[test]
     fn marking_tracks_the_composition_range() {
-        let mut model = model("ab");
+        let mut model = text_model("ab");
         model.set_selection(2..2);
         let start = model.replace_and_mark(2..2, "に");
         assert_eq!(start, 2);

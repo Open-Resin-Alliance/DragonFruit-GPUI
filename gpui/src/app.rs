@@ -2,13 +2,13 @@ use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use camera::Camera;
 use gpui::{
     AnyElement, Context, Corners, ExternalPaths, FocusHandle, FontWeight, IntoElement,
-    MouseButton, Render, ScrollDelta, Window, div, gpu_canvas, prelude::*, px, relative, rgb,
-    rgba,
+    MouseButton, Render, ScrollDelta, SharedString, Window, div, gpu_canvas, prelude::*, px,
+    relative, rgb, rgba,
 };
 use gpui_interop::attach;
 use gpui_wgpu::{ImportedTextureExt as _, WgpuRenderer};
@@ -296,8 +296,13 @@ pub(crate) struct DragonFruit {
     store: Option<gpui_store::Store>,
     /// The file this session opened, written to `session.json` on exit.
     last_file: Option<PathBuf>,
-    /// `session.json`'s `lastFile`, opened on the first frame: `new` has no
-    /// built entity to spawn the background load from.
+    /// `session.json`'s `recentFiles`, most recent first. The rows the empty
+    /// scene shows are rebuilt from it (see [`Self::sync_recents`]).
+    recent_files: Vec<gpui_store::session::RecentFile>,
+    /// The source's `reopenError`: a recent row's path no longer exists.
+    reopen_error: Option<SharedString>,
+    /// The viewport width from the last frame, handed to the top bar's
+    /// responsive layout (`app_bar::State::window_width`).
     pub(crate) window_width: f32,
     /// An OS file drag is over the canvas (`isPrepareDragActive`).
     pub(crate) drag_active: bool,
@@ -338,9 +343,10 @@ impl DragonFruit {
 
         // The store is the only state that outlives the process:
         // `settings.json` hydrates the settings draft once, and `session.json`
-        // restores the last file, camera pose, Prepare tool and panel layout.
-        // A store that cannot open leaves every one of those at its default and
-        // disables the saves below.
+        // restores the recent-file list, the Prepare tool and the panel layout.
+        // The camera is not restored: a launch has no open file, so it starts
+        // at the home pose the source uses. A store that cannot open leaves
+        // every one of those at its default and disables the saves below.
         let store = gpui_store::Store::open().ok();
         let session = match &store {
             Some(store) => {
@@ -408,6 +414,8 @@ impl DragonFruit {
             support_panel: SupportPanel::default(),
             store,
             last_file: None,
+            recent_files: Vec::new(),
+            reopen_error: None,
             window_width: 0.0,
             drag_active: false,
             drag_unsupported: false,
@@ -428,7 +436,9 @@ impl DragonFruit {
             match load_file(&path) {
                 Ok(loaded) => {
                     app.apply_loaded(loaded);
-                    app.last_file = Some(path);
+                    app.last_file = Some(path.clone());
+                    app.record_recent(&path);
+                    app.save_session();
                 }
                 Err(error) => {
                     eprintln!("{error:#}");
@@ -442,13 +452,11 @@ impl DragonFruit {
         app
     }
 
-    /// Restore `session.json`: the camera pose, the Prepare tool and the panel
-    /// layout. [`Self::last_file`] keeps the path, which `new` hands to
-    /// [`Self::pending_reopen`] when the command line named no file.
+    /// Restore `session.json`: the Prepare tool, the panel layout and the
+    /// recent-file list. [`Self::last_file`] keeps the path for the record only;
+    /// the source never reopens a file on launch, so the camera stays where
+    /// `new` parked it and the app always starts on the home pose.
     fn apply_session(&mut self, session: &gpui_store::Session) {
-        if let Some(pose) = session.camera {
-            restore_camera(&self.camera, &pose);
-        }
         // A session file from a build without the key loads as the identity;
         // a hand-edited one with a NaN must not poison the model matrix.
         if session.rotation.iter().all(|angle| angle.is_finite()) {
@@ -459,6 +467,61 @@ impl DragonFruit {
         self.active_tool = (session.active_tool as usize).min(rail::prepare_tool_count() - 1);
         apply_session_layout(&self.layout, &session.panel_layout);
         self.last_file = session.last_file.clone().filter(|path| path.is_file());
+        self.recent_files = session.recent_files.clone();
+        self.recent_files.truncate(gpui_store::session::RECENT_FILES_LIMIT);
+        self.sync_recents();
+    }
+
+    /// Rebuild the empty scene's rows from [`Self::recent_files`].
+    ///
+    /// `RecentOpenedFile::id` is the entry's path: the source's `id` is a uuid
+    /// keying its IndexedDB blob cache, which the port does not have, so the
+    /// path is the only handle a row can reopen.
+    fn sync_recents(&mut self) {
+        self.empty_scene.recent_opened_files = self
+            .recent_files
+            .iter()
+            .map(|entry| gpui_core::empty_state::RecentOpenedFile {
+                id: entry.path.to_string_lossy().into_owned().into(),
+                name: entry.name.clone().into(),
+                kind: match entry.kind {
+                    gpui_store::session::RecentFileKind::Mesh => {
+                        gpui_core::empty_state::RecentFileKind::Mesh
+                    }
+                    gpui_store::session::RecentFileKind::Scene => {
+                        gpui_core::empty_state::RecentFileKind::Scene
+                    }
+                },
+                size_bytes: entry.size_bytes,
+                opened_at_ms: entry.opened_at_ms,
+            })
+            .collect();
+    }
+
+    /// `trackRecentOpenedFiles`: newest first, one row per path, trimmed to the
+    /// source's limit, with the empty scene's rows rebuilt. Runs before the
+    /// load, as the source does, so a file that fails to parse is still listed;
+    /// the caller persists the document.
+    fn record_recent(&mut self, path: &Path) {
+        if path.as_os_str().is_empty() {
+            return;
+        }
+        let entry = gpui_store::session::RecentFile {
+            path: path.to_path_buf(),
+            name: path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            kind: if is_scene_file(path) {
+                gpui_store::session::RecentFileKind::Scene
+            } else {
+                gpui_store::session::RecentFileKind::Mesh
+            },
+            size_bytes: std::fs::metadata(path).ok().map(|meta| meta.len()),
+            opened_at_ms: now_ms(),
+        };
+        gpui_store::session::push_recent(&mut self.recent_files, entry);
+        self.sync_recents();
     }
 
     /// Persist a settings edit for the frame that just handled input, and wait
@@ -492,20 +555,16 @@ impl DragonFruit {
     }
 
     /// `session.json`'s document for the current state.
+    ///
+    /// `camera` is not written: the source starts every launch at the home
+    /// pose (a cold start has no model, and it never reopens the last file), so
+    /// there is no pose for this build to restore. The field still loads.
     fn session_document(&self) -> gpui_store::Session {
-        let camera = self.camera.borrow();
         gpui_store::Session {
             last_file: self.last_file.clone(),
-            camera: Some(gpui_store::CameraPose {
-                yaw: camera.yaw,
-                pitch: camera.pitch,
-                distance: camera.distance,
-                target: camera.target.to_array(),
-                fov_y: camera.fov_y,
-                orthographic: camera.orthographic,
-            }),
             active_tool: self.active_tool as u32,
             rotation: self.rotation,
+            recent_files: self.recent_files.clone(),
             panel_layout: session_layout(&self.layout),
             ..Default::default()
         }
@@ -595,6 +654,11 @@ impl DragonFruit {
     /// background load; the source's blocking import overlay is not ported.
     pub(crate) fn load_path(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         self.loading = true;
+        // `trackRecentOpenedFiles` runs before the parse, so a file that fails
+        // still lands in the list (the source tracks meshes the same way).
+        self.reopen_error = None;
+        self.record_recent(&path);
+        self.save_session();
         // The empty scene's blocking-import card: label plus the file name.
         self.empty_scene.loading = true;
         self.empty_scene.loading_label = Some("Importing your file…".into());
@@ -648,6 +712,21 @@ impl DragonFruit {
         else {
             return;
         };
+        self.load_path(path, cx);
+    }
+
+    /// A recent row's click — the source's `onReopenRecentFile`.
+    ///
+    /// The source reopens from an IndexedDB blob, or from the entry's
+    /// `sourcePath` when it has one; the port's entry *is* its path, so a path
+    /// that no longer exists is the source's failed reopen and raises its
+    /// `reopenError` line instead of a toast.
+    pub(crate) fn reopen_recent(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        if !path.is_file() {
+            self.reopen_error = Some("Could not reopen this file from cache.".into());
+            cx.notify();
+            return;
+        }
         self.load_path(path, cx);
     }
 
@@ -1717,6 +1796,7 @@ impl Render for DragonFruit {
             .when(!has_models, |this| {
                 this.child(panels::empty_scene::empty_scene_state(
                     self.empty_scene.clone(),
+                    self.reopen_error.clone(),
                     entity.clone(),
                 ))
             })
@@ -2077,6 +2157,14 @@ fn toast_view(toast: Toast) -> impl IntoElement {
     )
 }
 
+/// Milliseconds since the Unix epoch, the unit `openedAt` uses.
+fn now_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_millis() as i64)
+        .unwrap_or(0)
+}
+
 fn file_extension(path: &Path) -> String {
     path.extension()
         .and_then(|extension| extension.to_str())
@@ -2139,25 +2227,6 @@ fn mesh_color(selected: bool, hovered: bool) -> [f32; 3] {
     } else {
         [srgb_to_linear(0xa3), srgb_to_linear(0xa3), srgb_to_linear(0xa3)]
     }
-}
-
-/// A restored camera pose, applied to the parked camera before the first frame.
-///
-/// `Camera`'s smoothing goals are private, and `orient_to` is the only public
-/// setter that writes them — writing `yaw`/`pitch` alone is undone by the next
-/// `step`. `orient_to` starts the source's 400 ms `tweenCamera`; stepping it
-/// once with a full second's delta lands on the end pose and clears the tween,
-/// because a restored pose is a restore, not an entry animation. The distance,
-/// target and projection set here are the tween's start and end, so only the
-/// angles were ever in flight.
-fn restore_camera(camera: &Rc<RefCell<Camera>>, pose: &gpui_store::CameraPose) {
-    let mut camera = camera.borrow_mut();
-    camera.distance = pose.distance;
-    camera.target = glam::Vec3::from_array(pose.target);
-    camera.fov_y = pose.fov_y;
-    camera.orthographic = pose.orthographic;
-    camera.orient_to(pose.yaw, pose.pitch);
-    let _ = camera.step(1.0);
 }
 
 /// `panel_layout.rs`'s placement as the store's plain copy.

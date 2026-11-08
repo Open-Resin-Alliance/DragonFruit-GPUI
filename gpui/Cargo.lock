@@ -2580,6 +2580,7 @@ dependencies = [
  "bite-gpui",
  "declarative-gpui",
  "gpui-core",
+ "gpui-locale",
 ]
 
 [[package]]

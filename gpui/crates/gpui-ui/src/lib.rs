@@ -2,6 +2,7 @@
 //! settings-row primitives built from the generated theme tokens.
 
 pub mod panel_fields;
+pub mod text_input;
 pub mod widgets;
 
 /// The widget library under its historical path, so `ui::card()` and

@@ -22,10 +22,13 @@
 //! * **Import Scene** — the source imports `.voxl` / `.lys` scenes; this build
 //!   has no scene importer, so the button renders with its label and does
 //!   nothing (`PORT GAP`).
-//! * **Recent files** — the port has no recent-file store and no cache-backed
-//!   reopen, so the list renders read-only: rows are not clickable, the
-//!   `Clear` button (gated on `onClearRecentFiles`) is not rendered, and the
-//!   `reopenError` line never appears (`PORT GAP`).
+//! * **Recent files** — `session.json` keeps the list (newest first, deduped by
+//!   path, ten entries); the panel shows the newest eight and every row
+//!   reopens through `DragonFruit::reopen_recent`. The source reopens from an
+//!   IndexedDB blob or the entry's `sourcePath`; the port has neither cache nor
+//!   a separate `id`, so the row's path is the handle and a path that no longer
+//!   exists renders the source's `reopenError` line. The `Clear` button is
+//!   still absent (`PORT GAP`).
 //! * **First-run onboarding** — `onAddPrinter` opens the printer library and
 //!   `onUseWithoutPrinter` sets the prepare-without-printer flag. Neither store
 //!   exists in the port; both buttons render and do nothing (`PORT GAP`).
@@ -63,6 +66,7 @@
 //! * **`select-none`** on the card has no GPUI equivalent.
 
 use std::cell::Cell;
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -89,6 +93,10 @@ const EMPTY_STATE_PADDING: f32 = 20.0;
 /// Bare Tailwind `rounded` (4px); `rounded-md`/`rounded-lg` come from the
 /// theme's `ROUNDED_MD` / `ROUNDED_LG` (10 / 14, the app's `--radius-*`).
 const RADIUS_BARE: f32 = 4.0;
+
+/// The source's `Math.min(recentOpenedFiles.length, 8)` and its
+/// `.slice(0, 8)`: the panel shows eight rows even though the list keeps ten.
+const RECENT_ROWS: usize = 8;
 
 /// The version chip's `px-3.5 py-1 text-[13px]`.
 const CHIP_PADDING_X: f32 = 14.0;
@@ -234,6 +242,7 @@ fn format_recent_opened_at(opened_at_ms: i64) -> Option<String> {
 /// the panel; it carries no handlers, so it does not intercept the canvas.
 pub fn empty_scene_state(
     state: EmptySceneState,
+    reopen_error: Option<SharedString>,
     entity: WeakEntity<DragonFruit>,
 ) -> impl IntoElement {
     let EmptySceneState {
@@ -371,6 +380,7 @@ pub fn empty_scene_state(
     } else {
         actions_and_recents(
             recent_opened_files,
+            reopen_error,
             drop_active,
             drop_unsupported,
             entity.clone(),
@@ -553,6 +563,7 @@ fn onboarding_card() -> Div {
 /// The two action buttons plus the recent-files card and the drop zone.
 fn actions_and_recents(
     recent_opened_files: Vec<RecentOpenedFile>,
+    reopen_error: Option<SharedString>,
     drop_active: bool,
     drop_unsupported: bool,
     entity: WeakEntity<DragonFruit>,
@@ -645,7 +656,7 @@ fn actions_and_recents(
         .child(div().flex_1().min_w(px(0.0)).child(import_scene));
 
     // ── Recent files ────────────────────────────────────────────────────────
-    let count = recent_opened_files.len().min(8);
+    let count = recent_opened_files.len().min(RECENT_ROWS);
     let header = div()
         .flex()
         .items_center()
@@ -663,7 +674,8 @@ fn actions_and_recents(
                 .items_center()
                 .gap(px(6.0))
                 // `PORT GAP:` the `Clear` button renders only when
-                // `onClearRecentFiles` is set; the port has no recent store.
+                // `onClearRecentFiles` is set; the port keeps the list but has
+                // no clear action.
                 .child(
                     div()
                         .min_w(px(20.0))
@@ -685,9 +697,8 @@ fn actions_and_recents(
 
     let rows: Vec<_> = recent_opened_files
         .iter()
-        .rev()
-        .take(8)
-        .map(recent_row)
+        .take(RECENT_ROWS)
+        .map(|entry| recent_row(entry, entity.clone()))
         .collect();
 
     let list = if rows.is_empty() {
@@ -787,7 +798,16 @@ fn actions_and_recents(
         .text_left()
         .child(header)
         .child(list)
-        // `PORT GAP:` `reopenError` — nothing can reopen a recent file here.
+        // `{reopenError && <div className="mt-1 text-[10px]" …>}`.
+        .when_some(reopen_error, |this, error| {
+            this.child(
+                div()
+                    .mt(px(4.0))
+                    .text_size(px(10.0))
+                    .text_color(rgb(DANGER))
+                    .child(error),
+            )
+        })
         .child(drop_zone);
 
     div()
@@ -799,9 +819,10 @@ fn actions_and_recents(
         .child(recents)
 }
 
-/// One recent-file row. The source's `<button>` is `disabled` whenever
-/// `onReopenRecentFile` is absent, which is always the case here.
-fn recent_row(entry: &RecentOpenedFile) -> Div {
+/// One recent-file row — the source's `<button onClick={… handleReopenRecentFile}>`.
+/// The row's `id` is its path (the port has no blob cache to key), so a click
+/// hands the path to `DragonFruit::reopen_recent`.
+fn recent_row(entry: &RecentOpenedFile, entity: WeakEntity<DragonFruit>) -> gpui::Stateful<Div> {
     let accent = entry.kind.accent();
     let period = format_recent_opened_at(entry.opened_at_ms);
     let meta = match period {
@@ -809,8 +830,11 @@ fn recent_row(entry: &RecentOpenedFile) -> Div {
         None => "last opened just now".to_owned(),
     };
     let size = format_recent_bytes(entry.size_bytes).unwrap_or_else(|| "cached".to_owned());
+    let path = PathBuf::from(entry.id.as_ref());
+    let hovered_bg = mix(SURFACE_1, SURFACE_2, 0.5);
 
     div()
+        .id(SharedString::from(format!("recent-{}", entry.id)))
         .flex()
         .items_center()
         .justify_between()
@@ -824,7 +848,14 @@ fn recent_row(entry: &RecentOpenedFile) -> Div {
         .text_size(px(10.0))
         .text_left()
         .text_color(rgb(TEXT_STRONG))
-        .cursor_not_allowed()
+        .cursor_pointer()
+        .hover(move |this| this.bg(rgba(with_alpha(hovered_bg, 0xf2))))
+        .on_click(move |_, _, cx| {
+            let path = path.clone();
+            entity
+                .update(cx, |this, cx| this.reopen_recent(path, cx))
+                .ok();
+        })
         .child(
             div()
                 .min_w(px(0.0))

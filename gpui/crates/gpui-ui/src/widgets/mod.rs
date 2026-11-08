@@ -48,11 +48,14 @@
 //!   set on a container is inherited as-is. Elements that change their own font
 //!   size therefore set their own line-height, and a container's ratio is
 //!   resolved against the container's font size.
-//! - **Text editing** — `NumberInput`, `ScrollableNumberField`,
-//!   `CompactNumberField` and `MiniStepperField` render the frame, the value and
-//!   the steppers. GPUI has no editable text field in this port, so typing, the
-//!   locale parse/format, the wheel step and the blur commit stay with the
-//!   caller; the step callbacks are the atoms' only interaction.
+//! - **Text editing** — `text_field` is now a real editable `.ui-input`
+//!   (`crate::text_input::TextInput` + GPUI's `EntityInputHandler` path), and
+//!   `number_field` is its locale-aware numeric form. The older
+//!   `NumberInput`, `ScrollableNumberField`, `CompactNumberField` and
+//!   `MiniStepperField` atoms were built before that and still render only the
+//!   frame, value and steppers; panels can move their text entry to
+//!   `text_field`/`number_field` without losing focus, typing or the locale
+//!   parse/format.
 //! - **`w-[min(520px,92vw)]`** — `BlockingOverlay`'s panel is `92%` of the
 //!   overlay (the window) capped at 520px, which is the same box.
 //! - **Select menu height** — the source measures the trigger and caps the menu
@@ -88,6 +91,7 @@ pub mod menu;
 pub mod number_field;
 pub mod select;
 pub mod select_menu;
+pub mod text_field;
 pub mod tooltip;
 
 pub use button::*;
@@ -103,6 +107,7 @@ pub use menu::*;
 pub use number_field::*;
 pub use select::*;
 pub use select_menu::*;
+pub use text_field::*;
 pub use tooltip::*;
 
 pub use gpui_core::state::ToastTone;

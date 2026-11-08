@@ -1,12 +1,12 @@
-//! `session.json` — what the app should reopen with next launch: the last
-//! file, the panel layout and dock widths, the camera pose and the active
-//! Prepare tool.
+//! `session.json` — what the app carries across launches: the recent-file
+//! list, the panel layout and dock widths, the last file the session opened and
+//! the active Prepare tool.
 //!
 //! The panel layout mirrors the document `gpui-core/src/panel_layout.rs`
 //! serialises (`version: 6`, `panels`, `docks`), restated here as plain data so
-//! the store crate does not have to depend on gpui. The camera fields are the
-//! pose in `gpui-core/src/camera.rs`; the tool index is `app.rs`'s
-//! `active_tool` (0 = select).
+//! the store crate does not have to depend on gpui. The camera field is a
+//! legacy key that still loads and is no longer written (see [`Session`]); the
+//! tool index is `app.rs`'s `active_tool` (0 = select).
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -22,6 +22,10 @@ pub const LAYOUT_VERSION: u32 = 6;
 /// `DEFAULT_PANEL_WIDTH` in `panel_layout.rs`.
 pub const DEFAULT_PANEL_WIDTH: f32 = 320.0;
 
+/// `RECENT_OPENED_FILES_LIMIT` in `useSceneCollectionManager.ts`: the list is
+/// kept at ten entries even though the empty scene's panel shows eight.
+pub const RECENT_FILES_LIMIT: usize = 10;
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Session {
@@ -31,7 +35,10 @@ pub struct Session {
     /// load; a path that no longer exists is the caller's to check.
     #[serde(default)]
     pub last_file: Option<PathBuf>,
-    /// Where the camera was; `None` parks the app at its own default.
+    /// A camera pose from a document written before the port stopped restoring
+    /// it. The source never persists or restores the view — a launch has no
+    /// model and starts at the home pose — so this build accepts the key and
+    /// ignores it.
     #[serde(default)]
     pub camera: Option<CameraPose>,
     /// The model's Euler rotation in radians (XYZ order), the same value
@@ -44,8 +51,22 @@ pub struct Session {
     /// `DragonFruit::active_tool`, the Prepare tool index.
     #[serde(default)]
     pub active_tool: u32,
+    /// The empty scene's recent-file list, most recent first. The source keeps
+    /// this in `localStorage` under `app-recent-opened-files`; the port keeps it
+    /// beside the session so one document carries everything a launch reads.
+    #[serde(default)]
+    pub recent_files: Vec<RecentFile>,
     #[serde(default)]
     pub panel_layout: SessionLayout,
+}
+
+/// `trackRecentOpenedFiles`: one entry per path, newest first, trimmed to
+/// [`RECENT_FILES_LIMIT`]. A path that no longer exists is kept — the panel is
+/// what reports it missing.
+pub fn push_recent(files: &mut Vec<RecentFile>, entry: RecentFile) {
+    files.retain(|item| item.path != entry.path);
+    files.insert(0, entry);
+    files.truncate(RECENT_FILES_LIMIT);
 }
 
 impl Default for Session {
@@ -56,6 +77,7 @@ impl Default for Session {
             camera: None,
             rotation: [0.0; 3],
             active_tool: 0,
+            recent_files: Vec::new(),
             panel_layout: SessionLayout::default(),
         }
     }
@@ -193,4 +215,33 @@ impl Default for CameraPose {
             orthographic: true,
         }
     }
+}
+
+/// `RecentOpenedFileKind` in `useSceneCollectionManager.ts`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RecentFileKind {
+    #[default]
+    Mesh,
+    Scene,
+}
+
+/// One `RecentOpenedFileEntry`. The source's `id` is a uuid that keys the
+/// IndexedDB blob cache; the port has no cache, so `path` is the identity and
+/// the dedup key.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecentFile {
+    #[serde(default)]
+    pub path: PathBuf,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub kind: RecentFileKind,
+    /// `sizeBytes`; `None` renders the panel's `cached` fallback.
+    #[serde(default)]
+    pub size_bytes: Option<u64>,
+    /// `openedAt`, milliseconds since the Unix epoch.
+    #[serde(default, rename = "openedAt")]
+    pub opened_at_ms: i64,
 }

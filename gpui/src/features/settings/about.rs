@@ -388,13 +388,13 @@ pub(crate) fn about_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>) 
     let (build_status_text, build_status_border, build_status_bg) = if is_beta_build_channel {
         (
             0xfdba74,
-            mix(0xf97316, BORDER_SUBTLE, 0.16),
+            mix(BORDER_SUBTLE, 0xf97316, 0.16),
             rgba(with_alpha(0xf97316, 0x0A)), // `color-mix(#f97316, transparent 96%)`
         )
     } else {
         (
             TEXT_STRONG,
-            mix(ACCENT, BORDER_SUBTLE, 0.40),
+            mix(BORDER_SUBTLE, ACCENT, 0.40),
             rgba(with_alpha(ACCENT, 0x29)), // `color-mix(accent, transparent 84%)`
         )
     };
@@ -407,8 +407,8 @@ pub(crate) fn about_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>) 
         // color-mix(accent-secondary, surface-0 94%))`
         .bg(linear_gradient(
             145.,
-            linear_color_stop(rgb(mix(ACCENT, SURFACE_0, 0.95)), 0.),
-            linear_color_stop(rgb(mix(ACCENT_SECONDARY, SURFACE_0, 0.94)), 1.),
+            linear_color_stop(rgb(mix(SURFACE_0, ACCENT, 0.95)), 0.),
+            linear_color_stop(rgb(mix(SURFACE_0, ACCENT_SECONDARY, 0.94)), 1.),
         ))
         .child(
             // `relative flex items-center justify-center` (`:1592`)
@@ -482,7 +482,7 @@ pub(crate) fn about_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>) 
                                 .border_color(rgb(if copied {
                                     0x2d8a4e
                                 } else {
-                                    mix(BORDER_SUBTLE, WHITE, 0.92)
+                                    mix(WHITE, BORDER_SUBTLE, 0.92)
                                 }))
                                 .bg(if copied {
                                     rgba(with_alpha(0x2d8a4e, 0x1a))
@@ -560,8 +560,8 @@ pub(crate) fn about_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>) 
                 div()
                     .rounded(px(6.))
                     .border_1()
-                    .border_color(rgb(mix(tone_color, BORDER_SUBTLE, 0.45)))
-                    .bg(rgb(mix(tone_color, SURFACE_0, background_mix)))
+                    .border_color(rgb(mix(BORDER_SUBTLE, tone_color, 0.45)))
+                    .bg(rgb(mix(SURFACE_0, tone_color, background_mix)))
                     .px(px(12.))
                     .py(px(10.))
                     // `flex items-center justify-between gap-2 text-sm`
@@ -654,8 +654,8 @@ pub(crate) fn about_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>) 
         .gap(px(16.))
         .rounded(px(12.))
         .border_1()
-        .border_color(rgb(mix(ACCENT_SECONDARY, BORDER_SUBTLE, 0.52)))
-        .bg(rgb(mix(ACCENT_SECONDARY, SURFACE_0, 0.94)))
+        .border_color(rgb(mix(BORDER_SUBTLE, ACCENT_SECONDARY, 0.52)))
+        .bg(rgb(mix(SURFACE_0, ACCENT_SECONDARY, 0.94)))
         .px(px(16.))
         .py(px(12.))
         // `ORA_LOGO_DARK_URL` at `h-14 w-auto object-contain shrink-0`
