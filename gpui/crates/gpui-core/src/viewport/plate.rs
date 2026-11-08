@@ -188,10 +188,23 @@ pub(super) fn axis_arrows(metrics: &PlateMetrics) -> Vec<[f32; 6]> {
                 origin[2] + dir[2] * t + (u[2] * cos + v[2] * sin) * radius,
             ]
         };
-        // Solid colour per axis: the gradient's per-vertex interpolation read
-        // as faceted on the 12-sided cones, so the arrows use the bright end
-        // of each gradient instead.
-        let shade = |_t: f32, _span: f32| -> [f32; 3] { tip };
+        // A pale start fading to the axis colour by the tip. The earlier
+        // version painted whole triangles, which read as facets on the
+        // 12-sided cone; shading per vertex by position along the axis
+        // interpolates smoothly instead.
+        let light = [
+            tip[0] * 0.45 + 0.55,
+            tip[1] * 0.45 + 0.55,
+            tip[2] * 0.45 + 0.55,
+        ];
+        let shade = |t: f32, span: f32| -> [f32; 3] {
+            let k = (t / span.max(1e-6)).clamp(0.0, 1.0);
+            [
+                light[0] + (tip[0] - light[0]) * k,
+                light[1] + (tip[1] - light[1]) * k,
+                light[2] + (tip[2] - light[2]) * k,
+            ]
+        };
         let tip_point = [
             origin[0] + dir[0] * total,
             origin[1] + dir[1] * total,
@@ -242,8 +255,11 @@ pub(super) fn axis_arrows(metrics: &PlateMetrics) -> Vec<[f32; 6]> {
             // Cone: `ConeGeometry(headRadius, headLength, 12)`, base capped.
             let b0 = ring(length, head_radius, a0);
             let b1 = ring(length, head_radius, a1);
-            let cone_base = shade(0.0, head_length);
-            let cone_tip = shade(head_length, head_length);
+            // Absolute positions, so the cone continues the shaft's ramp
+            // instead of restarting it (which read as a bright ring at the
+            // shaft/cone seam).
+            let cone_base = shade(length, total);
+            let cone_tip = shade(total, total);
             let center = center_at(length);
             let cone_radial = radial(length, b0, b1);
             push_tri_colors(
