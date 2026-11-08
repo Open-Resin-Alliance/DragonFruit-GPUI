@@ -1282,10 +1282,12 @@ fn app_menu(
             "menu-new-scene" => {
                 entity
                     .update(cx, |this, cx| {
-                        this.mesh = None;
-                        *this.supports.borrow_mut() = None;
+                        // `delete_model` is the one path that clears the scene:
+                        // it also homes the camera, drops the selection and the
+                        // session's last file, and saves. Clearing the fields
+                        // here skipped all of that.
+                        this.delete_model();
                         this.status = "No model loaded".to_owned();
-                        this.mode = Mode::Prepare;
                         this.show_app_menu = false;
                         cx.notify();
                     })
