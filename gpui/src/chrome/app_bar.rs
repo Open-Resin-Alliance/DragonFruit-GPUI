@@ -352,6 +352,8 @@ pub fn app_bar(state: AppBarState, entity: WeakEntity<DragonFruit>) -> impl Into
     let app_menu_button = ui! {
         div(
             id = "app-menu-button",
+            on_mouse_down = |_, _, cx| cx.stop_propagation(),
+
             w_40, h_40, flex, items_center, justify_center,
             rounded_6,
             when(show_app_menu, bg = rgba(0xec2a7733)),
@@ -396,6 +398,8 @@ pub fn app_bar(state: AppBarState, entity: WeakEntity<DragonFruit>) -> impl Into
     let printer_button = ui! {
         div(
             id = "printer-menu-button",
+            on_mouse_down = |_, _, cx| cx.stop_propagation(),
+
             h_40, max_w_300, flex, items_center, gap_8, px_8,
             rounded_6,
             when(!actions_disabled, cursor_pointer),
@@ -1065,7 +1069,10 @@ fn view_type_dropdown(
     if disabled {
         trigger = trigger.opacity(0.55).cursor_not_allowed();
     } else {
-        trigger = trigger.cursor_pointer().on_click(move |_, _, cx| {
+        trigger = trigger
+            .cursor_pointer()
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(move |_, _, cx| {
             toggle_entity
                 .update(cx, |this, cx| {
                     this.show_view_menu = !this.show_view_menu;
