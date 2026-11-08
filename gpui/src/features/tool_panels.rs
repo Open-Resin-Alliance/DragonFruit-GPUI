@@ -480,19 +480,13 @@ fn transform_actions(
 
     let (d, n) = flags!();
     let on_center = Rc::new(move || {
-        // `handleCenterSelectedModels` targets the plate centre. The port has no
-        // `originMode`/plate size, and the plate is centred on the origin. This
-        // is still the Z-rotation/uniform-scale solve: it takes
-        // `translate + Rz(rotation) * (scale * raw)` and puts the raw bbox centre
-        // at (0, 0), ignoring X/Y rotation and axes 0/1 of the scale.
+        // `handleCenterSelectedModels` targets the plate centre, which is the
+        // origin here. The viewport pivots on the bbox centre, so the model's
+        // world centre is `position + mesh_center` for any rotation and scale —
+        // placing it on the origin needs no trigonometry.
         with_store(|store| {
-            let angle = store.transform.rotation[2];
-            let (sin, cos) = angle.sin_cos();
-            let scale = store.transform.scale;
-            let x = scale[0] * store.mesh_center[0];
-            let y = scale[1] * store.mesh_center[1];
-            store.transform.position[0] = -(cos * x - sin * y);
-            store.transform.position[1] = -(sin * x + cos * y);
+            store.transform.position[0] = -store.mesh_center[0];
+            store.transform.position[1] = -store.mesh_center[1];
         });
         mark(&d, &n);
     });
