@@ -54,7 +54,6 @@ pub use soup::MeshTriangles;
 use candidates::Candidate;
 use constants::ANCHOR_HEIGHT_THRESHOLD_MM;
 use scan::Region;
-use soup::WeldedMesh;
 
 /// The support type a contact attaches as.
 ///
@@ -132,9 +131,11 @@ impl Contact {
 ///    and ring, and deduplicate (`deduplicateCandidates`);
 /// 4. resolve each candidate's type from its tip height.
 ///
-/// Order is the TS's: grid contacts in region order (lattice then ring), then
-/// the remaining single contacts in priority order, then the dedupe's stable
-/// priority sort.
+/// Order is the TS's: candidates are generated as grid contacts in region order
+/// (lattice then ring) followed by the remaining single contacts in priority
+/// order, and the dedupe then sorts the survivors by priority (stable,
+/// descending) — so sub-threshold single contacts come first, and the grid
+/// contacts keep their generation order behind them.
 pub fn place(mesh: &MeshTriangles, settings: &SupportSettings) -> Vec<Contact> {
     if !settings.enabled || mesh.is_empty() {
         return Vec::new();
@@ -235,8 +236,13 @@ mod tests {
     /// A slope of `angle_deg` from horizontal, `size` wide in X and `size` in
     /// Y-run, facing down.
     fn slope(size: f32, angle_deg: f32, base_z: f32) -> MeshTriangles {
+        slope_rise(size, size * angle_deg.to_radians().tan(), base_z)
+    }
+
+    /// A slope with an explicit Z rise over `size` of Y-run. `rise == size` is
+    /// exactly 45°, with no `tan` rounding in the coordinates.
+    fn slope_rise(size: f32, rise: f32, base_z: f32) -> MeshTriangles {
         let h = size / 2.0;
-        let rise = size * angle_deg.to_radians().tan();
         let mut mesh = MeshTriangles::new();
         mesh.push([-h, -h, base_z], [-h, h, base_z + rise], [h, -h, base_z]);
         mesh.push([h, -h, base_z], [-h, h, base_z + rise], [h, h, base_z + rise]);
@@ -270,7 +276,7 @@ mod tests {
             );
             assert!(
                 (contact.normal - Vec3::NEG_Z).length() < 1e-3,
-                "flat ceiling normal is −Z: {}",
+                "flat ceiling normal is −Z: {:?}",
                 contact.normal
             );
             assert_eq!(contact.support_type, ContactSupportType::Trunk);
@@ -286,8 +292,9 @@ mod tests {
         let settings = SupportSettings::default();
         // 8 × 8 mm: 64 mm² projected, so a misclassification would show up as
         // grid contacts, but 90.5 mm² of surface — well under the 150 mm²
-        // steep-flat floor, so the topple path cannot mask the answer.
-        let contacts = place(&slope(8.0, 45.0, 10.0), &settings);
+        // steep-flat floor, so the topple path cannot mask the answer. The rise
+        // equals the run exactly, i.e. 45.000° with no `tan` rounding.
+        let contacts = place(&slope_rise(8.0, 8.0, 10.0), &settings);
         assert!(
             contacts.is_empty(),
             "45° is the threshold, not past it: {} contacts",
@@ -305,7 +312,7 @@ mod tests {
         for contact in &contacts {
             assert!(
                 (contact.normal.z + expected_z).abs() < 1e-3,
-                "the contact leans with the face: {}",
+                "the contact leans with the face: {:?}",
                 contact.normal
             );
             // The fixture rises 1/√3 in Z per mm of Y.

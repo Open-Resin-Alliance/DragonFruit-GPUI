@@ -217,7 +217,8 @@ pub fn menu_open() -> bool {
 
 // ── Edits ───────────────────────────────────────────────────────────────────
 
-/// Stage an edit. `Save` commits it into the active custom record.
+/// Stage an edit on the live auto-support block. `Save` acknowledges it; the
+/// selected record's own `settings.autoSupport` is left untouched.
 pub fn set_value(f: impl FnOnce(&mut SupportSettingsValues)) {
     with(|state| f(&mut state.draft));
 }
@@ -263,8 +264,9 @@ pub fn reset() -> SupportSettingsValues {
 /// The draft is **not** merged into the active record: `savePreset` restores
 /// the record's own `autoSupport` block (`presets.ts:723-731`), so a preset is
 /// never polluted with the live one. A record whose own `isBuiltIn` is set
-/// refuses the save, exactly as `PresetSelector.tsx`'s save gate does (every
-/// factory record in `presets.ts` is `isBuiltIn: false`).
+/// refuses the save, as the source footer's Save does
+/// (`AutoSupportPresets.tsx:630-633`); every factory record in `presets.ts` is
+/// `isBuiltIn: false`, so a fresh profile saves freely.
 pub fn save_active() -> Option<SupportSettingsValues> {
     with(|state| {
         if state

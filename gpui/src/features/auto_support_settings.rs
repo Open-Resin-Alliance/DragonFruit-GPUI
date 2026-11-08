@@ -112,8 +112,9 @@ const ROUNDED_XL: f32 = 12.0;
 /// `#d97706` — the calibration card's warning tone.
 const WARNING: u32 = 0xd97706;
 
-/// `NO_ACTIVE_PRESET_LABEL`.
-const NO_ACTIVE_PRESET_LABEL: &str = "Custom — not a preset";
+/// `NO_ACTIVE_PRESET_LABEL`. Shared by the dialog's strip and the Auto Supports
+/// panel's trigger, so the two surfaces name the unselected state the same way.
+pub const NO_ACTIVE_PRESET_LABEL: &str = "Custom — not a preset";
 /// `NEW_PRESET_NAME`.
 const NEW_PRESET_NAME: &str = "New Preset";
 /// `NEW_PRESET_ENTRY`.
@@ -1256,10 +1257,17 @@ impl DialogState {
 }
 
 static AUTO_SUPPORT_DIALOG: LazyLock<Mutex<DialogState>> =
-    LazyLock::new(|| Mutex::new(DialogState::default()));
+    LazyLock::new(|| Mutex::new(DialogState::load()));
 
 fn state() -> &'static Mutex<DialogState> {
     &AUTO_SUPPORT_DIALOG
+}
+
+fn with_state<R>(f: impl FnOnce(&DialogState) -> R) -> R {
+    match state().lock() {
+        Ok(guard) => f(&guard),
+        Err(poisoned) => f(&poisoned.into_inner()),
+    }
 }
 
 fn edit(f: impl FnOnce(&mut DialogState)) {
@@ -1288,8 +1296,10 @@ fn close(entity: &WeakEntity<DragonFruit>, cx: &mut App) {
 }
 
 /// `setActiveAutoSupportPreset`: applies the preset to the live block, and the
-/// dialog's draft follows it so the fields show what was applied.
-fn select_preset(id: &str) {
+/// dialog's draft follows it so the fields show what was applied. The selection
+/// and the applied block are written together, so a restart cannot show one
+/// preset as active over another's settings.
+pub fn select_preset(id: &str) {
     edit(|state| {
         let Some(preset) = state
             .presets
@@ -1302,22 +1312,115 @@ fn select_preset(id: &str) {
         state.active = Some(preset.id);
         state.live = preset.settings;
         state.draft = preset.settings;
+        state.row_menu_open = false;
+        state.persist();
     });
 }
 
 /// The live block reaches the app: `DragonFruit::support_angle` is the one knob
 /// `stl::overhang_points` reads.
 fn apply_live_to_app(entity: &WeakEntity<DragonFruit>, cx: &mut App) {
-    let angle = match state().lock() {
-        Ok(guard) => guard.live.overhang_self_support_angle_deg,
-        Err(poisoned) => poisoned.into_inner().live.overhang_self_support_angle_deg,
-    };
+    let angle = with_state(|state| state.live.overhang_self_support_angle_deg);
     entity
         .update(cx, |this, cx| {
             this.support_angle = angle;
             cx.notify();
         })
         .ok();
+}
+
+// ── The Auto Supports panel's row ───────────────────────────────────────────
+//
+// `AutoSupportPresetRow.tsx` is handed the collection, the active id and the
+// Auto-Lift flag as props, because the panel and the dialog read the same store.
+// In the port the store is this module, so the panel gets read accessors and two
+// mutations that keep the entity's redraw in step.
+
+/// One row of the panel's run-policy dropdown — `AutoSupportPresetOption` in
+/// `AutoSupportPresetSelect.tsx`.
+pub struct PresetRow {
+    pub id: SharedString,
+    pub name: SharedString,
+    pub built_in: bool,
+}
+
+/// Every preset the store holds, in store order — built-ins first, then the
+/// user's own (`getAutoSupportPresetsSnapshot`). The panel's dropdown lists all
+/// of them, so a profile saved in the dialog is pickable from the panel too.
+pub fn preset_rows() -> Vec<PresetRow> {
+    with_state(|state| {
+        state
+            .presets
+            .iter()
+            .map(|preset| PresetRow {
+                id: preset.id.clone(),
+                name: preset.name.clone(),
+                built_in: preset.built_in,
+            })
+            .collect()
+    })
+}
+
+/// The store's active preset id — what the trigger shows, "never a guess made by
+/// matching the live block against each preset".
+pub fn active_preset_id() -> Option<SharedString> {
+    with_state(|state| state.active.clone())
+}
+
+/// `TIER_HINTS[activePresetId]` — the active built-in's explanation, substituted
+/// for the generic tooltip since a dropdown cannot carry a hint per row.
+pub fn active_preset_hint() -> Option<&'static str> {
+    let active = active_preset_id()?;
+    match active.as_ref() {
+        "light" => Some("Sparse supports — the detail sizing band"),
+        "medium" => Some("Balanced supports — the structure sizing band"),
+        "heavy" => Some("Dense supports — the anchor sizing band"),
+        _ => None,
+    }
+}
+
+/// Whether the panel's preset dropdown is open.
+pub fn row_menu_open() -> bool {
+    with_state(|state| state.row_menu_open)
+}
+
+/// Open or close the panel's preset dropdown.
+pub fn set_row_menu_open(open: bool, entity: &WeakEntity<DragonFruit>, cx: &mut App) {
+    edit_and_notify(entity, cx, |state| state.row_menu_open = open);
+}
+
+/// `selectAutoSupportPreset(id, setDraft)` from the panel's row: applies the
+/// preset to the live block, copies it into the dialog's draft and closes the
+/// menu. The trunk (Studio) preset is deliberately not touched.
+pub fn choose_preset(id: &str, entity: &WeakEntity<DragonFruit>, cx: &mut App) {
+    select_preset(id);
+    apply_live_to_app(entity, cx);
+}
+
+/// The applied block — `getSettings().autoSupport`. The panel's run reads the
+/// self-support angle from here so a restart uses the saved policy even before
+/// the dialog has been opened.
+pub fn live_settings() -> AutoSupportSettings {
+    with_state(|state| state.live)
+}
+
+/// The Auto-Lift flag the panel's button shows (`AutoSupportPresetRow`'s
+/// `autoLift`). See PORT DEVIATION 13 for why it lives here.
+pub fn auto_lift() -> bool {
+    with_state(|state| state.auto_lift)
+}
+
+/// `onAutoLiftChange(!autoLift)`: flips the flag and writes it with the rest of
+/// the document.
+pub fn set_auto_lift(value: bool, entity: &WeakEntity<DragonFruit>, cx: &mut App) {
+    edit(|state| {
+        if state.auto_lift == value {
+            return;
+        }
+        state.auto_lift = value;
+        state.persist();
+    });
+    entity.update(cx, |_, cx| cx.notify()).ok();
 }
 
 /// `normalizeFieldValue`: clamped, then rounded to the decimals the step implies.
@@ -1517,6 +1620,7 @@ fn toggle_field(
                         state.origin_colors = next;
                         state.live.debug_support_origin_colors = next;
                         state.draft.debug_support_origin_colors = next;
+                        state.persist();
                     });
                 }
                 ToggleAction::SkipAutoBracing => {
@@ -1524,6 +1628,7 @@ fn toggle_field(
                         state.skip_auto_bracing = next;
                         state.live.debug_skip_auto_bracing = next;
                         state.draft.debug_skip_auto_bracing = next;
+                        state.persist();
                     });
                 }
                 ToggleAction::Simplified => {
@@ -1984,6 +2089,7 @@ fn preset_strip(
                     settings: source.settings,
                 });
                 state.active = Some(id);
+                state.persist();
             });
         },
     );
@@ -2056,6 +2162,7 @@ fn footer_reset_button(enabled: bool, entity: &WeakEntity<DragonFruit>) -> State
                     state.live = restored;
                 }
                 state.draft = state.live;
+                state.persist();
             });
             apply_live_to_app(&click_entity, cx);
         })
@@ -2105,6 +2212,9 @@ fn footer_save_button(
                         }
                     }
                     state.saved = true;
+                    // The live block and its preset are one write, so a restart
+                    // cannot show a saved-preset star over the old settings.
+                    state.persist();
                 });
                 apply_live_to_app(&click_entity, cx);
                 // Two seconds of acknowledgement, then back to the button.
@@ -2199,6 +2309,7 @@ fn delete_dialog(preset_name: &str, entity: &WeakEntity<DragonFruit>) -> Div {
                     state.presets.retain(|preset| preset.id != active);
                 }
                 state.pending_delete = false;
+                state.persist();
             });
             select_preset("medium");
             apply_live_to_app(&confirm_entity, cx);
@@ -2294,6 +2405,7 @@ fn name_dialog(dialog: &NameDialog, entity: &WeakEntity<DragonFruit>) -> Div {
                 }
                 state.name_dialog = None;
                 state.draft = state.live;
+                state.persist();
             });
             confirm_entity.update(cx, |_, cx| cx.notify()).ok();
         })

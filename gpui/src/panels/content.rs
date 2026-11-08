@@ -668,32 +668,124 @@ pub fn supports_body(count: usize, entity: WeakEntity<DragonFruit>) -> impl Into
     // `AutoSupportPresetRow`: `flex gap-1.5`, the preset select at `flex-1
     // min-w-0`, the Auto-Lift button beside it at `flex-1 min-w-0`.
     //
-    // PORT GAP: the app has neither a preset store nor an auto-lift flag, so the
-    // trigger shows the no-preset label and the button shows OFF; both are inert.
+    // The collection, the selection and the Auto-Lift flag all come from
+    // `features::auto_support_settings`, the store the settings dialog edits —
+    // `AutoSupportPanel.tsx:360-364` passes `presets`, `activePresetId`,
+    // `selectAutoSupportPreset` and `autoLift` the same way. The trigger names
+    // the active preset (or `NO_ACTIVE_PRESET_LABEL` when nothing is selected)
+    // and opens the same list the dialog's strip offers, so a profile saved in
+    // the dialog is pickable here.
+    let presets = auto_support::preset_rows();
+    let active_id = auto_support::active_preset_id();
+    let active_name: SharedString = active_id
+        .as_ref()
+        .and_then(|active| presets.iter().find(|row| row.id == *active))
+        .map(|row| row.name.clone())
+        .unwrap_or_else(|| auto_support::NO_ACTIVE_PRESET_LABEL.into());
+    let preset_hint = auto_support::active_preset_hint()
+        .unwrap_or("Apply this preset to the auto-support settings");
+    let menu_open = auto_support::row_menu_open();
+
+    let mut preset_entries: Vec<ContextMenuEntry> = Vec::new();
+    if active_id.is_none() {
+        // `autoSupportPresetOptions`: with nothing selected the list gains a
+        // disabled row naming that state, because the trigger renders the
+        // selected option's label and would otherwise be an empty box.
+        preset_entries.push(
+            ContextMenuEntry::new("", auto_support::NO_ACTIVE_PRESET_LABEL).disabled(),
+        );
+    }
+    for row in presets.iter() {
+        let selected = active_id.as_ref().is_some_and(|active| *active == row.id);
+        let entry = ContextMenuEntry::new(row.id.clone(), row.name.clone())
+            .with_trailing(if row.built_in { "Built-in" } else { "Custom" });
+        // `SelectDropdown` tints the selected row instead of ticking it; the
+        // menu's tick is the only "this is the value" mark `ui::context_menu`
+        // has, and the dialog's strip already marks its selection the same way.
+        preset_entries.push(if selected { entry.checked() } else { entry });
+    }
+    let menu_width = 288.0;
+    let select_entity = entity.clone();
+    let preset_menu = context_menu_sized(
+        &preset_entries,
+        None,
+        menu_width,
+        move |id: &str, _: &mut Window, cx: &mut App| {
+            if id.is_empty() {
+                return;
+            }
+            auto_support::choose_preset(id, &select_entity, cx);
+        },
+    );
+    let toggle_entity = entity.clone();
+    let trigger = preset_select_trigger(active_name, menu_open).on_click(
+        move |_, _, cx| {
+            let open = auto_support::row_menu_open();
+            auto_support::set_row_menu_open(!open, &toggle_entity, cx);
+        },
+    );
+
+    let lift_on = auto_support::auto_lift();
+    let lift_entity = entity.clone();
+    // `Button variant="secondary" size="auto"` at `min-w-0 flex-1 !h-8 px-2
+    // text-[11px]`, `style={autoLift ? ON_STYLE : OFF_STYLE}`:
+    // ON_STYLE is `color-mix(accent, border-subtle 30%)` /
+    // `color-mix(accent, surface-1 85%)` / `--text-strong`; OFF_STYLE keeps the
+    // variant's border and text and only sets the dropdown's `--surface-1` fill.
+    //
+    // PORT GAP: the lift itself (moving the model to the distance and returning
+    // it when the flag clears) is `tool_panels`' Translate/Lift path; the flag is
+    // the app's one auto-lift switch (see the auto-lift store's PORT DEVIATION
+    // 13), so the button records the decision and the lift path reads it.
+    let lift_button = {
+        let mut lift_spec = ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Sm);
+        lift_spec = if lift_on {
+            lift_spec.fill(
+                mix(ACCENT, SURFACE_1, 0.15),
+                mix(ACCENT, BORDER_SUBTLE, 0.70),
+                TEXT_STRONG,
+            )
+        } else {
+            lift_spec.hover = Some(SURFACE_1);
+            lift_spec
+        };
+        let label = if lift_on { "Auto-Lift ON" } else { "Auto-Lift OFF" };
+        button_with("supports-auto-lift", label, &lift_spec)
+            .flex_1()
+            .min_w(px(0.))
+            .truncate()
+            .on_click(move |_, _, cx| {
+                auto_support::set_auto_lift(!lift_on, &lift_entity, cx);
+            })
+    };
+
+    // `flex gap-1.5`; the menu hangs below the row (the source portals it to the
+    // trigger's measured position, and GPUI has no measure pass here).
     let preset_row = div()
+        .relative()
         .flex()
         .gap(px(6.))
-        .child(div().flex_1().min_w(px(0.)).child(hint(
-            "supports-preset-tip",
-            preset_select_trigger(),
-            "Apply this preset to the auto-support settings",
-        )))
+        .child(
+            div()
+                .flex_1()
+                .min_w(px(0.))
+                .child(hint("supports-preset-tip", trigger, preset_hint)),
+        )
         .child(div().flex_1().min_w(px(0.)).child(hint(
             "supports-lift-tip",
-            // `Button variant="secondary" size="auto"` at
-            // `min-w-0 flex-1 !h-8 px-2 text-[11px]` with OFF_STYLE
-            // (`background: var(--surface-1)`).
-            {
-                let mut lift_spec = ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Sm);
-                lift_spec.hover = Some(SURFACE_1);
-                button_with("supports-auto-lift", "Auto-Lift OFF", &lift_spec)
-                    .flex_1()
-                    .min_w(px(0.))
-                    .truncate()
-            },
+            lift_button,
             "Lift the selected models to this distance so a support can stand under \
              them; off returns them to the height they were at.",
-        )));
+        )))
+        .when(menu_open, |this| {
+            this.child(
+                div()
+                    .absolute()
+                    .left(px(0.))
+                    .top(px(34.))
+                    .child(preset_menu),
+            )
+        });
 
     // `text-[10px] italic text-center`, muted.
     let hint_text = div()
@@ -743,8 +835,11 @@ fn island_stat(label: &'static str, value: &str, accent: bool) -> impl IntoEleme
 
 /// `AutoSupportPresetSelect`'s trigger: `.ui-input` at `rounded-[4px] w-full
 /// !h-8 text-[12px] leading-tight`, `background: surface-1`, centred label with
-/// 26px of right padding for the 14px chevron at `right-3`.
-fn preset_select_trigger() -> Div {
+/// 26px of right padding for the 14px chevron at `right-3`. The label is the
+/// selected option's — the store's active preset name, or the no-preset label
+/// when nothing is selected — and the chevron flips while the menu is open (the
+/// source rotates it 180°; GPUI swaps the icon).
+fn preset_select_trigger(label: SharedString, open: bool) -> Stateful<Div> {
     div()
         .relative()
         .w_full()
@@ -760,12 +855,8 @@ fn preset_select_trigger() -> Div {
         .text_size(px(FONT_XS))
         .line_height(px(FONT_XS * 1.25))
         .text_color(rgb(TEXT_STRONG))
-        .child(
-            div()
-                .min_w(px(0.))
-                .truncate()
-                .child("Custom — not a preset"),
-        )
+        .cursor_pointer()
+        .child(div().min_w(px(0.)).truncate().child(label))
         .child(
             div()
                 .absolute()
@@ -774,7 +865,11 @@ fn preset_select_trigger() -> Div {
                 .bottom(px(0.))
                 .flex()
                 .items_center()
-                .child(icon("chevron-down", 14., TEXT_MUTED)),
+                .child(icon(
+                    if open { "chevron-up" } else { "chevron-down" },
+                    14.,
+                    TEXT_MUTED,
+                )),
         )
 }
 

@@ -45,7 +45,7 @@ fn js_round(value: f64) -> f64 {
 
 /// A surface sample: the face's Z plus the mesh face it came from.
 #[derive(Clone, Copy, Debug)]
-struct Sample {
+pub(crate) struct Sample {
     z: f32,
     /// Welded-mesh face index, or `None` for the voxel fallback.
     face: Option<u32>,
@@ -53,7 +53,7 @@ struct Sample {
 
 /// `SurfaceSampler` — `{ z, faceIndex }` or null when the point lies outside
 /// the region.
-enum SurfaceAt<'a> {
+pub(crate) enum SurfaceAt<'a> {
     /// `createTriangleSurfaceAt`: an upward ray from just below the region's
     /// base, accepted only on one of the region's own triangles.
     Triangles {
@@ -99,6 +99,7 @@ impl<'a> SurfaceAt<'a> {
     fn sample(&self, x: f64, y: f64) -> Option<Sample> {
         match self {
             Self::Triangles { mesh, ids, base_z } => {
+                // `createTriangleSurfaceAt` seeds at `island.baseZ - 2`.
                 let origin_z = *base_z - 2.0;
                 let x = x as f32;
                 let y = y as f32;
@@ -367,7 +368,10 @@ pub(crate) fn build_boundary_points(voxels: &[[f32; 3]], spacing: f64) -> Vec<[f
         let angle_b = ((b[1] as f64) - cy).atan2((b[0] as f64) - cx);
         angle_a.partial_cmp(&angle_b).unwrap_or(std::cmp::Ordering::Equal)
     });
-    let step = (js_round(spacing / 0.25) as i64).max(1) as usize;
+    // `Math.max(1, Math.round(spacing / 0.25))` — 0.25 mm is the footprint's own
+    // cell pitch (`OVERHANG_FOOTPRINT_PX_MM`).
+    let cell_pitch_mm = 0.25f64;
+    let step = (js_round(spacing / cell_pitch_mm) as i64).max(1) as usize;
     let mut points = Vec::new();
     for index in (0..boundary.len()).step_by(step) {
         points.push(boundary[index]);
@@ -401,12 +405,14 @@ pub(crate) fn resolve_surface_normal(
     const SEARCH_RADII_MM: [f64; 4] = [0.0, 0.75, 1.5, 2.25];
     /// `SAME_SIDE_TOLERANCE_MM` in `resolveSurfaceNormal`.
     const SAME_SIDE_TOLERANCE_MM: f64 = 0.5;
+    /// The `±2` the ray is seeded at (`tipPos.z - 2` / `tipPos.z + 2`).
+    const SEED_OFFSET_MM: f64 = 2.0;
 
     let cast = |direction_z: f64| -> Option<(DVec3, Vec3)> {
         let seed_z = if direction_z > 0.0 {
-            tip.z - 2.0
+            tip.z - SEED_OFFSET_MM
         } else {
-            tip.z + 2.0
+            tip.z + SEED_OFFSET_MM
         };
         for radius in SEARCH_RADII_MM {
             let steps = if radius == 0.0 { 1 } else { 8 };
@@ -729,9 +735,10 @@ mod tests {
     #[test]
     fn flat_ceilings_grid_at_the_boosted_density() {
         let settings = SupportSettings::default();
-        // √10 × 0.7, area <= threshold so the suction term is inert.
+        // √10 × 0.7, area <= threshold so the suction term is inert. The knobs
+        // are f32, so the product carries their rounding.
         let spacing = compute_region_spacing(&island(20.0, 0.0), &settings);
-        assert!((spacing - 10.0f64.sqrt() * 0.7).abs() < 1e-9, "{spacing}");
+        assert!((spacing - 10.0f64.sqrt() * 0.7).abs() < 1e-6, "{spacing}");
     }
 
     #[test]
