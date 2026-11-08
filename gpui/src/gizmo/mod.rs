@@ -34,12 +34,20 @@
 //! | arrow head | `ConeGeometry(arrowHeadRadius, arrowHeadLength, 8)` centred on the tip | `0.24 × 0.6`, 8 segments, centred on the tip |
 //! | head outline | same cone at `1.15`, colour × `0.3` (× `0.7` when dimmed) | same |
 //! | head hover | group scale `1.1` hovered, `1.18` active | same |
-//! | ring | `TubeGeometry(90° arc, 72, 0.016, 16)` at `ringMajorRadius` | same arc and radius, 24 × 6 (a 0.016 tube is sub-pixel) |
-//! | ring back arc | `Line`, `π/2…3π/2`, opacity `0.26` | same span as a tube, colour × `0.26` |
+//! | ring | `TubeGeometry(90° arc, 72, 0.016, 16)` at `ringMajorRadius` | same arc and radius, 24 × 8, radius floored at one pixel |
+//! | ring back arc | `Line`, `π/2…3π/2`, `opacity × 0.26` | same span as a tube, alpha × `0.26` |
 //! | diamond | `ConeGeometry(ringDiamondRadius·0.36, ringDiamondRadius, 16)` at `±0.52·r` along the tangent | same |
 //! | diamond outline | `scale 1.08`, × `0.3` / × `0.32` | same |
 //! | scale handle | `BoxGeometry(1,1,1)` scaled by `scaleHexagonRadius` (**a cube**, not a hexagon) + `EdgesGeometry` × `0.3` | cube of half-size `0.25`, 12 edge prisms |
 //! | scale placement | `±scaleLineLength` on the camera's side | same |
+//!
+//! Every handle also carries the source's own alpha, per vertex: the centre's
+//! disc and border at `0.55` (`1.0` while hovered or held), arrows at `0.9`
+//! (`1.0` while held), rings at `0.72` (`0.95` while held), scale cubes at
+//! `0.9` (`1.0` while hovered or held), any handle another gesture is not using
+//! at `0.15`, and the ring's back arc at `0.26` of its ring's opacity. The
+//! gizmo pipeline blends, which is what makes the 90° arc the bright part of
+//! the ring and the other 180° a wash over the model.
 //!
 //! `GIZMO_SIZES.ringMinorRadius` (0.12) and `scaleHexagonDepth` (0.3) are
 //! declared in the source but reached by no draw call — the ring's tube is a
@@ -73,13 +81,18 @@
 //!   circumference it rides, and the circumference is already drawn.
 //! * **No line overlays.** The two `Line` overlays the source draws over the
 //!   front arc (and the back arc itself) are screen-space line primitives; the
-//!   viewport has none, so the arc is the tube alone and the back arc is a tube
-//!   at the source's `0.26` opacity folded into its colour.
+//!   viewport has none, so the arc is the tube alone. Its radius is floored at
+//!   one pixel so a 0.016-unit tube cannot break up under MSAA and read as a
+//!   dashed ring — that floor is the triangle stand-in for the source's
+//!   `lineWidth 0.92` / `1.34` overlays.
 //! * **The viewport never culls and never depth-tests the gizmo.** Both are the
 //!   source's own material settings (`depthTest: false`, `depthWrite: false`),
 //!   so a handle is never hidden behind the model and triangles that overlap
 //!   paint in emission order — which is why the build keeps the source's handle
-//!   order.
+//!   order. The pass blends (`ALPHA_BLENDING`), so the source's per-handle
+//!   opacities composite over the model and the grid as they do in three.js;
+//!   the blend happens in the sRGB target rather than on an sRGB canvas, so a
+//!   partially transparent handle is one gamma step off.
 //! * **No retarget damping.** `ScreenSpaceGizmo` eases the gizmo from its old
 //!   position when the active model changes (`SWITCH_DAMP_LAMBDA`,
 //!   `SWITCH_SNAP_EPSILON`, the 72 ms `AXIS_SUPPRESS_MS` arc-animation hold) and
@@ -95,9 +108,12 @@
 //!   the model's own frame when the Transform panel's local-space switch is on;
 //!   the entity's store flag is not read here, so the port's gizmo is always
 //!   world aligned, which is the source's default.
-//! * **The gizmo is opaque.** The source dims a non-active handle to 0.15 alpha;
-//!   this pass has no alpha, so it uses the source's `dimmedColor` (`#cccccc`)
-//!   instead — the same colour, without the blend.
+//! * **The gizmo is drawn in the scene pass, blended.** The source renders its
+//!   handles as `transparent` materials sorted by `renderOrder`; here the whole
+//!   gizmo is one vertex stream, last in the scene pass, drawn with straight
+//!   alpha and no depth test. Overlapping handles composite in emission order
+//!   rather than back-to-front by depth, which is invisible at these opacities
+//!   because every handle already sits in front of the model.
 
 mod constants;
 mod drag;
@@ -126,7 +142,7 @@ pub fn vertices(
     center: Vec3,
     hovered: Option<Handle>,
     active: Option<Handle>,
-) -> Rc<Vec<[f32; 6]>> {
+) -> Rc<Vec<[f32; 7]>> {
     let view = View::new(camera, aspect, viewport, center);
     geometry::cached(cache, &view, hovered, active)
 }

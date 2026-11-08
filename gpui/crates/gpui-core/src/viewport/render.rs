@@ -31,7 +31,7 @@ impl Viewport {
         layers: ViewLayers,
         model: glam::Mat4,
         clip_z: f32,
-        gizmo: Option<&[[f32; 6]]>,
+        gizmo: Option<&[[f32; 7]]>,
         camera: &Camera,
         base_color: [f32; 3],
         width: u32,

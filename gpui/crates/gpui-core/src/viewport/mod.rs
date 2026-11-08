@@ -223,7 +223,7 @@ pub struct Viewport {
     gizmo_vertex_count: u32,
     /// The vertices the buffer holds, so a frame the gizmo did not move pays no
     /// rebuild — the mesh's and the supports' caching trick.
-    gizmo_vertices: Vec<[f32; 6]>,
+    gizmo_vertices: Vec<[f32; 7]>,
 }
 
 impl Viewport {

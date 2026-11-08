@@ -14,8 +14,8 @@ use super::plate::{
     decal_vertices, front_texture, grid_vertices, logo_texture, plate_mesh, sprite_vertices,
 };
 use super::shaders::{
-    AXIS_SHADER, BACKGROUND_SHADER, COMPOSITE_SHADER, DECAL_SHADER, FOOTPRINT_SHADER, MESH_SHADER,
-    PLATE_SHADER, SPRITE_SHADER, SUPPORT_SHADER, VOLUME_SHADER,
+    AXIS_SHADER, BACKGROUND_SHADER, COMPOSITE_SHADER, DECAL_SHADER, FOOTPRINT_SHADER, GIZMO_SHADER,
+    MESH_SHADER, PLATE_SHADER, SPRITE_SHADER, SUPPORT_SHADER, VOLUME_SHADER,
 };
 use super::targets::Targets;
 use super::uniforms::{ColorUniform, DecalUniform, SpriteUniform, SupportInstance, Uniforms};
@@ -220,6 +220,10 @@ impl Viewport {
         let axis_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("viewport axis"),
             source: wgpu::ShaderSource::Wgsl(AXIS_SHADER.into()),
+        });
+        let gizmo_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("viewport gizmo"),
+            source: wgpu::ShaderSource::Wgsl(GIZMO_SHADER.into()),
         });
         let decal_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("viewport decal"),
@@ -753,22 +757,44 @@ impl Viewport {
             true,
             SAMPLE_COUNT,
         );
-        // The transform gizmo: the axes' unlit vertex-colour shader on triangles,
-        // with the depth test disabled and no depth write. That is exactly the
-        // source's `depthTest: false` / `depthWrite: false` on every handle
-        // material — a handle is never hidden behind the model.
-        let gizmo = pipeline(
+        // The transform gizmo: an unlit vertex-colour pass on triangles, with the
+        // depth test disabled and no depth write — the source's
+        // `depthTest: false` / `depthWrite: false` on every handle material, so a
+        // handle is never hidden behind the model. It is the last draw of the
+        // scene pass, which is what makes straight-alpha blending safe: every
+        // handle composites over the finished model and grid, exactly as
+        // three.js blends its `transparent` handle materials over its scene.
+        //
+        // The vertex carries `[pos3, rgba]`; the alpha is the source's own
+        // per-handle opacity (0.55 centre, 0.9 arrow/scale, 0.72 ring, 0.26 of
+        // that for the back arc, 0.15 for a handle dimmed by a running drag).
+        let gizmo_layout = wgpu::VertexBufferLayout {
+            array_stride: 28,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &[
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x3,
+                    offset: 0,
+                    shader_location: 0,
+                },
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x4,
+                    offset: 12,
+                    shader_location: 1,
+                },
+            ],
+        };
+        let gizmo = pipeline_blended(
             device,
             &uniform_pipeline_layout,
-            &axis_shader,
-            &[Some(axis_layout.clone())],
+            &gizmo_shader,
+            &[Some(gizmo_layout)],
             wgpu::PrimitiveTopology::TriangleList,
             None,
             false,
             wgpu::CompareFunction::Always,
             WgpuSurface::DEFAULT_FORMAT,
-            true,
-            true,
+            wgpu::DepthBiasState::default(),
             SAMPLE_COUNT,
         );
         // Supports: one instanced pass per batch, `meshBasicMaterial`'s flat

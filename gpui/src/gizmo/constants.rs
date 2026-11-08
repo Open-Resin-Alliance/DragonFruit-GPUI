@@ -105,10 +105,31 @@ pub const RING_FRONT_ARC: f32 = std::f32::consts::FRAC_PI_2;
 /// `opacity * 0.26` and `lineWidth 0.8`.
 pub const RING_BACK_ARC_START: f32 = std::f32::consts::FRAC_PI_2;
 pub const RING_BACK_ARC: f32 = std::f32::consts::PI;
-/// The back arc's opacity in the source. The gizmo pass is opaque, so the
-/// colour is multiplied by it instead — see the module docs of
-/// [`crate::gizmo`].
+/// The back arc's `opacity * 0.26` in the source — its own alpha, multiplied
+/// into the handle's.
 pub const RING_BACK_ALPHA: f32 = 0.26;
+
+/// Every handle material in the source is `transparent` with its own opacity.
+/// These are the `baseOpacity` values the components use, carried per vertex so
+/// the blended pass can composite them the way three.js composites its scene.
+///
+/// `GizmoMove`'s `baseOpacity = isHidden ? 0 : isDimmed ? 0.15 : isActive ? 1 : 0.9`.
+pub const ARROW_ALPHA: f32 = 0.9;
+/// `GizmoCenter`'s `baseOpacity = isDimmed ? 0.15 : isHighlighted ? 1 : 0.55`,
+/// where `isHighlighted` is hovered *or* held.
+pub const CENTER_ALPHA: f32 = 0.55;
+/// `GizmoRotation`'s `baseOpacity = isDimmed ? 0.15 : isActive ? 0.95 : 0.72`.
+pub const RING_ALPHA: f32 = 0.72;
+pub const RING_ACTIVE_ALPHA: f32 = 0.95;
+/// `GizmoScale`'s `baseOpacity = isDimmed ? 0.15 : isHighlighted ? 1 : 0.9`.
+pub const SCALE_ALPHA: f32 = 0.9;
+/// The lit value for the handles that brighten (`1.0`).
+pub const HIGHLIGHT_ALPHA: f32 = 1.0;
+/// `isDimmed ? 0.15` — a handle another gesture is not using.
+pub const DIMMED_ALPHA: f32 = 0.15;
+/// The centre's halo: `opacity={isActive ? 0.5 : 0.38}`.
+pub const HALO_ALPHA: f32 = 0.38;
+pub const HALO_ACTIVE_ALPHA: f32 = 0.5;
 
 /// `GizmoCenter`'s disc, border ring and halo, as multiples of
 /// `GIZMO_SIZES.centerRadius`.
