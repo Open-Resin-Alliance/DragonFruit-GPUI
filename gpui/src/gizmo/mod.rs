@@ -35,7 +35,7 @@
 //! | head outline | same cone at `1.15`, colour × `0.3` (× `0.7` when dimmed) | same |
 //! | head hover | group scale `1.1` hovered, `1.18` active | same |
 //! | ring | `TubeGeometry(90° arc, 72, 0.016, 16)` at `ringMajorRadius` | same arc and radius, 24 × 8, radius floored at one pixel |
-//! | ring back arc | `Line`, `π/2…3π/2`, `opacity × 0.26` | same span as a tube, alpha × `0.26` |
+//! | ring dim remainder | `Line`, fixed `π/2…3π/2`, `opacity × 0.26` | the 270° complement of the bright span, turning with it, at `opacity × 0.11` |
 //! | diamond | `ConeGeometry(ringDiamondRadius·0.36, ringDiamondRadius, 16)` at `±0.52·r` along the tangent | same |
 //! | diamond outline | `scale 1.08`, × `0.3` / × `0.32` | same |
 //! | scale handle | `BoxGeometry(1,1,1)` scaled by `scaleHexagonRadius` (**a cube**, not a hexagon) + `EdgesGeometry` × `0.3` | cube of half-size `0.25`, 12 edge prisms |
@@ -45,9 +45,20 @@
 //! disc and border at `0.55` (`1.0` while hovered or held), arrows at `0.9`
 //! (`1.0` while held), rings at `0.72` (`0.95` while held), scale cubes at
 //! `0.9` (`1.0` while hovered or held), any handle another gesture is not using
-//! at `0.15`, and the ring's back arc at `0.26` of its ring's opacity. The
-//! gizmo pipeline blends, which is what makes the 90° arc the bright part of
-//! the ring and the other 180° a wash over the model.
+//! at `0.15`, and the ring's dim remainder at `0.11` of its ring's opacity (the
+//! source's `0.26`, converted — see [`constants::RING_BACK_ALPHA`]). The gizmo
+//! pipeline blends, which is what makes the 90° arc the bright part of the ring
+//! and the rest a wash over the model.
+//!
+//! Two deliberate departures from the source's ring:
+//!
+//! * its dim half is a fixed `π/2…3π/2` in the ring's own frame, which leaves
+//!   two 45° gaps that stay put while the bright quarter follows the camera.
+//!   Here the dim part is the 270° complement of the bright span and turns with
+//!   it, so the ring always reads as one circle with one bright quarter.
+//! * the `0.26` is an encoded-space alpha (three blends on its sRGB canvas),
+//!   and this pass blends in linear space, so it is converted to the value that
+//!   reproduces the same composite: `0.11`.
 //!
 //! `GIZMO_SIZES.ringMinorRadius` (0.12) and `scaleHexagonDepth` (0.3) are
 //! declared in the source but reached by no draw call — the ring's tube is a

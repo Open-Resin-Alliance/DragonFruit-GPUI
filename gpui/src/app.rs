@@ -1146,11 +1146,15 @@ impl Render for DragonFruit {
             let drag = drag.clone();
             let last = last.clone();
             let camera_enabled = camera_enabled.clone();
+            let camera = camera.clone();
             move |event, _, _| {
                 if !camera_enabled.get() {
                     return;
                 }
                 drag.set(Some(MouseButton::Middle));
+                // Orbit's flag governs both gestures: without it a pan eases at
+                // the release rate instead of tracking the pointer.
+                camera.borrow_mut().set_dragging(true);
                 last.set((event.position.x.0, event.position.y.0));
             }
         })

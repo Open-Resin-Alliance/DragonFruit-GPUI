@@ -101,13 +101,22 @@ pub const RING_TUBE_RADIUS: f32 = 0.016;
 /// The front arc's angular span (`getCachedRotationArcPoints('front')`):
 /// `±π/4` about the handle, so a quarter of the ring is the bright arc.
 pub const RING_FRONT_ARC: f32 = std::f32::consts::FRAC_PI_2;
-/// The back arc spans `π` from `π/2` to `3π/2` in the ring's own frame, at
-/// `opacity * 0.26` and `lineWidth 0.8`.
-pub const RING_BACK_ARC_START: f32 = std::f32::consts::FRAC_PI_2;
-pub const RING_BACK_ARC: f32 = std::f32::consts::PI;
-/// The back arc's `opacity * 0.26` in the source — its own alpha, multiplied
-/// into the handle's.
-pub const RING_BACK_ALPHA: f32 = 0.26;
+
+/// The dim remainder of the ring, as a fraction of its handle's opacity.
+///
+/// The source writes `opacity * 0.26` and lets three.js blend it on its sRGB
+/// canvas, i.e. on sRGB-encoded values. This viewport's gizmo pass blends in the
+/// sRGB target, which the hardware does in *linear* space, so the authored
+/// `0.26` composites about 1.8× too strong: over a dark backdrop it lands at
+/// encoded ≈ 0.51 where three produces ≈ 0.41.
+///
+/// Solving the same composite in linear space — `a·C + (1−a)·D` for
+/// `C ≈ 1.0` (a saturated ring colour) over the plate/grid, `D ≈ 0.03` linear
+/// (encoded 0.2) — gives `a = 0.11`, which reproduces the source's encoded
+/// result exactly on that backdrop (0.407 vs 0.408). Over a mid-tone model the
+/// same 0.11 comes out a notch fainter than three (encoded 0.62 vs 0.67), which
+/// is the side to err on for an element this quiet.
+pub const RING_BACK_ALPHA: f32 = 0.11;
 
 /// Every handle material in the source is `transparent` with its own opacity.
 /// These are the `baseOpacity` values the components use, carried per vertex so

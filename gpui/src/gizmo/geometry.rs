@@ -37,10 +37,9 @@ use super::constants::{
     CUBE_EDGE_DIM, CUBE_EDGE_WIDTH, DIAMOND_OUTLINE_DIM, DIAMOND_OUTLINE_SCALE,
     DIAMOND_SECONDARY_OUTLINE_DIM, DIMMED, DIMMED_ALPHA, HALO_ACTIVE_ALPHA, HALO_ALPHA,
     HEAD_ACTIVE_SCALE, HEAD_HOVER_SCALE, HEAD_OUTLINE_DIM, HEAD_OUTLINE_SCALE, HIGHLIGHT_ALPHA,
-    HOVER, RING_ACTIVE_ALPHA, RING_ACTIVE_SCALE, RING_ALPHA, RING_BACK_ALPHA, RING_BACK_ARC,
-    RING_BACK_ARC_START, RING_DIAMOND_RADIUS, RING_FRONT_ARC, RING_MAJOR_RADIUS,
-    RING_TUBE_RADIUS, SCALE_ALPHA, SCALE_HEXAGON_RADIUS, SCALE_HIT_ACTIVE_SCALE,
-    SCALE_HIT_HOVER_SCALE,
+    HOVER, RING_ACTIVE_ALPHA, RING_ACTIVE_SCALE, RING_ALPHA, RING_BACK_ALPHA,
+    RING_DIAMOND_RADIUS, RING_FRONT_ARC, RING_MAJOR_RADIUS, RING_TUBE_RADIUS, SCALE_ALPHA,
+    SCALE_HEXAGON_RADIUS, SCALE_HIT_ACTIVE_SCALE, SCALE_HIT_HOVER_SCALE,
 };
 use super::layout::View;
 use super::types::{Axis, Handle};
@@ -62,6 +61,10 @@ const DIAMOND_SEGMENTS: usize = 16;
 /// hairline rather than a dashed one.
 const ARC_SEGMENTS: usize = 24;
 const ARC_SIDES: usize = 8;
+/// The dim arc is three times as long, so it takes more stations: 32 over 270°
+/// is 8.4° per station, a sagitta of ~0.01 gizmo units — under half a pixel at
+/// the reference viewport.
+const BACK_ARC_SEGMENTS: usize = 32;
 /// `CircleGeometry(radius, 32)` and `RingGeometry(..., 32)`.
 const CENTER_SEGMENTS: usize = 32;
 
@@ -348,17 +351,20 @@ fn ring(
         ARC_SIDES,
         tint(arc_color, alpha),
     );
-    // Back arc: `π/2 … 3π/2` in the ring's frame, at `opacity * 0.26` — the
-    // source's `opacity={Math.max(0, opacity * 0.26)}`.
+    // Back arc: the complement of the bright span — everything the front arc
+    // does not cover — so the ring reads as one circle with one bright quarter
+    // and the dim part turns with the camera instead of standing still. (The
+    // source draws a fixed 180° here, in the ring's own frame, which leaves two
+    // 45° gaps that move against the camera; see the module docs.)
     arc_tube(
         out,
         view.center,
         axis,
-        RING_BACK_ARC_START,
-        RING_BACK_ARC,
+        angle + RING_FRONT_ARC * 0.5,
+        TAU - RING_FRONT_ARC,
         arc_major,
         tube,
-        ARC_SEGMENTS,
+        BACK_ARC_SEGMENTS,
         ARC_SIDES,
         tint(arc_color, alpha * RING_BACK_ALPHA),
     );
