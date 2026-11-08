@@ -272,6 +272,10 @@
               "slug": "dev/gpui-port-parity"
             },
             {
+              "label": "GPUI Visual Parity Harness",
+              "slug": "dev/gpui-visual-parity"
+            },
+            {
               "label": "GPUI Widgets",
               "slug": "dev/gpui-widgets"
             },

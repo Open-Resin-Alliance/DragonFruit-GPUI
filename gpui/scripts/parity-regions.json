@@ -1,0 +1,70 @@
+{
+  "units": "x, y, w, h are fractions of the window width/height (0..1), so the manifest is resolution independent",
+  "referenceWindow": "1440x900 (the layout values below come from globals.css --topbar-height: 52px, ToolRail TOOL_RAIL_WIDTH_PX: 66px, FloatingPanelStack DEFAULT_PANEL_WIDTH: 320px + 6px margins, CrossSliderPanel 48px, SettingsModal max-w-[72rem] with p-5)",
+  "regions": [
+    {
+      "name": "topbar",
+      "x": 0.0,
+      "y": 0.0,
+      "w": 1.0,
+      "h": 0.0578,
+      "source": "src/components/layout/TopBar.tsx"
+    },
+    {
+      "name": "tool-rail",
+      "x": 0.0,
+      "y": 0.0578,
+      "w": 0.0458,
+      "h": 0.9422,
+      "source": "src/components/controls/ToolRail.tsx"
+    },
+    {
+      "name": "models-panel",
+      "x": 0.0458,
+      "y": 0.0578,
+      "w": 0.2306,
+      "h": 0.5,
+      "source": "src/components/organisms/panels/ModelsPanel.tsx"
+    },
+    {
+      "name": "support-panels",
+      "x": 0.7361,
+      "y": 0.0578,
+      "w": 0.2306,
+      "h": 0.8,
+      "source": "src/supports/Settings/SupportSidebar.tsx"
+    },
+    {
+      "name": "settings-modal",
+      "x": 0.1,
+      "y": 0.0222,
+      "w": 0.8,
+      "h": 0.9556,
+      "source": "src/components/settings/SettingsModal.tsx"
+    },
+    {
+      "name": "viewport",
+      "x": 0.2764,
+      "y": 0.0578,
+      "w": 0.4597,
+      "h": 0.9422,
+      "source": "src/components/scene/SceneCanvas/SceneCanvas.tsx"
+    },
+    {
+      "name": "right-rail",
+      "x": 0.9667,
+      "y": 0.0578,
+      "w": 0.0333,
+      "h": 0.9355,
+      "source": "src/components/controls/CrossSliderPanel.tsx"
+    },
+    {
+      "name": "status-toasts",
+      "x": 0.25,
+      "y": 0.85,
+      "w": 0.75,
+      "h": 0.15,
+      "source": "src/components/organisms/NotificationStack.tsx"
+    }
+  ]
+}
