@@ -48,14 +48,14 @@
 //!   only changes once that store exists.
 //! - Sponsors: remote avatars are not fetched, so every sponsor renders the
 //!   source's initials monogram; the 34s marquee has no GPUI equivalent and the
-//!   row is static. The tier ring is a conic gradient at the source and renders
-//!   as the tier's solid colour.
+//!   row is a horizontal scroller. The tier ring is a conic gradient at the
+//!   source and renders as a two-stop linear with a real glow.
 //! - About reads the GPUI build's version/channel (there is no
 //!   `NEXT_PUBLIC_*`), and the build-info chip cannot reach a clipboard, so it
 //!   always shows the un-copied `Version …` state. The branding images
-//!   (`text_logo.svg`, the ORA logo, `simple_icon.svg`) are not in the GPUI
-//!   asset set: the wordmark and the ORA mark render as text and the trailing
-//!   app icon is omitted.
+//!   (`text_logo.svg`, the ORA logo, `simple_icon.svg`) load from `public/`
+//!   by compile-time path, so a shipped binary needs that tree beside the
+//!   crate: nothing copies it into the asset bundle.
 //! - The Logging tab's `Copy path` tile cannot reach a clipboard either, so it
 //!   is inert; the log path itself is the source's own non-desktop placeholder
 //!   and the viewer shows its "desktop build" line.
