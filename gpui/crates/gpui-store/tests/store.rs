@@ -117,7 +117,25 @@ fn session_round_trip() {
             orthographic: false,
         }),
         active_tool: 3,
-        rotation: [0.0, -0.5, std::f32::consts::FRAC_PI_2],
+        models: vec![
+            gpui_store::session::SessionModel {
+                path: Some("C:/models/part.voxl".into()),
+                name: "part.voxl".to_owned(),
+                translate: [1.0, -2.0, 3.5],
+                rotation: [0.25, -0.5, std::f32::consts::FRAC_PI_2],
+                scale: [1.0, 2.0, 0.5],
+                visible: true,
+            },
+            gpui_store::session::SessionModel {
+                path: None,
+                name: "support-a".to_owned(),
+                translate: [4.0, 5.0, 0.0],
+                rotation: [0.0, 0.0, 0.125],
+                scale: [1.0, 1.0, 1.0],
+                visible: false,
+            },
+        ],
+        active: Some(1),
         panel_layout: layout,
         ..gpui_store::Session::default()
     };
@@ -127,7 +145,82 @@ fn session_round_trip() {
 }
 
 #[test]
-fn an_older_session_file_without_rotation_loads_the_identity_rotation() {
+fn a_two_model_session_round_trips_through_the_written_document() {
+    let (_dir, store) = store();
+
+    let session = gpui_store::Session {
+        last_file: Some("C:/models/scene.voxl".into()),
+        models: vec![
+            gpui_store::session::SessionModel {
+                path: None,
+                name: "body".to_owned(),
+                translate: [10.0, 20.0, 0.0],
+                rotation: [0.0, 0.0, 0.5],
+                scale: [1.0, 1.0, 1.0],
+                visible: true,
+            },
+            gpui_store::session::SessionModel {
+                path: None,
+                name: "lid".to_owned(),
+                translate: [-3.0, 4.0, 12.0],
+                rotation: [0.1, 0.2, -0.3],
+                scale: [2.0, 2.0, 2.0],
+                visible: false,
+            },
+        ],
+        active: Some(1),
+        ..gpui_store::Session::default()
+    };
+
+    store.save_session(&session).expect("save");
+    let loaded = store.load_session();
+    assert_eq!(loaded.models.len(), 2);
+    assert_eq!(loaded.models, session.models);
+    assert_eq!(loaded.active, Some(1));
+
+    // The document carries the list, not the legacy single key.
+    let written = fs::read_to_string(store.path(StoreFile::Session)).expect("read");
+    let document: serde_json::Value = serde_json::from_str(&written).expect("json");
+    assert!(document.get("models").is_some());
+    assert!(
+        document.get("rotation").is_none(),
+        "the legacy key must not be written: {written}"
+    );
+}
+
+#[test]
+fn an_older_session_file_with_rotation_loads_as_one_model() {
+    let (_dir, store) = store();
+    // Schema 1: the plate held one model, so one rotation and `lastFile` stood
+    // for the whole scene.
+    fs::write(
+        store.path(StoreFile::Session),
+        br#"{"lastFile": "C:/models/part.stl", "activeTool": 2, "rotation": [0.0, -0.5, 1.5707964]}"#,
+    )
+    .expect("write older");
+
+    let session = store.load_session();
+    assert_eq!(
+        session.last_file,
+        Some(std::path::PathBuf::from("C:/models/part.stl"))
+    );
+    assert_eq!(session.active_tool, 2);
+    assert_eq!(session.models.len(), 1);
+    let model = &session.models[0];
+    assert_eq!(
+        model.path,
+        Some(std::path::PathBuf::from("C:/models/part.stl"))
+    );
+    assert_eq!(model.name, "part.stl");
+    assert_eq!(model.translate, [0.0; 3]);
+    assert_eq!(model.rotation, [0.0, -0.5, std::f32::consts::FRAC_PI_2]);
+    assert_eq!(model.scale, [1.0; 3]);
+    assert!(model.visible);
+    assert_eq!(session.active, Some(0));
+}
+
+#[test]
+fn an_older_session_file_without_rotation_loads_one_identity_model() {
     let (_dir, store) = store();
     // Written before `rotation` existed: no `rotation` key at all.
     fs::write(
@@ -142,7 +235,33 @@ fn an_older_session_file_without_rotation_loads_the_identity_rotation() {
         Some(std::path::PathBuf::from("C:/models/part.voxl"))
     );
     assert_eq!(session.active_tool, 2);
-    assert_eq!(session.rotation, [0.0; 3]);
+    assert_eq!(session.models.len(), 1);
+    assert_eq!(session.models[0].name, "part.voxl");
+    assert_eq!(session.models[0].rotation, [0.0; 3]);
+    assert_eq!(session.active, Some(0));
+}
+
+#[test]
+fn a_session_with_an_unknown_key_still_loads() {
+    let (_dir, store) = store();
+    // A document from a newer build (or a hand-edited one) carries keys this
+    // build does not know; only the known fields matter.
+    fs::write(
+        store.path(StoreFile::Session),
+        br#"{
+            "schemaVersion": 2,
+            "lastFile": null,
+            "activeTool": 1,
+            "futureKey": {"nested": [1, 2, 3]},
+            "models": []
+        }"#,
+    )
+    .expect("write newer");
+
+    let session = store.load_session();
+    assert_eq!(session.active_tool, 1);
+    assert!(session.models.is_empty());
+    assert_eq!(session.active, None);
 }
 
 #[test]

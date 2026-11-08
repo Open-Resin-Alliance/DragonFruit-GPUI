@@ -197,10 +197,13 @@ pub(crate) struct DragonFruit {
     /// Retained for the support panel's `SUPP` document.
     #[allow(dead_code)]
     pub(crate) voxl: Option<gpui_voxl::Scene>,
-    /// `session.json`'s `rotation` key. It was the port's single-model
-    /// orientation; with per-model transforms it is legacy and only read back
-    /// when the scene is empty (a launch has no model to rotate).
-    session_rotation: [f32; 3],
+    /// `session.json`'s per-model transforms, held while the plate is empty.
+    /// The port never reopens `last_file` at boot, so a launch has no scene to
+    /// apply them to; [`Self::install_models`] restores them when the same
+    /// scene is loaded again.
+    session_models: Vec<gpui_store::session::SessionModel>,
+    /// The index into [`Self::session_models`] that was active.
+    session_active: Option<usize>,
     /// Time of the last frame, for the camera's real delta. The source drives
     /// every tween from `requestAnimationFrame`'s timestamp, so the port must
     /// not advance at a fixed step: a 144Hz window would finish a tween 2.4x
@@ -409,7 +412,8 @@ impl DragonFruit {
         let mut app = Self {
             scene: gpui_core::scene::Scene::new(),
             voxl: None,
-            session_rotation: [0.0; 3],
+            session_models: Vec::new(),
+            session_active: None,
             last_frame: None,
             camera: Rc::new(RefCell::new(Camera::parked(glam::Vec3::new(
                 0.0, 0.0, 110.0,
@@ -505,18 +509,26 @@ impl DragonFruit {
         app
     }
 
-    /// Restore `session.json`: the Prepare tool, the panel layout and the
-    /// recent-file list. [`Self::last_file`] keeps the path for the record only;
-    /// the source never reopens a file on launch, so the camera stays where
-    /// `new` parked it and the app always starts on the home pose.
+    /// Restore `session.json`: the Prepare tool, the panel layout, the
+    /// recent-file list and the per-model transforms. [`Self::last_file`] keeps
+    /// the path for the record only; the source never reopens a file on launch,
+    /// so the camera stays where `new` parked it and the app always starts on
+    /// the home pose.
+    ///
+    /// The plate is empty at this point, so the stored models are inert: there
+    /// is no model to carry a transform yet. They stay in
+    /// [`Self::session_models`] and [`Self::install_models`] applies them when
+    /// a load produces the same scene (matched by name, in import order).
     fn apply_session(&mut self, session: &gpui_store::Session) {
-        // A session file from a build without the key loads as the identity;
-        // a hand-edited one with a NaN must not poison a model matrix. With
-        // per-model transforms the key is legacy: a launch has no model, so it
-        // is only echoed back until a file supplies the real transforms.
-        if session.rotation.iter().all(|angle| angle.is_finite()) {
-            self.session_rotation = session.rotation;
+        // A newer build or a hand-edited file may hold a stale index; `Session`
+        // sanitised it at the parse boundary, and the check keeps the
+        // invariant local in case this is called with a hand-built document.
+        let mut active = session.active;
+        if active.is_some_and(|index| index >= session.models.len()) {
+            active = None;
         }
+        self.session_models = session.models.clone();
+        self.session_active = active;
         // The rail owns the list; a document from a newer build with more tools
         // must not index past this build's match arms.
         self.active_tool = (session.active_tool as usize).min(rail::prepare_tool_count() - 1);
@@ -616,14 +628,46 @@ impl DragonFruit {
     /// pose (a cold start has no model, and it never reopens the last file), so
     /// there is no pose for this build to restore. The field still loads.
     fn session_document(&self) -> gpui_store::Session {
+        // With no scene, echo what `apply_session` read: the port never
+        // reopens `last_file`, so the transforms stay inert until a load, and
+        // an exit before that must not erase them. A scene writes its own
+        // models, in import order, and its active model's index.
+        let (models, active) = if self.scene.is_empty() {
+            (self.session_models.clone(), self.session_active)
+        } else {
+            let models = self
+                .scene
+                .models()
+                .iter()
+                .enumerate()
+                .map(|(index, model)| gpui_store::session::SessionModel {
+                    // A scene's models all come from `last_file`; only a
+                    // single-model load names one file of its own.
+                    path: if self.scene.models().len() == 1 && index == 0 {
+                        self.last_file.clone()
+                    } else {
+                        None
+                    },
+                    name: model.name.clone(),
+                    translate: model.translate,
+                    rotation: model.rotation,
+                    scale: model.scale,
+                    visible: model.visible,
+                })
+                .collect();
+            let active = self.scene.active.and_then(|id| {
+                self.scene
+                    .models()
+                    .iter()
+                    .position(|model| model.id == id)
+            });
+            (models, active)
+        };
         gpui_store::Session {
             last_file: self.last_file.clone(),
             active_tool: self.active_tool as u32,
-            rotation: self
-                .scene
-                .active_model()
-                .map(|model| model.rotation)
-                .unwrap_or(self.session_rotation),
+            models,
+            active,
             recent_files: self.recent_files.clone(),
             panel_layout: session_layout(&self.layout),
             ..Default::default()
@@ -667,6 +711,52 @@ impl DragonFruit {
         }
     }
 
+    /// Apply `session.json`'s stored transforms to a freshly loaded `scene`.
+    ///
+    /// The match is strict — same count, same names in the same import order —
+    /// so a different file (or a different scene) does not inherit the old
+    /// placement. A matched scene also restores the saved active model, or
+    /// clears the selection when the saved session had none. Returns whether
+    /// the scene matched.
+    fn restore_session_models(&self, scene: &mut gpui_core::scene::Scene) -> bool {
+        let saved = &self.session_models;
+        if saved.is_empty()
+            || saved.len() != scene.models.len()
+            || !scene
+                .models
+                .iter()
+                .zip(saved)
+                .all(|(model, entry)| model.name == entry.name)
+        {
+            return false;
+        }
+        for (model, entry) in scene.models.iter_mut().zip(saved) {
+            let finite = entry
+                .translate
+                .iter()
+                .chain(entry.rotation.iter())
+                .chain(entry.scale.iter())
+                .all(|value| value.is_finite());
+            let non_zero_scale = entry.scale.iter().all(|value| *value != 0.0);
+            if finite && non_zero_scale {
+                model.translate = entry.translate;
+                model.rotation = entry.rotation;
+                model.scale = entry.scale;
+            }
+            model.visible = entry.visible;
+        }
+        let active = self
+            .session_active
+            .and_then(|index| scene.models.get(index).map(|model| model.id));
+        match active {
+            Some(id) => {
+                scene.set_active(id);
+            }
+            None => scene.clear_active(),
+        }
+        true
+    }
+
     /// Replace the plate's contents with `models`, make the first one active
     /// and frame it. The camera intro still frames the active model only; the
     /// scene's whole-bounds framing is a later step.
@@ -704,9 +794,20 @@ impl DragonFruit {
                 model.visible,
             );
         }
-        if let Some(first) = installed.models.first().map(|model| model.id) {
-            installed.set_active(first);
+        // `session.json`'s transforms are inert while the plate is empty (the
+        // port never reopens `last_file`), so this is the first moment they can
+        // apply. The saved scene replaces the load's defaults only when it
+        // matches the loaded models exactly; a different file keeps its own
+        // placement. Either way the stored list is consumed: the scene now owns
+        // the transforms, and the next save writes them.
+        let restored = self.restore_session_models(&mut installed);
+        if !restored {
+            if let Some(first) = installed.models.first().map(|model| model.id) {
+                installed.set_active(first);
+            }
         }
+        self.session_models.clear();
+        self.session_active = None;
         self.scene = installed;
         self.draft = None;
         self.hovered.set(None);
@@ -865,6 +966,8 @@ impl DragonFruit {
             // There is nothing left to reopen: a deleted model must not come
             // back with the next launch's `session.json`.
             self.last_file = None;
+            self.session_models.clear();
+            self.session_active = None;
             // Models going to zero resets the camera home
             // (`useStlLoadCameraIntro`).
             self.camera
@@ -974,15 +1077,28 @@ impl DragonFruit {
         self.scene.active.is_some()
     }
 
-    /// The Models panel's row click: with one row the click cannot name a
-    /// different model, so it re-establishes the first model as active rather
-    /// than dropping the selection.
-    pub(crate) fn select_active(&mut self) {
-        if self.scene.active.is_none() {
-            if let Some(first) = self.scene.models.first().map(|model| model.id) {
-                self.scene.set_active(first);
-            }
+    /// The Models panel's row click: make `id` the active model. A stale id
+    /// (a row for a model that has since been removed) is ignored. The painter
+    /// picks up the new selection from `cx.notify()`; the session records it on
+    /// the next save.
+    pub(crate) fn select_model(&mut self, id: gpui_core::scene::ModelId) {
+        self.scene.set_active(id);
+    }
+
+    /// The Models panel's eye toggle. Visibility feeds `max_height_world`, so
+    /// the layer stack is re-derived exactly as a removal does, and the new
+    /// state is written to `session.json` at once — unlike a selection, a
+    /// hidden model changes what the slice preview and export cover.
+    pub(crate) fn set_model_visible(&mut self, id: gpui_core::scene::ModelId, visible: bool) {
+        let Some(model) = self.scene.model_mut(id) else {
+            return;
+        };
+        if model.visible == visible {
+            return;
         }
+        model.visible = visible;
+        self.after_scene_edit();
+        self.save_session();
     }
 
     /// The transform panel's write-back: its three rows edit the active model.
@@ -1816,11 +1932,6 @@ impl Render for DragonFruit {
             }
         });
 
-        let mesh_name = self
-            .scene
-            .active_model()
-            .map(|model| model.name.clone())
-            .unwrap_or_else(|| "No model".to_owned());
         let mode = self.mode;
         let show_settings = self.show_settings;
         let has_models = self.has_mesh();
@@ -2066,9 +2177,8 @@ impl Render for DragonFruit {
                         .dock(panels::list::PanelDock::Left)
                         .header_right(panels::content::models_add_button(entity.clone()))
                         .content(panels::content::models_body(
-                            mesh_name.clone(),
-                            triangles,
-                            self.selected(),
+                            self.scene.models(),
+                            self.scene.active,
                             entity.clone(),
                         )),
                     );
