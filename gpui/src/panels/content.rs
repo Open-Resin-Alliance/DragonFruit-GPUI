@@ -26,18 +26,28 @@
 //!    into a 28px column; GPUI's native tooltip needs a view builder and a
 //!    window context these bodies do not receive. [`hint`] is a fixed 200px box
 //!    hanging from the trigger's right edge, where the source's portal centres
-//!    an auto-width box under the trigger and clamps it to the viewport.
+//!    an auto-width box under the trigger and clamps it to the viewport. It is
+//!    an absolute child of its trigger, not a `deferred` draw: `deferred` would
+//!    paint above later siblings, but its `group_hover` resolves before the
+//!    group's hitbox is registered and the box would never appear. The Models
+//!    rows therefore hang theirs *above* the trigger ([`hint_above`]) — a later
+//!    row paints over an earlier one, so an upward box is never covered by the
+//!    rows below it.
 //! 5. Tailwind radii: bare `rounded` is 4px, `rounded-md` is 10px (the overrides
 //!    in `globals.css`), `rounded-sm` on `.ui-button` is 6px.
 //!
 //! ## Models — `ModelManagerPanel.tsx`
 //!
-//! 6. The app holds one mesh (`DragonFruit::mesh`), not a model list: one row,
-//!    no build plates, no import groups and no multi-body 3MF. `body_row`,
-//!    `folder_row` and `models_context_menu` are ported but unreachable; the
-//!    `rounded-md border p-1` wrapper that groups a folder's rows is described
-//!    on `folder_row` and not built.
-//! 7. No per-model visibility: the eye button is inert and always renders `eye`.
+//! 6. No build plates or import groups, and no multi-body 3MF: the body is the
+//!    ungrouped path of `buildModelGroups` (`:159-186`) — one row per scene
+//!    model, sorted by name, with no folder header and no plate folder.
+//!    `body_row`, `folder_row` and `models_context_menu` are ported but
+//!    unreachable; the `rounded-md border p-1` wrapper that groups a folder's
+//!    rows is described on `folder_row` and not built.
+//! 7. Visibility is live: the eye writes `Model::visible` through
+//!    `DragonFruit::set_model_visible`, which re-derives the layer stack, and
+//!    the glyph flips `eye` / `eye-off`. The viewport already draws and raycasts
+//!    only the visible models, so the row and the plate agree.
 //! 8. No details dialog: the info button is inert. Its tooltip carries the
 //!    source's `${size} · ${polygons}` reduced to the polygon clause, because
 //!    `stl::MeshData` has no file size.
@@ -46,18 +56,22 @@
 //!     same path the `Delete` key and the canvas menu take. The source's undo
 //!     stack does not exist here, so the delete cannot be undone.
 //! 11. No context-menu state (`PanelContextMenuState`): the menu cannot open.
-//! 12. Row click: the source calls `onSelect(id, 'single')`; the app's selection
-//!     is one boolean, so the row sets it true and the viewport's hit test can
-//!     clear it. Shift-range and ctrl-toggle have no multi-model equivalent.
+//! 12. Row click: the source calls `onSelect(id, 'single')`; the row calls
+//!     `DragonFruit::select_model`, which makes that model the active one — the
+//!     single-selection the source describes. Shift-range and ctrl-toggle have
+//!     no multi-selection equivalent yet.
 //! 13. The row has no second line: the previous port invented a triangle line,
 //!     which the source does not have. The count lives in the info tooltip.
 //! 14. The list's `overflow-y-auto` is not applied: the card grows to its content
 //!     in this shell, so a scroll container would collapse. With that, the
 //!     source's viewport-derived `maxHeight` (`100vh - topbar - clearance`) is
-//!     not applied either: one row can never reach it.
+//!     not applied either; a scene with more models than fit runs past it until
+//!     the shell gives the card a height to scroll inside.
 //! 15. Every row button swallows its press (`stopPropagation` in the source), so
-//!     pressing one never selects the model. The info and eye buttons are inert;
-//!     only delete acts (deviation 10).
+//!     pressing one never selects the model. The info button is inert
+//!     (deviation 8); the eye and the trash act (deviations 7, 10). The row's own
+//!     hover feedback is the source's: the pointer cursor and the buttons'
+//!     `hover:bg-white/10` — the row itself carries no hover fill.
 //!
 //! ## Auto Supports — `AutoSupportPanel.tsx`
 //!
@@ -117,8 +131,8 @@
 //!     `PrintingPanel.tsx`; it is removed.
 
 use gpui::{
-    App, BoxShadow, Div, FontWeight, IntoElement, MouseButton, SharedString, Stateful, WeakEntity,
-    Window, div, prelude::*, px, relative, rgb, rgba,
+    AnyElement, App, BoxShadow, Div, ElementId, FontWeight, IntoElement, MouseButton, SharedString,
+    Stateful, WeakEntity, Window, div, prelude::*, px, relative, rgb, rgba,
 };
 
 use gpui_core::icons::icon;
@@ -156,36 +170,70 @@ fn hint(
     trigger: impl IntoElement,
     text: impl Into<SharedString>,
 ) -> Stateful<Div> {
+    hint_placed(id, trigger, text, Placement::Below)
+}
+
+/// Where a [`hint`]'s popover hangs.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Placement {
+    /// Under the trigger — the source's `Tooltip` vertical offset.
+    Below,
+    /// Above the trigger.
+    Above,
+}
+
+/// [`hint`] hanging its popover above the trigger.
+///
+/// The Models list needs this: a list row's popover below it would be covered
+/// by the next row's fill, because GPUI paints later siblings over earlier ones
+/// and the port has no portal. A later row paints over an earlier one, so an
+/// upward popover is never covered.
+fn hint_above(
+    id: impl Into<SharedString>,
+    trigger: impl IntoElement,
+    text: impl Into<SharedString>,
+) -> Stateful<Div> {
+    hint_placed(id, trigger, text, Placement::Above)
+}
+
+fn hint_placed(
+    id: impl Into<SharedString>,
+    trigger: impl IntoElement,
+    text: impl Into<SharedString>,
+    placement: Placement,
+) -> Stateful<Div> {
     let group: SharedString = id.into();
+    let mut popover = div()
+        .absolute()
+        .right(px(0.))
+        .w(px(200.))
+        .opacity(0.)
+        .group_hover(group.clone(), |style| style.opacity(1.))
+        .rounded(px(RADIUS_BARE))
+        .px(px(8.))
+        .py(px(6.))
+        .text_size(px(11.))
+        .line_height(px(11. * LINE_HEIGHT_TIGHT))
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(rgb(TEXT_STRONG))
+        .bg(rgba(0x181818fa))
+        .border_1()
+        .border_color(rgb(ACCENT))
+        .whitespace_normal()
+        .shadow_lg()
+        .child(text.into());
+    popover = match placement {
+        Placement::Below => popover.top(relative(1.)).mt(px(28.)),
+        Placement::Above => popover.bottom(relative(1.)).mb(px(28.)),
+    };
+
     div()
         .id(group.clone())
         .relative()
         .flex()
-        .group(group.clone())
+        .group(group)
         .child(trigger)
-        .child(
-            div()
-                .absolute()
-                .right(px(0.))
-                .top(relative(1.))
-                .mt(px(28.))
-                .w(px(200.))
-                .opacity(0.)
-                .group_hover(group, |style| style.opacity(1.))
-                .rounded(px(RADIUS_BARE))
-                .px(px(8.))
-                .py(px(6.))
-                .text_size(px(11.))
-                .line_height(px(11. * LINE_HEIGHT_TIGHT))
-                .font_weight(FontWeight::MEDIUM)
-                .text_color(rgb(TEXT_STRONG))
-                .bg(rgba(0x181818fa))
-                .border_1()
-                .border_color(rgb(ACCENT))
-                .whitespace_normal()
-                .shadow_lg()
-                .child(text.into()),
-        )
+        .child(popover)
 }
 
 /// `IconButton variant="ghost"`: a bare hit target that shows `bg-white/10` on
@@ -194,14 +242,14 @@ fn hint(
 /// The source's row buttons all `stopPropagation` so pressing one never selects
 /// the model. This form is the inert one: the press is swallowed and nothing
 /// else happens.
-fn ghost_icon(id: &'static str, icon_name: &'static str, size: f32) -> Stateful<Div> {
+fn ghost_icon(id: impl Into<ElementId>, icon_name: &'static str, size: f32) -> Stateful<Div> {
     ghost_icon_action(id, icon_name, size, |_, _| {})
 }
 
 /// [`ghost_icon`] with the row button's action: the press stops at the button
 /// (`e.stopPropagation()` in `ModelManagerPanel.tsx`), then the action runs.
 fn ghost_icon_action(
-    id: &'static str,
+    id: impl Into<ElementId>,
     icon_name: &'static str,
     size: f32,
     on_click: impl Fn(&mut Window, &mut App) + 'static,
@@ -242,13 +290,20 @@ fn grid3(a: impl IntoElement, b: impl IntoElement, c: impl IntoElement) -> Div {
 // Models — `ModelManagerPanel.tsx`
 // ---------------------------------------------------------------------------
 
-/// The Models body: the add button, the model row and the empty state.
+/// The Models body: one row per model on the plate, or the empty state.
+///
+/// The source's list is `buildModelGroups`, which puts folders first and then
+/// one alphabetical row per ungrouped model (`ModelManagerPanel.tsx:159-186`).
+/// This build has no groups, so it is the ungrouped rows alone.
+///
+/// The return is type-erased: the rows borrow the scene, and in edition 2024 an
+/// `impl IntoElement` return would capture that borrow, so the caller could not
+/// turn it into the panel's `'static` `AnyElement`.
 pub fn models_body(
-    mesh_name: String,
-    triangles: usize,
-    selected: bool,
+    models: &[gpui_core::scene::Model],
+    active: Option<gpui_core::scene::ModelId>,
     entity: WeakEntity<DragonFruit>,
-) -> impl IntoElement {
+) -> AnyElement {
     // `text-xs text-center py-2 italic`, muted.
     let empty = || {
         div()
@@ -260,17 +315,28 @@ pub fn models_body(
             .child("No models loaded")
     };
 
-    // `space-y-1 overflow-y-auto pr-0.5 flex-1 min-h-0`. With one ungrouped
-    // model `buildModelGroups` yields a single entry with no header, so the list
-    // is the row alone.
+    // `buildModelGroups`' final sort, `a.name.localeCompare(b.name)`; without
+    // the locale collator, case folding approximates it and the model id breaks
+    // a tie so two models sharing a name keep a stable order.
+    let mut rows: Vec<&gpui_core::scene::Model> = models.iter().collect();
+    rows.sort_by(|a, b| {
+        a.name
+            .to_lowercase()
+            .cmp(&b.name.to_lowercase())
+            .then(a.id.cmp(&b.id))
+    });
+
+    // `space-y-1 overflow-y-auto pr-0.5 flex-1 min-h-0`; the scroll container is
+    // omitted (deviation 14).
     let list = div()
         .flex()
         .flex_col()
         .gap(px(4.))
-        .when(triangles == 0, |this| this.child(empty()))
-        .when(triangles > 0, |this| {
-            this.child(model_row(mesh_name, triangles, selected, entity))
-        });
+        .when(rows.is_empty(), |this| this.child(empty()))
+        .children(
+            rows.into_iter()
+                .map(|model| model_row(model, active == Some(model.id), entity.clone())),
+        );
 
     // `px-2.5 pt-1 pb-2.5 space-y-2 flex flex-col flex-1 min-h-0`.
     div()
@@ -281,6 +347,7 @@ pub fn models_body(
         .flex_col()
         .gap(px(8.))
         .child(list)
+        .into_any_element()
 }
 
 /// `CardHeader`'s right slot: the Models panel's add button.
@@ -310,12 +377,14 @@ pub fn models_add_button(entity: WeakEntity<DragonFruit>) -> impl IntoElement {
 /// `px-2 py-1 rounded border transition-colors flex items-center gap-2
 /// cursor-pointer`, with the selected fills from the row's inline style.
 fn model_row(
-    name: String,
-    triangles: usize,
+    model: &gpui_core::scene::Model,
     selected: bool,
     entity: WeakEntity<DragonFruit>,
 ) -> impl IntoElement {
-    let click_entity = entity.clone();
+    let model_id = model.id;
+    let row_key = model_id.get();
+    let visible = model.visible;
+    let name = model.name.clone();
 
     // `min-w-0 text-sm font-medium truncate`, wrapped in the source's
     // `Tooltip content={model.name} fullWidth`.
@@ -327,36 +396,65 @@ fn model_row(
         .font_weight(FontWeight::MEDIUM)
         .text_color(rgb(TEXT_STRONG))
         .child(name.clone());
-    let name_cell = div()
-        .flex_1()
-        .min_w(px(0.))
-        .child(hint("model-name-tip", name_trigger, name));
+    let name_cell = div().flex_1().min_w(px(0.)).child(hint_above(
+        format!("model-name-tip-{row_key}"),
+        name_trigger,
+        name,
+    ));
 
     // `formatModelInfoTooltip`: `${size} · ${polygons}`, or the polygons alone
     // when there is no size. `MeshData` has no file size, so only the polygon
     // clause survives.
-    let polygons = if triangles == 1 {
+    let polygons = if model.mesh.triangles == 1 {
         "1 polygon".to_owned()
     } else {
-        format!("{triangles} polygons")
+        format!("{} polygons", model.mesh.triangles)
     };
 
+    let select_entity = entity.clone();
+    let visibility_entity = entity.clone();
     let delete_entity = entity.clone();
+
+    // `Eye` / `EyeOff` → `onVisibilityChange(model.id, !model.visible)`. The
+    // write goes through the entity so the layer stack follows the tallest
+    // remaining model, exactly as a load does.
+    let eye_button = ghost_icon_action(
+        format!("model-eye-{row_key}"),
+        if visible { "eye" } else { "eye-off" },
+        16.,
+        move |_, cx| {
+            visibility_entity
+                .update(cx, |this, cx| {
+                    this.set_model_visible(model_id, !visible);
+                    cx.notify();
+                })
+                .ok();
+        },
+    );
+
     // `Trash2` → `onDelete(model.id)`. The source's `scene.deleteModel` is the
     // same path the `Delete` key and the canvas menu take
     // (`DragonFruit::delete_model`), and it asks nothing first because deleting
-    // is undoable there; this build has no undo stack either way.
-    let delete_button = ghost_icon_action("model-delete", "trash-2", 14., move |_, cx| {
-        delete_entity
-            .update(cx, |this, cx| {
-                this.delete_model();
-                cx.notify();
-            })
-            .ok();
-    });
+    // is undoable there; this build has no undo stack either way. That path
+    // removes the *active* model, so the row makes its model active first and
+    // the next load re-derives from what is left.
+    let delete_button = ghost_icon_action(
+        format!("model-delete-{row_key}"),
+        "trash-2",
+        14.,
+        move |_, cx| {
+            delete_entity
+                .update(cx, |this, cx| {
+                    this.select_model(model_id);
+                    this.delete_model();
+                    cx.notify();
+                })
+                .ok();
+        },
+    );
 
     div()
-        .id("model-row")
+        .id(format!("model-row-{row_key}"))
         .flex()
         .items_center()
         .gap(px(8.))
@@ -385,26 +483,28 @@ fn model_row(
                 .items_center()
                 .gap(px(2.))
                 // PORT GAP: no details dialog — the info button is inert.
-                .child(hint(
-                    "model-info-tip",
-                    ghost_icon("model-info", "info", 14.),
+                .child(hint_above(
+                    format!("model-info-tip-{row_key}"),
+                    ghost_icon(format!("model-info-{row_key}"), "info", 14.),
                     polygons,
                 ))
-                // PORT GAP: no per-model visibility — the eye is inert and the
-                // model is always visible.
-                .child(hint(
-                    "model-eye-tip",
-                    ghost_icon("model-eye", "eye", 16.),
-                    "Hide",
+                .child(hint_above(
+                    format!("model-eye-tip-{row_key}"),
+                    eye_button,
+                    if visible { "Hide" } else { "Show" },
                 ))
-                .child(hint("model-delete-tip", delete_button, "Delete model")),
+                .child(hint_above(
+                    format!("model-delete-tip-{row_key}"),
+                    delete_button,
+                    "Delete model",
+                )),
         )
         .on_click(move |_, _, cx| {
-            // `onSelect(model.id, 'single')`: with one row the row *is* the
-            // active model, so the click re-establishes it rather than clearing.
-            click_entity
+            // `onSelect(model.id, 'single')`: the row makes its own model the
+            // active one, which is what moves the gizmo and the transform panel.
+            select_entity
                 .update(cx, |this, cx| {
-                    this.select_active();
+                    this.select_model(model_id);
                     cx.notify();
                 })
                 .ok();
