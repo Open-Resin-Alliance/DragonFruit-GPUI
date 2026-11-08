@@ -776,7 +776,10 @@ fn step_button(
     if dimmed {
         step = step.opacity(0.45);
     }
-    if disabled {
+    // `TopBar.tsx` makes a *locked* step inert too: `disabled = locked ||
+    // topbarActionsDisabled` guards the click. Dimming alone left Support/Export
+    // clickable with an empty scene.
+    if dimmed {
         step = step.cursor_not_allowed();
     } else {
         step = step
