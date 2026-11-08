@@ -1,33 +1,56 @@
 //! The gizmo's triangle soup, in world space, for the viewport's unlit pass.
 //!
 //! The source builds its handles from three.js primitives (`ConeGeometry`,
-//! `CylinderGeometry`, `TubeGeometry`, a box, a sphere) under a group that is
-//! scaled every frame to hold a constant size on screen. The port has no scene
-//! graph on the GPU side: it emits the same primitives as positioned triangles
-//! with a colour per vertex, which is the vertex format the viewport's existing
-//! unlit pipeline already takes. The screen-space scale is applied here, per
-//! vertex, from [`View::scale`], so the geometry can only ever be the size the
-//! camera says it is.
+//! `CylinderGeometry`, `TubeGeometry`, a `BoxGeometry` with `EdgesGeometry`, a
+//! `CircleGeometry` and two `RingGeometry`s) under a group that is scaled every
+//! frame to hold a constant size on screen. The port has no scene graph on the
+//! GPU side: it emits the same primitives as positioned triangles with a colour
+//! per vertex, which is the vertex format the viewport's existing unlit pipeline
+//! already takes. The screen-space scale is applied here, per vertex, from
+//! [`View::scale`], so the geometry can only ever be the size the camera says it
+//! is.
+//!
+//! Every number below is the source's own: see the table in `crate::gizmo`'s
+//! module docs for the constant-by-constant comparison.
 //!
 //! The vertex buffer is rebuilt only when the key changes (camera pose, model
 //! placement, hover, active handle), which is the mesh's caching trick applied
 //! to a buffer that is a few thousand vertices rather than a few million.
 
-use std::f32::consts::{FRAC_PI_4, PI, TAU};
+use std::f32::consts::TAU;
 use std::rc::Rc;
 
 use glam::Vec3;
 
 use super::constants::{
-    axis_end, linear, shaft_gradient, ACTIVE, ARROW_HEAD_LENGTH, ARROW_HEAD_RADIUS,
-    ARROW_SHAFT_RADIUS, CENTER, CENTER_RADIUS, DIMMED, HOVER, RING_DIAMOND_RADIUS,
-    RING_MAJOR_RADIUS, RING_MINOR_RADIUS, SCALE_HEXAGON_DEPTH, SCALE_HEXAGON_RADIUS, Z_AXIS_END,
-    Z_AXIS_START, Z_RING,
+    axis_end, axis_ring, axis_start, linear, shaft_gradient, ACTIVE, ARROW_HEAD_LENGTH,
+    ARROW_HEAD_RADIUS, ARROW_SHAFT_RADIUS, CENTER, CENTER_BORDER_SCALE, CENTER_DISC_SCALE,
+    CENTER_HALO_INNER_SCALE, CENTER_HALO_OUTER_SCALE, CENTER_RADIUS, CUBE_EDGE_DIM,
+    CUBE_EDGE_WIDTH, DIAMOND_OUTLINE_DIM, DIAMOND_OUTLINE_SCALE,
+    DIAMOND_SECONDARY_OUTLINE_DIM, DIMMED, HEAD_ACTIVE_SCALE, HEAD_HOVER_SCALE,
+    HEAD_OUTLINE_DIM, HEAD_OUTLINE_SCALE, HOVER, RING_ACTIVE_SCALE, RING_BACK_ALPHA,
+    RING_BACK_ARC, RING_BACK_ARC_START, RING_DIAMOND_RADIUS, RING_FRONT_ARC,
+    RING_MAJOR_RADIUS, RING_TUBE_RADIUS, SCALE_HEXAGON_RADIUS, SCALE_HIT_ACTIVE_SCALE,
+    SCALE_HIT_HOVER_SCALE,
 };
 use super::layout::View;
 use super::types::{Axis, Handle};
 
 type Vertex = [f32; 6];
+
+/// `getCachedMoveShaftGeometry`'s `CylinderGeometry(..., 8, 1)`.
+const SHAFT_SEGMENTS: usize = 8;
+/// `getCachedConeGeometry(headRadius, headLength, 8)`.
+const HEAD_SEGMENTS: usize = 8;
+/// `getCachedConeGeometry(ringDiamondRadius * 0.36, ringDiamondRadius, 16)`.
+const DIAMOND_SEGMENTS: usize = 16;
+/// The rotation arc is `TubeGeometry(curve, 72, 0.016, 16, false)`. A 0.016-unit
+/// tube is sub-pixel, so 24 stations and a 6-sided section trace the same
+/// silhouette for a quarter of the vertices.
+const ARC_SEGMENTS: usize = 24;
+const ARC_SIDES: usize = 6;
+/// `CircleGeometry(radius, 32)` and `RingGeometry(..., 32)`.
+const CENTER_SEGMENTS: usize = 32;
 
 /// The memoised triangle soup and the state it was built for.
 pub struct GeometryCache {
@@ -83,170 +106,317 @@ pub fn cached(
     vertices
 }
 
-/// Every handle's triangles for one pose.
+/// Every handle's triangles for one pose, in the source's draw order: centre,
+/// then arrows, then rings, then scale cubes. The pass has no depth test, so
+/// that order is what decides which handle covers which.
 pub fn build(view: &View<'_>, hovered: Option<Handle>, active: Option<Handle>) -> Vec<Vertex> {
     let mut out = Vec::new();
-    let scale = view.scale();
-    let dimmed_any = active.is_some();
-
-    // Centre nub. `GizmoCenter` draws a disc, a border ring and a halo ring around
-    // one pick sphere; a single sphere is what those three read as at this size.
-    sphere(
-        &mut out,
-        view.center,
-        CENTER_RADIUS * scale,
-        12,
-        24,
-        handle_color(Handle::Center, hovered, active, dimmed_any, CENTER),
-    );
-
-    // Move arrows, on the camera's side of the model.
+    centre(view, hovered, active, &mut out);
     for axis in Axis::ALL {
-        let handle = Handle::Axis(axis);
-        let tip = view.arrow_tip(axis);
-        let dir = (tip - view.center).normalize_or_zero();
-        if dir == Vec3::ZERO {
-            continue;
-        }
-        let dimmed = dimmed_any && active != Some(handle);
-        let shaft_end = tip - dir * (ARROW_HEAD_LENGTH * 0.5 * scale);
-        let (start_hex, end_hex) = shaft_gradient(axis);
-        let (shaft_start, shaft_end_color) = if dimmed {
-            (linear(DIMMED), linear(DIMMED))
-        } else {
-            (linear(start_hex), linear(end_hex))
-        };
-        cylinder(
-            &mut out,
-            view.center,
-            shaft_end,
-            ARROW_SHAFT_RADIUS * scale,
-            10,
-            |t| lerp(shaft_start, shaft_end_color, (t - 0.33).max(0.0) / 0.67),
-        );
-
-        let head = handle_color(handle, hovered, active, dimmed_any, axis_end(axis));
-        // The darker, slightly larger cone behind the head is the source's
-        // outline (`scale={1.15}`, colour × 0.3).
-        let outline = multiply(head, 0.3);
-        let outline_radius = ARROW_HEAD_RADIUS * 1.15 * scale;
-        let outline_length = ARROW_HEAD_LENGTH * 1.15 * scale;
-        cone(
-            &mut out,
-            tip - dir * (outline_length * 0.5),
-            dir,
-            outline_radius,
-            outline_length,
-            10,
-            outline,
-        );
-        cone(
-            &mut out,
-            tip - dir * (ARROW_HEAD_LENGTH * 0.5 * scale),
-            dir,
-            ARROW_HEAD_RADIUS * scale,
-            ARROW_HEAD_LENGTH * scale,
-            10,
-            head,
-        );
+        arrow(view, axis, hovered, active, &mut out);
     }
-
-    // Rotation ring and its double-arrow handle.
-    let ring_axis = view.ring_axis();
-    let ring_handle = Handle::Ring(ring_axis);
-    let ring_color = handle_color(ring_handle, hovered, active, dimmed_any, Z_RING);
-    torus(
-        &mut out,
-        view.center,
-        ring_axis.unit(),
-        RING_MAJOR_RADIUS * scale,
-        RING_MINOR_RADIUS * scale,
-        48,
-        6,
-        ring_color,
-    );
-
-    // `positiveAxisMidpointAngle('z')` — the handle sits inside the ring at 45°,
-    // between the positive X and Y arrows.
-    let (u, v) = ring_axis.ring_basis();
-    let angle = FRAC_PI_4;
-    let radial = u * angle.cos() + v * angle.sin();
-    let tangent = -u * angle.sin() + v * angle.cos();
-    let handle_center = view.center + radial * (RING_MAJOR_RADIUS * scale);
-    let primary = handle_color(ring_handle, hovered, active, dimmed_any, Z_AXIS_END);
-    let secondary = if dimmed_any && active != Some(ring_handle) {
-        linear(DIMMED)
-    } else if active == Some(ring_handle) {
-        linear(ACTIVE)
-    } else if hovered == Some(ring_handle) {
-        lerp(linear(HOVER), linear(Z_AXIS_START), 0.35)
-    } else {
-        linear(Z_AXIS_START)
-    };
-    let cone_radius = RING_DIAMOND_RADIUS * 0.36 * scale;
-    let cone_height = RING_DIAMOND_RADIUS * scale;
-    let offset = RING_DIAMOND_RADIUS * 0.52 * scale;
-    for (direction, color) in [(tangent, primary), (-tangent, secondary)] {
-        // Outline first, at 1.08, then the coloured cone inside it.
-        let outline_radius = cone_radius * 1.08;
-        let outline_height = cone_height * 1.08;
-        let outline_offset = offset - outline_height * 0.5;
-        cone(
-            &mut out,
-            handle_center + direction * outline_offset,
-            direction,
-            outline_radius,
-            outline_height,
-            12,
-            multiply(color, 0.3),
-        );
-        cone(
-            &mut out,
-            handle_center + direction * (offset - cone_height * 0.5),
-            direction,
-            cone_radius,
-            cone_height,
-            12,
-            color,
-        );
-    }
-
-    // Scale handles: a hexagonal plate facing along each axis, on the camera's
-    // side, `scaleLineLength` out from the centre.
     for axis in Axis::ALL {
-        let handle = Handle::Scale(axis);
-        let color = handle_color(handle, hovered, active, dimmed_any, axis_end(axis));
-        hex_prism(
-            &mut out,
-            view.scale_handle(axis),
-            axis.unit(),
-            SCALE_HEXAGON_RADIUS * scale,
-            SCALE_HEXAGON_DEPTH * scale,
-            color,
-        );
+        ring(view, axis, hovered, active, &mut out);
     }
-
+    for axis in Axis::ALL {
+        scale_cube(view, axis, hovered, active, &mut out);
+    }
     out
 }
 
-/// The colour a handle takes from its own state: active wins, then any other
-/// active handle dims it, then hover, and only then the per-handle base colour.
-fn handle_color(
-    handle: Handle,
+/// `GizmoCenter`: a flat disc in the plate plane, a white border ring and — only
+/// while it is hovered or held — the halo ring outside them.
+///
+/// The disc, not a sphere: the source's pick proxy is a sphere but it is
+/// invisible (`visible={false}`), and the disc is what the user sees. It faces
+/// world `+Z` because the centre drag is the world-XY plane at the model's Z.
+fn centre(
+    view: &View<'_>,
     hovered: Option<Handle>,
     active: Option<Handle>,
-    dimmed_any: bool,
-    base: u32,
-) -> [f32; 3] {
-    if active == Some(handle) {
+    out: &mut Vec<Vertex>,
+) {
+    let scale = view.scale();
+    let dimmed = active.is_some() && active != Some(Handle::Center);
+    let disc = if active == Some(Handle::Center) {
         linear(ACTIVE)
-    } else if dimmed_any {
+    } else if dimmed {
         linear(DIMMED)
+    } else if hovered == Some(Handle::Center) {
+        linear(HOVER)
+    } else {
+        linear(CENTER)
+    };
+    let border = if dimmed { linear(DIMMED) } else { linear(CENTER) };
+
+    disc_fan(
+        out,
+        view.center,
+        CENTER_RADIUS * CENTER_DISC_SCALE * scale,
+        CENTER_SEGMENTS,
+        disc,
+    );
+    ring_band(
+        out,
+        view.center,
+        CENTER_RADIUS * CENTER_BORDER_SCALE * scale,
+        CENTER_RADIUS * CENTER_DISC_SCALE * scale,
+        CENTER_SEGMENTS,
+        border,
+    );
+
+    // `isHighlighted && !isDimmed && !isHidden`: the halo only exists while the
+    // nub is hovered or held.
+    let highlighted = hovered == Some(Handle::Center) || active == Some(Handle::Center);
+    if highlighted && !dimmed {
+        ring_band(
+            out,
+            view.center,
+            CENTER_RADIUS * CENTER_HALO_INNER_SCALE * scale,
+            CENTER_RADIUS * CENTER_HALO_OUTER_SCALE * scale,
+            CENTER_SEGMENTS,
+            if active == Some(Handle::Center) {
+                linear(ACTIVE)
+            } else {
+                linear(HOVER)
+            },
+        );
+    }
+}
+
+/// `GizmoMove`: a gradient shaft from the centre out to `arrowShaftLength`, and
+/// a cone straddling the tip with a darker, 1.15× outline behind it.
+///
+/// The arrow sits on the camera's side of the model (`pointsTowardCamera`), so
+/// its direction is the axis signed by the camera's side, and the drag axis
+/// stays the positive one — the flip is purely visual.
+fn arrow(
+    view: &View<'_>,
+    axis: Axis,
+    hovered: Option<Handle>,
+    active: Option<Handle>,
+    out: &mut Vec<Vertex>,
+) {
+    let handle = Handle::Axis(axis);
+    let scale = view.scale();
+    let dir = axis.unit() * view.axis_sign(axis);
+    let tip = view.arrow_tip(axis);
+    let dimmed = active.is_some() && active != Some(handle);
+
+    // `getCachedMoveShaftGeometry`: radius `Math.max(0.008, 0.02)`, length
+    // `arrowShaftLength`, colour held for the first third and then ramped to the
+    // secondary colour.
+    let (start_hex, end_hex) = shaft_gradient(axis);
+    let (shaft_start, shaft_end) = if dimmed {
+        (linear(DIMMED), linear(DIMMED))
+    } else {
+        (linear(start_hex), linear(end_hex))
+    };
+    cylinder(
+        out,
+        view.center,
+        tip,
+        ARROW_SHAFT_RADIUS * scale,
+        SHAFT_SEGMENTS,
+        |t| lerp(shaft_start, shaft_end, (t - 0.33).max(0.0) / 0.67),
+    );
+
+    // The head group carries `handleScale * hoverScale`; `hoverScale` is 1.18
+    // while the handle is held and 1.1 while it is hovered.
+    let head_scale = if active == Some(handle) {
+        HEAD_ACTIVE_SCALE
+    } else if hovered == Some(handle) {
+        HEAD_HOVER_SCALE
+    } else {
+        1.0
+    };
+    let head = if dimmed {
+        linear(DIMMED)
+    } else if active == Some(handle) {
+        linear(ACTIVE)
     } else if hovered == Some(handle) {
         linear(HOVER)
     } else {
-        linear(base)
+        linear(axis_end(axis))
+    };
+    // The outline is the same cone at 1.15×, darker: `multiplyScalar(0.3)`, or
+    // `0.7` of `dimmedColor` when the handle is dimmed.
+    let outline = multiply(head, if dimmed { 0.7 } else { HEAD_OUTLINE_DIM });
+    let radius = ARROW_HEAD_RADIUS * head_scale * scale;
+    let length = ARROW_HEAD_LENGTH * head_scale * scale;
+    cone(
+        out,
+        tip - dir * (length * HEAD_OUTLINE_SCALE * 0.5),
+        dir,
+        radius * HEAD_OUTLINE_SCALE,
+        length * HEAD_OUTLINE_SCALE,
+        HEAD_SEGMENTS,
+        outline,
+    );
+    cone(out, tip - dir * (length * 0.5), dir, radius, length, HEAD_SEGMENTS, head);
+}
+
+/// `GizmoRotation`: the bright 90° arc, the faint 180° back arc, and the
+/// double-cone diamond handle, all in the ring's own plane.
+///
+/// The handle and the bright arc ride the camera's azimuth within the ring
+/// (`getCameraAlignedAngle`), so the readable quarter of the ring is always the
+/// one facing the viewer — the source animates that per frame, the port derives
+/// it from the same camera pose the geometry is built for.
+fn ring(
+    view: &View<'_>,
+    axis: Axis,
+    hovered: Option<Handle>,
+    active: Option<Handle>,
+    out: &mut Vec<Vertex>,
+) {
+    let handle = Handle::Ring(axis);
+    let scale = view.scale();
+    let dimmed = active.is_some() && active != Some(handle);
+    let held = active == Some(handle);
+
+    // `ringColor`: dimmed, then active, then the ring's own colour. Hovering the
+    // ring does not recolour the arc in the source — only the diamond answers.
+    let arc_color = if dimmed {
+        linear(DIMMED)
+    } else if held {
+        linear(ACTIVE)
+    } else {
+        linear(axis_ring(axis))
+    };
+    let arc_major = RING_MAJOR_RADIUS * scale * if held { RING_ACTIVE_SCALE } else { 1.0 };
+    let tube = RING_TUBE_RADIUS * scale;
+    let angle = view.camera_aligned_angle(axis);
+
+    // Front arc: `arcAngle = π/2` centred on the handle.
+    arc_tube(
+        out,
+        view.center,
+        axis,
+        angle - RING_FRONT_ARC * 0.5,
+        RING_FRONT_ARC,
+        arc_major,
+        tube,
+        ARC_SEGMENTS,
+        ARC_SIDES,
+        arc_color,
+    );
+    // Back arc: `π/2 … 3π/2` in the ring's frame, at `opacity * 0.26`. The pass
+    // is opaque, so the colour carries the alpha instead.
+    arc_tube(
+        out,
+        view.center,
+        axis,
+        RING_BACK_ARC_START,
+        RING_BACK_ARC,
+        arc_major,
+        tube,
+        ARC_SEGMENTS,
+        ARC_SIDES,
+        multiply(arc_color, RING_BACK_ALPHA),
+    );
+
+    // `handleScale * 1.08` while the handle is hovered or held. The handle sits
+    // on the ring's own radius even while the active arc grows by 1.02.
+    let highlight = if hovered == Some(handle) || held { 1.08 } else { 1.0 };
+    let diamond = RING_DIAMOND_RADIUS * scale * highlight;
+    let (u, v) = axis.ring_basis();
+    let radial = u * angle.cos() + v * angle.sin();
+    let tangent = -u * angle.sin() + v * angle.cos();
+    let center = view.center + radial * (RING_MAJOR_RADIUS * scale);
+
+    let primary = if dimmed {
+        linear(DIMMED)
+    } else if held {
+        linear(ACTIVE)
+    } else if hovered == Some(handle) {
+        linear(HOVER)
+    } else {
+        linear(axis_end(axis))
+    };
+    let secondary = if dimmed {
+        linear(DIMMED)
+    } else if held {
+        linear(ACTIVE)
+    } else if hovered == Some(handle) {
+        lerp(linear(HOVER), linear(axis_start(axis)), 0.35)
+    } else {
+        linear(axis_start(axis))
+    };
+
+    let cone_radius = diamond * 0.36;
+    let offset = diamond * 0.52;
+    let outline_radius = cone_radius * DIAMOND_OUTLINE_SCALE;
+    let outline_height = diamond * DIAMOND_OUTLINE_SCALE;
+    for (direction, color, dim) in [
+        (tangent, primary, DIAMOND_OUTLINE_DIM),
+        (-tangent, secondary, DIAMOND_SECONDARY_OUTLINE_DIM),
+    ] {
+        // The outline mesh is the same cone scaled 1.08 about its own centre,
+        // so its base sits further back than the coloured cone's.
+        cone(
+            out,
+            center + direction * (offset - outline_height * 0.5),
+            direction,
+            outline_radius,
+            outline_height,
+            DIAMOND_SEGMENTS,
+            multiply(color, dim),
+        );
+        cone(
+            out,
+            center + direction * (offset - diamond * 0.5),
+            direction,
+            cone_radius,
+            diamond,
+            DIAMOND_SEGMENTS,
+            color,
+        );
     }
+}
+
+/// `GizmoScale`: a cube of side `scaleHexagonRadius` with its twelve edges drawn
+/// over it in a darker tone. `scaleHexagonDepth` and the "hexagon" rotation are
+/// both dead in the source — the handle is a `BoxGeometry(1, 1, 1)` scaled
+/// uniformly, so only the radius reaches the screen.
+fn scale_cube(
+    view: &View<'_>,
+    axis: Axis,
+    hovered: Option<Handle>,
+    active: Option<Handle>,
+    out: &mut Vec<Vertex>,
+) {
+    let handle = Handle::Scale(axis);
+    let scale = view.scale();
+    let dimmed = active.is_some() && active != Some(handle);
+    let highlight = if active == Some(handle) {
+        SCALE_HIT_ACTIVE_SCALE
+    } else if hovered == Some(handle) {
+        SCALE_HIT_HOVER_SCALE
+    } else {
+        1.0
+    };
+    let color = if dimmed {
+        linear(DIMMED)
+    } else if active == Some(handle) {
+        linear(ACTIVE)
+    } else if hovered == Some(handle) {
+        linear(HOVER)
+    } else {
+        linear(axis_end(axis))
+    };
+
+    let center = view.scale_handle(axis);
+    let half = SCALE_HEXAGON_RADIUS * highlight * 0.5 * scale;
+    box_solid(out, center, half, color);
+    // `EdgesGeometry` × `handleColor × 0.3`, drawn after the cube.
+    edge_box(
+        out,
+        center,
+        half,
+        CUBE_EDGE_WIDTH * scale,
+        multiply(color, CUBE_EDGE_DIM),
+    );
 }
 
 fn lerp(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
@@ -327,6 +497,18 @@ fn cylinder(
             quad(out, p0 + o0, p0 + o1, p1 + o1, p1 + o0, c0, c0, c1, c1);
         }
     }
+    // `CylinderGeometry` closes both ends; the shaft's start cap is hidden by
+    // the centre disc, but the tip cap is what the head sits on.
+    let c0 = color_at(0.0);
+    let c1 = color_at(1.0);
+    for index in 0..segments {
+        let a0 = index as f32 / segments as f32 * TAU;
+        let a1 = (index + 1) as f32 / segments as f32 * TAU;
+        let o0 = (u * a0.cos() + v * a0.sin()) * radius;
+        let o1 = (u * a1.cos() + v * a1.sin()) * radius;
+        tri(out, start, start + o1, start + o0, c0);
+        tri(out, end, end + o0, end + o1, c1);
+    }
 }
 
 /// A cone with its base at `base` and its apex `height` along `dir`.
@@ -351,31 +533,38 @@ fn cone(
     }
 }
 
-fn torus(
+/// A tube swept along `sweep` radians of a circle of radius `major` in the
+/// ring's plane, starting at `start`. `TubeGeometry` over the source's arc
+/// points, without the Frenet frames a planar circle does not need.
+#[allow(clippy::too_many_arguments)]
+fn arc_tube(
     out: &mut Vec<Vertex>,
     center: Vec3,
-    normal: Vec3,
+    axis: Axis,
+    start: f32,
+    sweep: f32,
     major: f32,
-    minor: f32,
-    tubular: usize,
-    radial: usize,
+    tube: f32,
+    segments: usize,
+    sides: usize,
     color: [f32; 3],
 ) {
-    let (u, v) = frame(normal);
-    let point = |i: usize, j: usize| {
-        let theta = (i % tubular) as f32 / tubular as f32 * TAU;
-        let phi = (j % radial) as f32 / radial as f32 * TAU;
-        let ring = u * theta.cos() + v * theta.sin();
-        center + ring * (major + minor * phi.cos()) + normal * (minor * phi.sin())
+    let (u, v) = axis.ring_basis();
+    let normal = axis.unit();
+    let point = |station: usize, side: usize| {
+        let theta = start + sweep * station as f32 / segments as f32;
+        let radial = u * theta.cos() + v * theta.sin();
+        let phi = side as f32 / sides as f32 * TAU;
+        center + radial * (major + tube * phi.cos()) + normal * (tube * phi.sin())
     };
-    for i in 0..tubular {
-        for j in 0..radial {
+    for station in 0..segments {
+        for side in 0..sides {
             quad(
                 out,
-                point(i, j),
-                point(i + 1, j),
-                point(i + 1, j + 1),
-                point(i, j + 1),
+                point(station, side),
+                point(station + 1, side),
+                point(station + 1, side + 1),
+                point(station, side + 1),
                 color,
                 color,
                 color,
@@ -385,63 +574,148 @@ fn torus(
     }
 }
 
-fn sphere(
+/// `CircleGeometry`: a fan in the XY plane, normal `+Z`.
+fn disc_fan(out: &mut Vec<Vertex>, center: Vec3, radius: f32, segments: usize, color: [f32; 3]) {
+    for index in 0..segments {
+        let a0 = index as f32 / segments as f32 * TAU;
+        let a1 = (index + 1) as f32 / segments as f32 * TAU;
+        let p0 = center + Vec3::new(a0.cos(), a0.sin(), 0.0) * radius;
+        let p1 = center + Vec3::new(a1.cos(), a1.sin(), 0.0) * radius;
+        tri(out, center, p0, p1, color);
+    }
+}
+
+/// `RingGeometry(inner, outer, segments)`: a flat annulus in the XY plane.
+fn ring_band(
     out: &mut Vec<Vertex>,
     center: Vec3,
-    radius: f32,
-    rings: usize,
+    inner: f32,
+    outer: f32,
     segments: usize,
     color: [f32; 3],
 ) {
-    let point = |i: usize, j: usize| {
-        let theta = (i % rings) as f32 / rings as f32 * PI;
-        let phi = (j % segments) as f32 / segments as f32 * TAU;
-        center
-            + Vec3::new(
-                theta.sin() * phi.cos(),
-                theta.sin() * phi.sin(),
-                theta.cos(),
-            ) * radius
-    };
-    for i in 0..rings {
-        for j in 0..segments {
-            quad(
-                out,
-                point(i, j),
-                point(i + 1, j),
-                point(i + 1, j + 1),
-                point(i, j + 1),
-                color,
-                color,
-                color,
-                color,
-            );
-        }
+    for index in 0..segments {
+        let a0 = index as f32 / segments as f32 * TAU;
+        let a1 = (index + 1) as f32 / segments as f32 * TAU;
+        let d0 = Vec3::new(a0.cos(), a0.sin(), 0.0);
+        let d1 = Vec3::new(a1.cos(), a1.sin(), 0.0);
+        quad(
+            out,
+            center + d0 * inner,
+            center + d0 * outer,
+            center + d1 * outer,
+            center + d1 * inner,
+            color,
+            color,
+            color,
+            color,
+        );
     }
 }
 
-/// A six-sided plate whose flat faces look along `axis`, as `GizmoScale`'s
-/// hexagon does (`CylinderGeometry` with six radial segments, axis rotated onto
-/// the handle's axis).
-fn hex_prism(
-    out: &mut Vec<Vertex>,
-    center: Vec3,
-    axis: Vec3,
-    radius: f32,
-    depth: f32,
-    color: [f32; 3],
-) {
-    let (u, v) = frame(axis);
-    let half = depth * 0.5;
-    let a = center - axis * half;
-    let b = center + axis * half;
-    for index in 0..6 {
-        let a0 = index as f32 / 6.0 * TAU;
-        let a1 = (index + 1) as f32 / 6.0 * TAU;
-        let o0 = (u * a0.cos() + v * a0.sin()) * radius;
-        let o1 = (u * a1.cos() + v * a1.sin()) * radius;
-        quad(out, a + o0, a + o1, b + o1, b + o0, color, color, color, color);
-        tri(out, b, b + o0, b + o1, color);
-        tri(out, a, a + o1, a + o0, color);
+/// The six faces of an axis-aligned box of half-size `half`.
+fn box_solid(out: &mut Vec<Vertex>, center: Vec3, half: f32, color: [f32; 3]) {
+    let x = Vec3::X * half;
+    let y = Vec3::Y * half;
+    let z = Vec3::Z * half;
+    let corners = [
+        center - x - y - z,
+        center + x - y - z,
+        center + x + y - z,
+        center - x + y - z,
+        center - x - y + z,
+        center + x - y + z,
+        center + x + y + z,
+        center - x + y + z,
+    ];
+    // Counter-clockwise seen from outside; the pass culls nothing, so the
+    // winding only has to be consistent, not visible.
+    const FACES: [[usize; 4]; 6] = [
+        [0, 1, 2, 3], // -Z
+        [4, 5, 6, 7], // +Z
+        [0, 1, 5, 4], // -Y
+        [3, 2, 6, 7], // +Y
+        [0, 3, 7, 4], // -X
+        [1, 2, 6, 5], // +X
+    ];
+    for face in FACES {
+        quad(
+            out,
+            corners[face[0]],
+            corners[face[1]],
+            corners[face[2]],
+            corners[face[3]],
+            color,
+            color,
+            color,
+            color,
+        );
+    }
+}
+
+/// `EdgesGeometry` on a box: the twelve edges as square-section prisms `width`
+/// across, so a `LineSegments` becomes triangles.
+fn edge_box(out: &mut Vec<Vertex>, center: Vec3, half: f32, width: f32, color: [f32; 3]) {
+    let t = width * 0.5;
+    for axis in 0..3 {
+        let along = match axis {
+            0 => Vec3::X,
+            1 => Vec3::Y,
+            _ => Vec3::Z,
+        };
+        let (u, v) = frame(along);
+        for su in [-1.0f32, 1.0] {
+            for sv in [-1.0f32, 1.0] {
+                let offset = (u * su + v * sv) * (half - t);
+                let a = center + offset - along * half;
+                let b = center + offset + along * half;
+                let ou = u * t;
+                let ov = v * t;
+                quad(
+                    out,
+                    a - ou - ov,
+                    a + ou - ov,
+                    b + ou - ov,
+                    b - ou - ov,
+                    color,
+                    color,
+                    color,
+                    color,
+                );
+                quad(
+                    out,
+                    a - ou + ov,
+                    a + ou + ov,
+                    b + ou + ov,
+                    b - ou + ov,
+                    color,
+                    color,
+                    color,
+                    color,
+                );
+                quad(
+                    out,
+                    a - ou - ov,
+                    a - ou + ov,
+                    b - ou + ov,
+                    b - ou - ov,
+                    color,
+                    color,
+                    color,
+                    color,
+                );
+                quad(
+                    out,
+                    a + ou - ov,
+                    a + ou + ov,
+                    b + ou + ov,
+                    b + ou - ov,
+                    color,
+                    color,
+                    color,
+                    color,
+                );
+            }
+        }
     }
 }

@@ -126,6 +126,19 @@ impl<'a> View<'a> {
         self.center + (u * angle.cos() + v * angle.sin()) * (RING_MAJOR_RADIUS * self.scale())
     }
 
+    /// `getCameraAlignedAngle` in `GizmoRotation.tsx`: the ring-local angle the
+    /// camera sits at, which is where the source parks the double-arrow handle
+    /// and centres the bright 90° arc.
+    ///
+    /// The source writes one `atan2` per axis because it hardcodes each ring's
+    /// frame; here the frame is [`Axis::ring_basis`], so the answer is the
+    /// camera direction's own components on that basis.
+    pub fn camera_aligned_angle(&self, axis: Axis) -> f32 {
+        let dir = (self.camera.eye() - self.center).normalize_or_zero();
+        let (u, v) = axis.ring_basis();
+        dir.dot(v).atan2(dir.dot(u))
+    }
+
     /// Where a pointer ray crosses the ring's plane, as `(radius, angle)` in
     /// gizmo units and ring-local radians.
     ///
@@ -137,9 +150,9 @@ impl<'a> View<'a> {
     /// `None` means no usable sample (a ray parallel to the plane, or a plane
     /// behind the pointer); the caller keeps its previous angle rather than
     /// inventing one, so a grazing ring stalls instead of flinging the model.
-    pub fn ring_hit(&self, pointer: Vec2) -> Option<(f32, f32)> {
+    pub fn ring_hit(&self, pointer: Vec2, axis: Axis) -> Option<(f32, f32)> {
         let (origin, direction) = self.ray(pointer);
-        let normal = self.ring_normal();
+        let normal = axis.unit();
         let denom = direction.dot(normal);
         if denom.abs() < 1e-6 {
             return None;
@@ -149,20 +162,9 @@ impl<'a> View<'a> {
             return None;
         }
         let local = origin + direction * t - self.center;
-        let (u, v) = self.ring_axis().ring_basis();
+        let (u, v) = axis.ring_basis();
         let radius = local.length() / self.scale().max(1e-6);
         Some((radius, wrap_angle(local.dot(v).atan2(local.dot(u)))))
-    }
-
-    /// The axis the port rotates about. The entity carries one Z rotation, so
-    /// the Z ring is the only one drawn — see the module docs of
-    /// [`crate::gizmo`].
-    pub fn ring_axis(&self) -> Axis {
-        Axis::Z
-    }
-
-    fn ring_normal(&self) -> Vec3 {
-        self.ring_axis().unit()
     }
 }
 

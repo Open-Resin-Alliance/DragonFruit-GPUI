@@ -34,6 +34,13 @@ pub struct Session {
     /// Where the camera was; `None` parks the app at its own default.
     #[serde(default)]
     pub camera: Option<CameraPose>,
+    /// The model's Euler rotation in radians (XYZ order), the same value
+    /// `Transform::rotation` carries in `gizmo/types.rs` and
+    /// `TransformState::rotation` shows in degrees. Kept next to the camera so
+    /// a reopened file keeps the orientation the user left it at; a session file
+    /// from before this field existed has no key and loads as the identity.
+    #[serde(default)]
+    pub rotation: [f32; 3],
     /// `DragonFruit::active_tool`, the Prepare tool index.
     #[serde(default)]
     pub active_tool: u32,
@@ -47,6 +54,7 @@ impl Default for Session {
             schema_version: SESSION_SCHEMA_VERSION,
             last_file: None,
             camera: None,
+            rotation: [0.0; 3],
             active_tool: 0,
             panel_layout: SessionLayout::default(),
         }

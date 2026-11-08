@@ -1,6 +1,6 @@
 //! The transform gizmo, ported from `src/components/gizmo/`
 //! (`TransformGizmo.tsx`, `ScreenSpaceGizmo.tsx`, `move/`, `rotate/`,
-//! `scale/`, `constants.ts`, `gizmoDragRegistry.ts`, `rotationDialModel.ts`,
+//! `scale/`, `constants.ts`, `gizmoGeometryCache.ts`, `rotationDialModel.ts`,
 //! `types.ts`).
 //!
 //! The source is a three.js/R3F tree: `TransformGizmo` owns the handle list,
@@ -15,21 +15,50 @@
 //! * [`pick`] — which handle the pointer is over, by pixel distance to the
 //!   projected handle. The source GPU-picks invisible proxies; a pixel test is
 //!   the same question with the handles' own screen geometry as the answer.
-//! * [`drag`] — one gesture, resolved into `translate` / `rotate_z` / `scale`,
-//!   the only three transform fields the editor entity carries.
+//! * [`drag`] — one gesture, resolved into `translate` / `rotation` / `scale`,
+//!   the three fields of the entity's transform.
 //! * [`geometry`] — the triangles the viewport's unlit pass draws, rebuilt only
 //!   when the camera pose, the model placement or the handle state changes.
 //!
+//! # Geometry, against the source
+//!
+//! Every drawn constant in [`geometry`] is the source's own value, in gizmo
+//! units (the units `ScreenSpaceGizmo` scales by `distance × 0.04`):
+//!
+//! | handle | source | port |
+//! |---|---|---|
+//! | centre | `CircleGeometry(centerRadius·1.05, 32)` in the XY plane | same disc, 32 segments |
+//! | centre border | `RingGeometry(1.0, 1.05, 32)` × `centerRadius`, white | same |
+//! | centre halo | `RingGeometry(1.1, 1.32, 32)` × `centerRadius`, hover/active only | same |
+//! | arrow shaft | `CylinderGeometry(max(.008, .02), …, arrowShaftLength, 8, 1)` | radius `0.02`, length `6.0`, 8 segments, centre → tip |
+//! | arrow head | `ConeGeometry(arrowHeadRadius, arrowHeadLength, 8)` centred on the tip | `0.24 × 0.6`, 8 segments, centred on the tip |
+//! | head outline | same cone at `1.15`, colour × `0.3` (× `0.7` when dimmed) | same |
+//! | head hover | group scale `1.1` hovered, `1.18` active | same |
+//! | ring | `TubeGeometry(90° arc, 72, 0.016, 16)` at `ringMajorRadius` | same arc and radius, 24 × 6 (a 0.016 tube is sub-pixel) |
+//! | ring back arc | `Line`, `π/2…3π/2`, opacity `0.26` | same span as a tube, colour × `0.26` |
+//! | diamond | `ConeGeometry(ringDiamondRadius·0.36, ringDiamondRadius, 16)` at `±0.52·r` along the tangent | same |
+//! | diamond outline | `scale 1.08`, × `0.3` / × `0.32` | same |
+//! | scale handle | `BoxGeometry(1,1,1)` scaled by `scaleHexagonRadius` (**a cube**, not a hexagon) + `EdgesGeometry` × `0.3` | cube of half-size `0.25`, 12 edge prisms |
+//! | scale placement | `±scaleLineLength` on the camera's side | same |
+//!
+//! `GIZMO_SIZES.ringMinorRadius` (0.12) and `scaleHexagonDepth` (0.3) are
+//! declared in the source but reached by no draw call — the ring's tube is a
+//! `0.016` literal and the "hexagon" is a cube scaled uniformly — so neither
+//! exists here.
+//!
 //! # PORT DEVIATIONS
 //!
-//! * **One rotation axis.** The source shows X, Y and Z rings and rotates a full
-//!   Euler. The entity has `rotate_z` and nothing else, so only the Z ring is
-//!   drawn: a ring that cannot turn is worse than no ring. The X/Y rings are the
-//!   single largest thing this port cannot express.
-//! * **Uniform scale only.** `GizmoScale` offers three hexagons; with
-//!   `uniformScaling` on (the source's default) each of them scales all three
-//!   axes. The entity's one `scale` field means that is the only branch that can
-//!   exist, so all three hexagons drive it.
+//! * **Euler components, not a quaternion.** `SceneCanvas` premultiplies the
+//!   group's quaternion by a world-axis rotation and decomposes the result back
+//!   into an `Euler('ZYX')`. The entity stores the three angles, so a ring adds
+//!   its sweep to its own component — the value the transform panel's row shows.
+//!   With the other two components zero the two are identical; with a model
+//!   already tilted, the source redistributes the turn across components.
+//! * **Uniform scale only.** `GizmoScale` offers three cubes; with
+//!   `uniformScaling` on (the source's default, and the only mode the panel
+//!   drives) each of them multiplies all three axes. [`types::Transform::scale`]
+//!   is a vector so a per-axis mode has somewhere to write; no such mode is
+//!   exposed.
 //! * **No protractor dial.** `RotationDial`, `rotationDialModel`'s magnet
 //!   (`resolveDialAngle`, `DIAL_ANATOMY`, `MAGNET_ENTER_PX`/`EXIT_PX`,
 //!   `DIAL_STEP_DEG`, `GIZMO_DIAL_COLORS`) and the snap-angle readout are 2D
@@ -39,22 +68,33 @@
 //!   per-handle point lights that wash colour onto the model are not ported; the
 //!   viewport has one headlight and the gizmo pass is unlit, exactly like the
 //!   source's own `meshBasicMaterial` handles.
-//! * **The ring is drawn as a full torus.** The source draws a 90° tube arc that
-//!   billboards toward the camera plus a fading back arc, and only its double-arrow
-//!   handle is pickable. A full ring in the same plane is stable at every camera
-//!   angle, and the whole circumference is the pick target — the alternative is a
-//!   single 22px diamond that moves with the camera.
+//! * **The whole ring is pickable.** The source picks only the diamond handle.
+//!   A 22px diamond that moves with the camera is a much smaller target than the
+//!   circumference it rides, and the circumference is already drawn.
+//! * **No line overlays.** The two `Line` overlays the source draws over the
+//!   front arc (and the back arc itself) are screen-space line primitives; the
+//!   viewport has none, so the arc is the tube alone and the back arc is a tube
+//!   at the source's `0.26` opacity folded into its colour.
+//! * **The viewport never culls and never depth-tests the gizmo.** Both are the
+//!   source's own material settings (`depthTest: false`, `depthWrite: false`),
+//!   so a handle is never hidden behind the model and triangles that overlap
+//!   paint in emission order — which is why the build keeps the source's handle
+//!   order.
 //! * **No retarget damping.** `ScreenSpaceGizmo` eases the gizmo from its old
 //!   position when the active model changes (`SWITCH_DAMP_LAMBDA`,
 //!   `SWITCH_SNAP_EPSILON`, the 72 ms `AXIS_SUPPRESS_MS` arc-animation hold) and
 //!   damps its scale every frame. The port recomputes the pose straight from the
-//!   camera and the transform: there is no in-flight transition to smooth, and one
-//!   selected model at a time means a retarget is a jump in the transform panel's
-//!   own values, not a new object.
-//! * **Local space is not wired.** `gizmoFrameRotation` rotates the gizmo into the
-//!   model's own frame when the Transform panel's local-space switch is on; the
-//!   entity's store flag is not read here, so the port's gizmo is always world
-//!   aligned, which is the source's default.
+//!   camera and the transform: there is no in-flight transition to smooth, and
+//!   one selected model at a time means a retarget is a jump in the transform
+//!   panel's own values, not a new object.
+//! * **No view culling.** `computeViewCullState` fades a handle whose axis
+//!   points at the camera. Every handle stays at full strength here; the pass is
+//!   opaque, so "fade" would have to be a colour, and the arrows already flip to
+//!   the camera's side.
+//! * **Local space is not wired.** `gizmoFrameRotation` rotates the gizmo into
+//!   the model's own frame when the Transform panel's local-space switch is on;
+//!   the entity's store flag is not read here, so the port's gizmo is always
+//!   world aligned, which is the source's default.
 //! * **The gizmo is opaque.** The source dims a non-active handle to 0.15 alpha;
 //!   this pass has no alpha, so it uses the source's `dimmedColor` (`#cccccc`)
 //!   instead — the same colour, without the blend.

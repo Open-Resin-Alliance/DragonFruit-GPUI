@@ -185,7 +185,7 @@ pub struct Toast {
 pub(crate) struct DragonFruit {
     pub(crate) mesh: Option<Arc<stl::MeshData>>,
     /// The parsed VOXL container when the last load was a scene: `SUPP` and
-    /// every model's `MODL` entry. `mesh`/`translate`/`rotate_z`/`scale` stay
+    /// every model's `MODL` entry. `mesh`/`translate`/`rotation`/`scale` stay
     /// the single-model view the viewport draws.
     pub(crate) scene: Option<gpui_voxl::Scene>,
     /// Time of the last frame, for the camera's real delta. The source drives
@@ -196,10 +196,10 @@ pub(crate) struct DragonFruit {
     pub(crate) camera: Rc<RefCell<Camera>>,
     pub(crate) viewport: Rc<RefCell<Option<Viewport>>>,
     /// A live grab: the plate-plane point under the pointer at press time and
-    /// the translation the model had then. A ray/plane hit is angle-correct; a
+    /// the transform the model had then. A ray/plane hit is angle-correct; a
     /// per-pixel scale is not — at a low camera angle vertical pointer travel
     /// covers far less plate distance.
-    pub(crate) grab: Option<(glam::Vec3, [f32; 3])>,
+    pub(crate) grab: Option<(glam::Vec3, gizmo::Transform)>,
     pub(crate) drag: Rc<Cell<Option<MouseButton>>>,
     pub(crate) last: Rc<Cell<(f32, f32)>>,
     /// Written by `app_bar` (New scene) and `panel_content` (export). The
@@ -237,8 +237,24 @@ pub(crate) struct DragonFruit {
     pub(crate) overhang_view: bool,
     pub(crate) logo: Option<PathBuf>,
     pub(crate) translate: [f32; 3],
-    pub(crate) rotate_z: f32,
-    pub(crate) scale: f32,
+    /// The Euler rotation in radians, `[x, y, z]` about the fixed world axes:
+    /// the same three numbers the source's `ModelTransform` stores in an
+    /// `Euler` of order `'ZYX'`, which `quaternionFromGlobalEuler` builds as
+    /// `qz · qy · qx`.
+    pub(crate) rotation: [f32; 3],
+    /// Per-axis scale, `1.0` at the model's own size. The gizmo's scale handles
+    /// multiply all three (`uniformScaling`, the source's default) and so does
+    /// the transform panel's uniform switch; the vector is the type
+    /// `applyScaleFactor` multiplies, so a per-axis mode has somewhere to write.
+    pub(crate) scale: [f32; 3],
+    /// The running gesture's stand-in transform.
+    ///
+    /// The source separates the two halves of a drag: the live transform moves
+    /// the model, and only the release commits it. This field is that stand-in.
+    /// The viewport, picking and the gizmo read it in place of the committed
+    /// fields above; the transform panel's store and `session.json` see nothing
+    /// until [`Self::commit_draft`] folds it in, once, on release.
+    pub(crate) draft: Option<gizmo::Transform>,
     pub(crate) support_angle: f32,
     pub(crate) support_density: f32,
     pub(crate) focus: FocusHandle,
@@ -366,8 +382,9 @@ impl DragonFruit {
             overhang_view: false,
             logo: rasterize_logo(),
             translate: [0.0; 3],
-            rotate_z: 0.0,
-            scale: 1.0,
+            rotation: [0.0; 3],
+            scale: [1.0; 3],
+            draft: None,
             support_angle: 45.0,
             support_density: 0.5,
             focus: cx.focus_handle(),
@@ -429,6 +446,11 @@ impl DragonFruit {
         if let Some(pose) = session.camera {
             restore_camera(&self.camera, &pose);
         }
+        // A session file from a build without the key loads as the identity;
+        // a hand-edited one with a NaN must not poison the model matrix.
+        if session.rotation.iter().all(|angle| angle.is_finite()) {
+            self.rotation = session.rotation;
+        }
         // The rail owns the list; a document from a newer build with more tools
         // must not index past this build's match arms.
         self.active_tool = (session.active_tool as usize).min(rail::prepare_tool_count() - 1);
@@ -480,6 +502,7 @@ impl DragonFruit {
                 orthographic: camera.orthographic,
             }),
             active_tool: self.active_tool as u32,
+            rotation: self.rotation,
             panel_layout: session_layout(&self.layout),
             ..Default::default()
         }
@@ -493,26 +516,31 @@ impl DragonFruit {
             Loaded::Mesh(mesh) => {
                 self.scene = None;
                 self.translate = [0.0; 3];
-                self.rotate_z = 0.0;
-                self.scale = 1.0;
+                self.rotation = [0.0; 3];
+                self.scale = [1.0; 3];
                 self.set_mesh(mesh);
             }
             Loaded::Scene(import) => {
                 self.translate = import.translate;
-                self.rotate_z = import.rotate_z;
+                self.rotation = import.rotation;
                 self.scale = import.scale;
                 if self.smoke {
                     let models = import.scene.models.len();
                     let meshes = import.scene.meshes.len();
                     eprintln!(
                         "smoke: VOXL v{} with {models} model(s), {meshes} MESH chunk(s); \
-                         translate [{:.2}, {:.2}, {:.2}], rotate_z {:.3} rad, scale {:.3}",
+                         translate [{:.2}, {:.2}, {:.2}], rotation [{:.3}, {:.3}, {:.3}] rad, \
+                         scale [{:.3}, {:.3}, {:.3}]",
                         import.scene.version,
                         self.translate[0],
                         self.translate[1],
                         self.translate[2],
-                        self.rotate_z,
-                        self.scale,
+                        self.rotation[0],
+                        self.rotation[1],
+                        self.rotation[2],
+                        self.scale[0],
+                        self.scale[1],
+                        self.scale[2],
                     );
                 }
                 self.scene = Some(import.scene);
@@ -625,6 +653,8 @@ impl DragonFruit {
         self.selected.set(false);
         self.gizmo_drag = None;
         self.gizmo_hover = None;
+        self.draft = None;
+        self.grab = None;
         self.editor_menu = None;
         self.num_layers = 0;
         self.layer = 0.0;
@@ -640,13 +670,41 @@ impl DragonFruit {
         self.save_session();
     }
 
-    /// The entity's three transform fields as the gizmo's own value type.
-    fn gizmo_transform(&self) -> gizmo::Transform {
-        gizmo::Transform {
+    /// The transform everything on screen draws with: the running gesture's
+    /// draft while one is live, the committed fields otherwise.
+    pub(crate) fn transform(&self) -> gizmo::Transform {
+        self.draft.unwrap_or(gizmo::Transform {
             translate: glam::Vec3::from_array(self.translate),
-            rotate_z: self.rotate_z,
-            scale: self.scale,
-        }
+            rotation: self.rotation,
+            scale: glam::Vec3::from_array(self.scale),
+        })
+    }
+
+    /// The model matrix the viewport, the hover raycast and the gizmo all use.
+    pub(crate) fn model_matrix(&self) -> glam::Mat4 {
+        self.transform().matrix()
+    }
+
+    /// Fold a finished gesture's draft into the committed fields.
+    ///
+    /// This is the one write a drag performs on the entity: the pointer stream
+    /// only ever touched [`Self::draft`]. Returns whether there was a draft to
+    /// commit, which is also whether the transform panel needs its one sync.
+    pub(crate) fn commit_draft(&mut self) -> bool {
+        let Some(draft) = self.draft.take() else {
+            return false;
+        };
+        self.translate = draft.translate.to_array();
+        self.rotation = draft.rotation;
+        self.scale = draft.scale.to_array();
+        true
+    }
+
+    /// Throw the draft away, leaving the committed transform as it was. Escape
+    /// and a cancelled gesture both end here; nothing was committed, so nothing
+    /// needs rebroadcasting.
+    pub(crate) fn discard_draft(&mut self) {
+        self.draft = None;
     }
 
     /// Whether the gizmo answers the pointer.
@@ -674,7 +732,7 @@ impl DragonFruit {
             return Some(center);
         }
         let mesh = self.mesh.as_ref()?;
-        Some(self.gizmo_transform().matrix().transform_point3(mesh.center))
+        Some(self.model_matrix().transform_point3(mesh.center))
     }
 
     /// Start a gesture if `pointer` is over a handle. Returns whether the press
@@ -698,22 +756,23 @@ impl DragonFruit {
             .mesh
             .as_ref()
             .map(|mesh| mesh.center.z - mesh.size[2] * 0.5);
-        let Some(drag) = gizmo::Drag::begin(
-            &view,
-            pointer,
-            handle,
-            self.gizmo_transform(),
-            mesh_min_z,
-        ) else {
+        let Some(drag) = gizmo::Drag::begin(&view, pointer, handle, self.transform(), mesh_min_z)
+        else {
             return false;
         };
+        // The gesture starts from the committed transform, so the draft is a
+        // copy of it until the pointer moves.
+        self.draft = Some(drag.base());
         self.gizmo_drag = Some(drag);
         self.gizmo_hover = Some(handle);
         true
     }
 
-    /// Feed one pointer sample to the running gesture and write the result back
-    /// into the entity. Returns whether the transform changed.
+    /// Feed one pointer sample to the running gesture.
+    ///
+    /// Only [`Self::draft`] changes: no panel store write, no history, no
+    /// session — the release commits once through [`Self::commit_draft`]. The
+    /// caller asks for the frame that repaints from the draft.
     fn update_gizmo_drag(
         &mut self,
         pointer: glam::Vec2,
@@ -733,9 +792,58 @@ impl DragonFruit {
         let Some(transform) = drag.update(&view, pointer) else {
             return false;
         };
-        self.translate = transform.translate.to_array();
-        self.rotate_z = transform.rotate_z;
-        self.scale = transform.scale;
+        self.draft = Some(transform);
+        true
+    }
+
+    /// The plate-plane grab: drag the model under the pointer in the world XY
+    /// plane. `origin` is the plane hit at press and `base` the transform then,
+    /// so a low camera angle cannot turn vertical travel into extra distance.
+    ///
+    /// Like the gizmo handles, this writes the draft only; the release commits.
+    fn update_grab(
+        &mut self,
+        pointer: glam::Vec2,
+        width: f32,
+        height: f32,
+        camera: &camera::Camera,
+    ) -> bool {
+        let Some((origin, base)) = self.grab else {
+            return false;
+        };
+        let ndc_x = pointer.x / width * 2.0 - 1.0;
+        let ndc_y = 1.0 - pointer.y / height * 2.0;
+        let Some(now) = plane_hit(camera, width / height, ndc_x, ndc_y, 0.0) else {
+            return false;
+        };
+        let delta = now - origin;
+        let mut transform = base;
+        transform.translate.x = base.translate.x + delta.x;
+        transform.translate.y = base.translate.y + delta.y;
+        if self.draft == Some(transform) {
+            return false;
+        }
+        self.draft = Some(transform);
+        true
+    }
+
+    /// Start the grab gesture under the pointer, if the pointer ray reaches the
+    /// plate plane.
+    fn begin_grab(
+        &mut self,
+        pointer: glam::Vec2,
+        width: f32,
+        height: f32,
+        camera: &camera::Camera,
+    ) -> bool {
+        let ndc_x = pointer.x / width * 2.0 - 1.0;
+        let ndc_y = 1.0 - pointer.y / height * 2.0;
+        let Some(hit) = plane_hit(camera, width / height, ndc_x, ndc_y, 0.0) else {
+            return false;
+        };
+        let base = self.transform();
+        self.grab = Some((hit, base));
+        self.draft = Some(base);
         true
     }
 
@@ -879,16 +987,13 @@ impl Render for DragonFruit {
         // The source moves the model under the pointer in every prepare tool, not
         // only the Move tool.
         let grab_mode = self.mesh.is_some();
-        let model_z = self.translate[2];
-        let supports = self.supports.clone();
-        let model_matrix = glam::Mat4::from_scale_rotation_translation(
-            glam::Vec3::splat(self.scale),
-            glam::Quat::from_rotation_z(self.rotate_z),
-            glam::Vec3::from_array(self.translate),
-        );
+        // The model matrix is a pure function of the running draft, so the hot
+        // path never reads a half-committed transform.
+        let model_matrix = self.model_matrix();
         // `publishClip`'s upper plane: none at layer 0 or at the top layer,
         // parked (infinite) when the cross-section switch is closed.
-        let translate_z = self.translate[2];
+        let supports = self.supports.clone();
+        let translate = self.transform().translate;
         let clip_z = if self.cross_section && self.mesh.is_some() {
             let upper = self.layer;
             let max_layer = self.num_layers as f32;
@@ -899,8 +1004,8 @@ impl Render for DragonFruit {
                     .as_ref()
                     .map(|mesh| {
                         // The clip plane is in world space, so the model's own
-                // translate has to be included.
-                let z_min = mesh.center.z + self.translate[2] - mesh.size[2] * 0.5;
+                        // translate has to be included.
+                        let z_min = mesh.center.z + translate.z - mesh.size[2] * 0.5;
                         z_min + upper * LAYER_HEIGHT_MM + CLIP_EPSILON_MM
                     })
                     .unwrap_or(f32::INFINITY)
@@ -1064,16 +1169,20 @@ impl Render for DragonFruit {
                     return;
                 }
                 drag.set(None);
-                let gizmo_ended = entity
+                // The gesture's stand-in becomes the committed transform here and
+                // nowhere else: one write, one panel sync, one repaint. A press
+                // that never moved commits the transform it started from, which
+                // is the same value the panel already shows.
+                let committed = entity
                     .update(cx, |this, _| {
-                        let had_gizmo = this.gizmo_drag.take().is_some();
+                        this.gizmo_drag = None;
                         this.grab = None;
-                        had_gizmo
+                        this.commit_draft()
                     })
                     .unwrap_or(false);
-                if gizmo_ended {
-                    // The gesture moved the entity under the transform panel's
-                    // store; push the final state back before the next frame.
+                if committed {
+                    // The transform panel reads its own store; this is the one
+                    // push a whole gesture makes.
                     features::tool_panels::sync_from_entity(&sync_entity, cx);
                 }
             }
@@ -1133,37 +1242,27 @@ impl Render for DragonFruit {
                         let width = size.width.0.max(1.0);
                         let height = size.height.0.max(1.0);
                         let pointer = glam::Vec2::new(event.position.x.0, event.position.y.0);
-                        let ndc_x = pointer.x / width * 2.0 - 1.0;
-                        let ndc_y = 1.0 - pointer.y / height * 2.0;
-                        let plane = {
-                            let camera = camera.borrow();
-                            plane_hit(&camera, width / height, ndc_x, ndc_y, 0.0)
-                        };
                         let drag_camera = camera.clone();
                         entity
                             .update(cx, |this, cx| {
+                                let camera = drag_camera.borrow();
                                 // A gizmo handle owns the left button while it is
                                 // held; the plate grab below only runs when no
-                                // gesture is live.
-                                if this.gizmo_drag.is_some() {
-                                    let camera = drag_camera.borrow();
-                                    if this.update_gizmo_drag(pointer, width, height, &camera) {
-                                        cx.notify();
-                                    }
-                                    return;
-                                }
-                                if let (Some(now), Some((origin, base))) = (plane, this.grab) {
-                                    let delta = now - origin;
-                                    this.translate[0] = base[0] + delta.x;
-                                    this.translate[1] = base[1] + delta.y;
+                                // gesture is live. Both write the draft and ask
+                                // for the frame that repaints from it — the
+                                // panel is told once, on release.
+                                let moved = if this.gizmo_drag.is_some() {
+                                    this.update_gizmo_drag(pointer, width, height, &camera)
+                                } else if this.grab.is_some() {
+                                    this.update_grab(pointer, width, height, &camera)
+                                } else {
+                                    false
+                                };
+                                if moved {
                                     cx.notify();
                                 }
                             })
                             .ok();
-                        // The transform panel reads its own store; without this the
-                        // XYZ fields keep the pre-drag values.
-                        features::tool_panels::sync_from_entity(&entity, cx);
-                        entity.update(cx, |_, cx| cx.notify()).ok();
                         return;
                     }
                     let mut camera = camera.borrow_mut();
@@ -1285,17 +1384,12 @@ impl Render for DragonFruit {
                     // the button, so a grab and an orbit cannot both be live.
                     drag.set(Some(MouseButton::Left));
                     last.set((event.position.x.0, event.position.y.0));
-                    let plane_hit = plane_hit(
-                        &camera.borrow(),
-                        width / height,
-                        ndc_x,
-                        ndc_y,
-                        model_z,
-                    );
+                    let grab_camera = camera.clone();
                     entity
                         .update(cx, |this, cx| {
                             this.selected.set(true);
-                            this.grab = plane_hit.map(|hit| (hit, this.translate));
+                            let camera = grab_camera.borrow();
+                            this.begin_grab(pointer, width, height, &camera);
                             cx.notify();
                         })
                         .ok();
@@ -1419,7 +1513,6 @@ impl Render for DragonFruit {
                 key_entity
                     .update(cx, |this, cx| {
                         let mut changed = false;
-                        let mut cancelled_gizmo = false;
 
                         // `useEscapeToClose`: Escape closes the dialogs and menus.
                         if key == "escape" {
@@ -1451,26 +1544,28 @@ impl Render for DragonFruit {
                             }
                             // A gizmo gesture in flight: `cancelActiveGizmoDrag`
                             // puts back what the gesture changed, so a cancelled
-                            // drag leaves the model where the grab found it.
-                            if let Some(drag) = this.gizmo_drag.take() {
-                                let base = drag.base();
-                                this.translate = base.translate.to_array();
-                                this.rotate_z = base.rotate_z;
-                                this.scale = base.scale;
-                                cancelled_gizmo = true;
+                            // drag leaves the model where the grab found it. The
+                            // gesture only ever wrote the draft, so dropping it
+                            // *is* the restore — nothing was committed, and the
+                            // panel's store never saw the intermediate values.
+                            if this.gizmo_drag.take().is_some() {
                                 changed = true;
                             }
+                            if this.grab.take().is_some() {
+                                changed = true;
+                            }
+                            this.discard_draft();
                             if changed {
                                 cx.notify();
                             }
-                            return cancelled_gizmo;
+                            return;
                         }
 
                         // The settings dialog owns the keyboard while open; GPUI
                         // has no "focused input" query to test instead. The Auto
                         // Supports settings dialog takes the same hold.
                         if this.show_settings || this.show_support_settings {
-                            return false;
+                            return;
                         }
 
                         // `CAMERA.TOGGLE_PROJECTION` (o).
@@ -1486,7 +1581,7 @@ impl Render for DragonFruit {
                         if key == "f" && !primary && !alt && !repeat {
                             if let Some(mesh) = &this.mesh {
                                 let mut camera = this.camera.borrow_mut();
-                                let world = mesh.center + glam::Vec3::from_array(this.translate);
+                                let world = this.model_matrix().transform_point3(mesh.center);
                                 camera.focus(world, mesh.radius.max(1.0));
                                 changed = true;
                             }
@@ -1551,14 +1646,6 @@ impl Render for DragonFruit {
 
                         if changed {
                             cx.notify();
-                        }
-                        cancelled_gizmo
-                    })
-                    .map(|cancelled| {
-                        if cancelled {
-                            // The transform panel's store still holds the
-                            // mid-drag values; put the restored ones back.
-                            features::tool_panels::sync_from_entity(&key_entity, cx);
                         }
                     })
                     .ok();

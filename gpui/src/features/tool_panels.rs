@@ -20,7 +20,7 @@
 //! The store is thread-local because the bodies' callbacks are `'static` and the
 //! adapter is handed no `cx` (or `App`) with which to read the entity while the
 //! element tree is being built. It is not a second source of truth: the entity
-//! remains authoritative for the fields it carries (`translate`, `rotate_z`,
+//! remains authoritative for the fields it carries (`translate`, `rotation`,
 //! `scale`, the mesh, the selection and the support list), and the mouse-down
 //! sync refreshes those from it. The fields the entity does not carry (the
 //! smoothing settings, the arrange/duplicate options, the organic-cut session,
@@ -89,14 +89,16 @@
 //!   Hollowing and Hole Punch have no scene services in this port: their Apply /
 //!   Confirm / Scan / Generate callbacks only re-render. The bodies' own module
 //!   notes record the same gap.
-//! * **Transform limits.** The entity has one uniform `scale` and one
-//!   `rotate_z`, so X/Y rotation and per-axis scale are recorded in the store but
-//!   only `rotation[2]` and `scale[0]` reach the entity. Uniform scaling starts
-//!   on (`page.tsx`'s `useState(true)`), matching the entity's single scale.
-//!   `Center Selection` targets the plate origin (the port has no
-//!   `originMode`/plate-size settings) and solves the translate that puts the
-//!   mesh's raw bbox centre there. `Lift`/`Drop` use the mesh's raw minimum Z
-//!   and the source's `PLATE_CLEARANCE_MM` (0.001 mm).
+//! * **Transform limits.** The entity carries the full Euler rotation and the
+//!   per-axis scale, so all three rotation fields and all three scale fields
+//!   reach it. `Center Selection` still solves only the Z-rotation case (it
+//!   turns by `rotation[2]` and scales by `scale[0..1]`, ignoring X/Y rotation),
+//!   and `Lift`/`Drop` still treat the bottom as
+//!   `position.z + scale[2] * mesh_min_z`, which is approximate for a tilted
+//!   model. `Center Selection` targets the plate origin (the port has no
+//!   `originMode`/plate-size settings). `Lift`/`Drop` use the mesh's raw minimum
+//!   Z and the source's `PLATE_CLEARANCE_MM` (0.001 mm). Uniform scaling starts
+//!   on (`page.tsx`'s `useState(true)`).
 //! * **History.** `on_position_commit`, `on_rotation_complete`,
 //!   `on_scale_commit` and `on_transform_commit` are no-ops: the port has no
 //!   undo history.
@@ -393,8 +395,8 @@ pub(crate) fn sync_from_entity(entity: &WeakEntity<DragonFruit>, cx: &mut App) {
                     .map(|batches| batches.straight_shafts.len() + batches.tapered_shafts.len())
                     .unwrap_or(0);
                 store.transform.position = this.translate;
-                store.transform.rotation = [0.0, 0.0, this.rotate_z];
-                store.transform.scale = [this.scale; 3];
+                store.transform.rotation = this.rotation;
+                store.transform.scale = this.scale;
                 if let Some(mesh) = this.mesh.as_ref() {
                     store.transform.has_bbox = true;
                     store.transform.original_size = mesh.size;
@@ -445,10 +447,8 @@ fn flush(
         .update(cx, |this, cx| {
             if transform_changed {
                 this.translate = position;
-                // The entity rotates about Z only.
-                this.rotate_z = rotation[2];
-                // The entity scales uniformly.
-                this.scale = scale[0];
+                this.rotation = rotation;
+                this.scale = scale;
             }
             cx.notify();
         })
@@ -476,15 +476,16 @@ fn transform_actions(
     let (d, n) = flags!();
     let on_center = Rc::new(move || {
         // `handleCenterSelectedModels` targets the plate centre. The port has no
-        // `originMode`/plate size, and the plate is centred on the origin. The
-        // model matrix applies `translate + Rz(rotation) * (scale * raw)`, so
-        // solve for the translate that puts the raw bbox centre at (0, 0).
+        // `originMode`/plate size, and the plate is centred on the origin. This
+        // is still the Z-rotation/uniform-scale solve: it takes
+        // `translate + Rz(rotation) * (scale * raw)` and puts the raw bbox centre
+        // at (0, 0), ignoring X/Y rotation and axes 0/1 of the scale.
         with_store(|store| {
             let angle = store.transform.rotation[2];
             let (sin, cos) = angle.sin_cos();
-            let scale = store.transform.scale[0];
-            let x = scale * store.mesh_center[0];
-            let y = scale * store.mesh_center[1];
+            let scale = store.transform.scale;
+            let x = scale[0] * store.mesh_center[0];
+            let y = scale[1] * store.mesh_center[1];
             store.transform.position[0] = -(cos * x - sin * y);
             store.transform.position[1] = -(sin * x + cos * y);
         });
@@ -544,7 +545,7 @@ fn transform_actions(
         with_store(|store| {
             if store.has_mesh {
                 let bottom =
-                    store.transform.position[2] + store.transform.scale[0] * store.mesh_min_z;
+                    store.transform.position[2] + store.transform.scale[2] * store.mesh_min_z;
                 store.transform.position[2] += store.transform.lift_distance - bottom;
             }
         });
@@ -556,7 +557,7 @@ fn transform_actions(
         with_store(|store| {
             if store.has_mesh {
                 let bottom =
-                    store.transform.position[2] + store.transform.scale[0] * store.mesh_min_z;
+                    store.transform.position[2] + store.transform.scale[2] * store.mesh_min_z;
                 store.transform.position[2] += PLATE_CLEARANCE_MM - bottom;
             }
         });

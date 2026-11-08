@@ -117,12 +117,32 @@ fn session_round_trip() {
             orthographic: false,
         }),
         active_tool: 3,
+        rotation: [0.0, -0.5, std::f32::consts::FRAC_PI_2],
         panel_layout: layout,
         ..gpui_store::Session::default()
     };
 
     store.save_session(&session).expect("save");
     assert_eq!(store.load_session(), session);
+}
+
+#[test]
+fn an_older_session_file_without_rotation_loads_the_identity_rotation() {
+    let (_dir, store) = store();
+    // Written before `rotation` existed: no `rotation` key at all.
+    fs::write(
+        store.path(StoreFile::Session),
+        br#"{"lastFile": "C:/models/part.voxl", "activeTool": 2, "camera": {"yaw": 1.0}}"#,
+    )
+    .expect("write older");
+
+    let session = store.load_session();
+    assert_eq!(
+        session.last_file,
+        Some(std::path::PathBuf::from("C:/models/part.voxl"))
+    );
+    assert_eq!(session.active_tool, 2);
+    assert_eq!(session.rotation, [0.0; 3]);
 }
 
 #[test]

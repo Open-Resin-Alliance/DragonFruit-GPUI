@@ -7,7 +7,7 @@
 //! * the `MESH` payload is a whole STL file (`codec-v2.ts`: `mimeType ??
 //!   'model/stl'`, "MESH chunk is a whole STL payload"), so it goes through
 //!   the same loader as a dropped `.stl`;
-//! * `MODL[0].transform` becomes the viewport's translate / rotate_z / scale.
+//! * `MODL[0].transform` becomes the viewport's translate / rotation / scale.
 //!
 //! The rest of the `Scene` is kept verbatim on the entity for the support
 //! panel: `SUPP` carries the support document, and the remaining models are
@@ -27,10 +27,11 @@ pub struct Imported {
     pub mesh: MeshData,
     /// `MODL[0].transform.position`, `[x, y, z]` in millimetres.
     pub translate: [f32; 3],
-    /// `MODL[0].transform.rotation.z` — the viewport only carries a Z angle.
-    pub rotate_z: f32,
-    /// `MODL[0].transform.scale.x` — the viewport carries one uniform scale.
-    pub scale: f32,
+    /// `MODL[0].transform.rotation`, `[x, y, z]` Euler radians about the fixed
+    /// world axes — `ModelTransform::rotation` (`Euler('ZYX')` in the scene).
+    pub rotation: [f32; 3],
+    /// `MODL[0].transform.scale`, `[x, y, z]`.
+    pub scale: [f32; 3],
 }
 
 /// Read a VOXL container and collapse its first model into the port's mesh
@@ -99,16 +100,24 @@ pub fn load(path: &Path) -> Result<Imported> {
         finite_or(axis("position", "y"), 0.0),
         finite_or(axis("position", "z"), 0.0),
     ];
-    let rotate_z = finite_or(axis("rotation", "z"), 0.0);
-    // The viewport has a single uniform scale; the source's per-axis scale is
-    // [x, y, z] and real scenes author it uniformly.
-    let scale = uniform_scale(axis("scale", "x"));
+    let rotation = [
+        finite_or(axis("rotation", "x"), 0.0),
+        finite_or(axis("rotation", "y"), 0.0),
+        finite_or(axis("rotation", "z"), 0.0),
+    ];
+    // Real scenes author the scale uniformly, but the document carries three
+    // components and the viewport now keeps all three.
+    let scale = [
+        uniform_scale(axis("scale", "x")),
+        uniform_scale(axis("scale", "y")),
+        uniform_scale(axis("scale", "z")),
+    ];
 
     Ok(Imported {
         scene,
         mesh,
         translate,
-        rotate_z,
+        rotation,
         scale,
     })
 }

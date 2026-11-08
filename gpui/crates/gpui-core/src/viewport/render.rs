@@ -57,12 +57,14 @@ impl Viewport {
             // The footprint outline is drawn with the scene uniform, not the
             // model's, so the hull is baked through `model` here — otherwise it
             // stays at the plate centre after the model is dragged.
-            if self.mesh_ptr != ptr || self.mesh_matrix != model {
-                let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("viewport vertices"),
-                    contents: bytemuck::cast_slice(&mesh.vertices),
-                    usage: wgpu::BufferUsages::VERTEX,
-                });
+            //
+            // The geometry buffer is *not* part of that: the vertices never
+            // change with the transform, and re-uploading them on every frame of
+            // a drag is what used to make moving a high-poly model crawl. Only
+            // the footprint — a few hundred points — follows the matrix.
+            let mesh_changed = self.mesh_ptr != ptr;
+            let matrix_changed = self.mesh_matrix != model;
+            if mesh_changed || matrix_changed {
                 let mut outline = Vec::with_capacity(mesh.footprint.len() * 2);
                 for index in 0..mesh.footprint.len() {
                     for point in [
@@ -73,19 +75,35 @@ impl Viewport {
                         outline.push([world.x, world.y]);
                     }
                 }
-                let footprint_buffer =
-                    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("viewport footprint"),
-                        contents: bytemuck::cast_slice(&outline),
-                        usage: wgpu::BufferUsages::VERTEX,
+                if mesh_changed {
+                    let vertex_buffer =
+                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("viewport vertices"),
+                            contents: bytemuck::cast_slice(&mesh.vertices),
+                            usage: wgpu::BufferUsages::VERTEX,
+                        });
+                    let footprint_buffer =
+                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("viewport footprint"),
+                            contents: bytemuck::cast_slice(&outline),
+                            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                        });
+                    self.mesh = Some(GpuMesh {
+                        vertex_buffer,
+                        vertex_count: mesh.vertices.len() as u32,
+                        footprint_buffer,
+                        footprint_vertex_count: outline.len() as u32,
                     });
-                self.mesh = Some(GpuMesh {
-                    vertex_buffer,
-                    vertex_count: mesh.vertices.len() as u32,
-                    footprint_buffer,
-                    footprint_vertex_count: outline.len() as u32,
-                });
-                self.mesh_ptr = ptr;
+                    self.mesh_ptr = ptr;
+                } else if let Some(gpu) = &self.mesh {
+                    // Same mesh, same outline length: the hull is a copy, not a
+                    // new buffer.
+                    queue.write_buffer(
+                        &gpu.footprint_buffer,
+                        0,
+                        bytemuck::cast_slice(&outline),
+                    );
+                }
                 self.mesh_matrix = model;
             }
         } else {
@@ -237,11 +255,20 @@ impl Viewport {
         if gizmo_vertices != self.gizmo_vertices.as_slice() {
             self.gizmo_vertex_count = gizmo_vertices.len() as u32;
             if !gizmo_vertices.is_empty() {
-                self.gizmo_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("viewport gizmo"),
-                    contents: bytemuck::cast_slice(gizmo_vertices),
-                    usage: wgpu::BufferUsages::VERTEX,
-                });
+                let bytes: &[u8] = bytemuck::cast_slice(gizmo_vertices);
+                if self.gizmo_buffer.size() < bytes.len() as u64 {
+                    // Grow in powers of two: the handle set changes size when
+                    // hover reveals an outline or a halo, and the buffer must
+                    // not be reallocated per frame while a drag moves the gizmo.
+                    let capacity = (bytes.len() as u64).next_power_of_two();
+                    self.gizmo_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                        label: Some("viewport gizmo"),
+                        size: capacity.max(24),
+                        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                    });
+                }
+                queue.write_buffer(&self.gizmo_buffer, 0, bytes);
             }
             self.gizmo_vertices.clear();
             self.gizmo_vertices.extend_from_slice(gizmo_vertices);

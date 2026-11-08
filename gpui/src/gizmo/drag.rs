@@ -1,4 +1,4 @@
-//! The drag state machine: one gesture, one handle, three entity fields.
+//! The drag state machine: one gesture, one handle, one transform.
 //!
 //! Each handle family keeps the maths its source component used:
 //!
@@ -6,11 +6,13 @@
 //!   ray and the drag axis, measured against the gizmo centre captured at press
 //!   so frame-to-frame numbers stay in one frame while the model moves;
 //! * **the centre nub** — `GizmoCenter`'s world-XY plane hit, Z pinned;
-//! * **the ring** — `GizmoRotation`/`rotationDialModel`'s ray-to-ring-plane
+//! * **the rings** — `GizmoRotation`/`rotationDialModel`'s ray-to-ring-plane
 //!   intersection, turned into a sweep from the angle the handle was grabbed
-//!   at, with the centre singularity and press slop the source keeps;
-//! * **the scale hexagons** — `GizmoScale`'s screen-distance ratio along the
-//!   press direction, clamped to 0.01…100, applied to the scale the drag found.
+//!   at, with the centre singularity and press slop the source keeps. Each ring
+//!   writes its own Euler component;
+//! * **the scale cubes** — `GizmoScale`'s screen-distance ratio along the press
+//!   direction, clamped to 0.01…100 and multiplied into the scale the drag
+//!   found (`applyScaleFactor`).
 //!
 //! The protractor dial's magnet is not ported: there is no dial overlay to
 //! display it against, and an invisible magnet would read as the ring sticking.
@@ -41,7 +43,8 @@ pub struct Drag {
     /// Scale: the screen distance and direction from the centre at press.
     start_distance: f32,
     start_direction: Vec2,
-    start_scale: f32,
+    /// Scale: the per-axis scale the drag found at press.
+    start_scale: Vec3,
     /// Scale: the model's underside at press, in world Z, and its local minimum
     /// Z, so `preserveModelBottom`'s rule can be restated here.
     base_bottom: Option<(f32, f32)>,
@@ -83,8 +86,8 @@ impl Drag {
                 let (origin, direction) = view.ray(pointer);
                 drag.axis_param = axis_param(view.center, axis.unit(), origin, direction);
             }
-            Handle::Ring(_) => {
-                let (_, angle) = view.ring_hit(pointer)?;
+            Handle::Ring(axis) => {
+                let (_, angle) = view.ring_hit(pointer, axis)?;
                 drag.last_angle = angle;
             }
             Handle::Scale(_) => {
@@ -100,7 +103,7 @@ impl Drag {
                 };
                 if let Some(min_z) = mesh_min_z {
                     drag.base_bottom = Some((
-                        base.translate.z + base.scale * min_z,
+                        base.translate.z + base.scale.z * min_z,
                         min_z,
                     ));
                 }
@@ -150,7 +153,7 @@ impl Drag {
                 self.transform.translate += axis.unit() * magnitude;
                 self.axis_param = next;
             }
-            Handle::Ring(_) => {
+            Handle::Ring(axis) => {
                 // `DIAL_MOVE_SLOP_PX`: a press that never meant to rotate stays
                 // at zero instead of committing a fraction of a degree.
                 if pointer.distance(self.press) <= DIAL_MOVE_SLOP_PX {
@@ -163,15 +166,19 @@ impl Drag {
                         return None;
                     }
                 }
-                let (_, angle) = view.ring_hit(pointer)?;
+                let (_, angle) = view.ring_hit(pointer, axis)?;
                 let delta = shortest_angle_delta(self.last_angle, angle);
                 if delta == 0.0 {
                     return None;
                 }
-                // `SceneCanvas` applies the emitted delta negated, so a positive
-                // sweep is a positive Z rotation; the entity stores radians and
-                // the panel reads them back wrapped, as a quaternion would.
-                self.transform.rotate_z = wrap_angle(self.transform.rotate_z + delta);
+                // The ring's frame is right-handed about its axis, so the sweep
+                // is already the rotation about that axis (`emittedDeltaForSweep`
+                // and `SceneCanvas` cancel their two negations). The entity
+                // stores the three world-axis angles, so one ring writes one
+                // component — the same value the panel's row shows.
+                let index = axis.index();
+                self.transform.rotation[index] =
+                    wrap_angle(self.transform.rotation[index] + delta);
                 self.last_angle = angle;
             }
             Handle::Scale(_) => {
@@ -179,12 +186,15 @@ impl Drag {
                 let delta = pointer - center_px;
                 let projected = delta.dot(self.start_direction);
                 let ratio = (projected / self.start_distance.max(1e-6)).clamp(0.01, 100.0);
-                // `applyScaleFactor`'s floor, then the source's uniform branch.
+                // `applyScaleFactor`'s floor, then its uniform branch: one
+                // factor times every axis. A per-axis mode would set one
+                // component here instead, which is why the transform carries a
+                // vector rather than a scalar.
                 self.transform.scale = self.start_scale * ratio.max(0.0001);
                 if let Some((bottom, min_z)) = self.base_bottom {
                     // `preserveModelBottom`: the model's underside stays put, so
                     // scaling does not sink it into the plate or lift it off.
-                    self.transform.translate.z = bottom - self.transform.scale * min_z;
+                    self.transform.translate.z = bottom - self.transform.scale.z * min_z;
                 }
             }
             Handle::Center => {

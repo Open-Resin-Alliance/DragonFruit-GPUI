@@ -619,11 +619,7 @@ pub fn supports_body(count: usize, entity: WeakEntity<DragonFruit>) -> impl Into
             generate_entity
                 .update(cx, |this, cx| {
                     if let Some(mesh) = this.mesh.as_ref() {
-                        let model = glam::Mat4::from_scale_rotation_translation(
-                            glam::Vec3::splat(this.scale),
-                            glam::Quat::from_rotation_z(this.rotate_z),
-                            glam::Vec3::from_array(this.translate),
-                        );
+                        let model = this.model_matrix();
                         let points = stl::overhang_points(mesh, this.support_angle);
                         let target = (300.0 * this.support_density).max(1.0) as usize;
                         let stride = (points.len() / target).max(1);
@@ -986,11 +982,7 @@ pub fn export_body(entity: WeakEntity<DragonFruit>) -> impl IntoElement {
                             else {
                                 return;
                             };
-                            let transform = glam::Mat4::from_scale_rotation_translation(
-                                glam::Vec3::splat(this.scale),
-                                glam::Quat::from_rotation_z(this.rotate_z),
-                                glam::Vec3::from_array(this.translate),
-                            );
+                            let transform = this.model_matrix();
                             // The source reports through `exportSuccessToast` /
                             // `exportErrorToast`; the shell owns the toast layer.
                             // A failure logs the error and toasts a fixed message.

@@ -10,16 +10,16 @@
 use glam::Vec2;
 
 use super::constants::{
-    ARROW_PICK_RADIUS, CENTER_PICK_PX, RING_MINOR_RADIUS, SCALE_HEXAGON_RADIUS,
+    ARROW_PICK_RADIUS, CENTER_PICK_PX, RING_TUBE_RADIUS, SCALE_HEXAGON_RADIUS,
 };
 use super::layout::{distance_to_segment, View};
 use super::types::{Axis, Handle};
 
-/// A ring is a thin tube; a pick radius three times the drawn thickness is the
-/// smallest band that is comfortable with a mouse, and never below 6px so an
-/// edge-on ring stays grabbable.
+/// A ring is a 0.016-unit tube; a pick radius three times the drawn thickness is
+/// still under 3px, so the band is never below 6px — an edge-on ring stays
+/// grabbable, and the whole circumference answers rather than only the diamond.
 fn ring_pick_px(pixels_per_unit: f32) -> f32 {
-    (RING_MINOR_RADIUS * 3.0 * pixels_per_unit).max(6.0)
+    (RING_TUBE_RADIUS * 3.0 * pixels_per_unit).max(6.0)
 }
 
 /// `GizmoScale`'s proxy box is `scaleHexagonRadius * 2.3` across; half of that
@@ -32,8 +32,8 @@ fn scale_pick_px(pixels_per_unit: f32) -> f32 {
 /// The handle under `pointer`, or `None` when the pointer is off the gizmo.
 ///
 /// Ties are resolved by distance, so where an arrow crosses its own ring the
-/// nearer one wins. The centre nub is tested too: it is an opaque ball in front
-/// of everything else, exactly as the source's pick sphere is.
+/// nearer one wins. The centre nub is tested too: it is an opaque disc in front
+/// of everything else, exactly as the source's disc and pick sphere are.
 pub fn pick(view: &View<'_>, pointer: Vec2) -> Option<Handle> {
     let center_px = view.project(view.center)?;
     let pixels_per_unit = view.pixels_per_unit();
@@ -66,7 +66,7 @@ pub fn pick(view: &View<'_>, pointer: Vec2) -> Option<Handle> {
             );
         }
 
-        // Scale handles: a round test at the hexagon's centre.
+        // Scale handles: a round test at the cube's centre.
         if let Some(handle_px) = view.project(view.scale_handle(axis)) {
             consider(
                 Handle::Scale(axis),
@@ -74,26 +74,28 @@ pub fn pick(view: &View<'_>, pointer: Vec2) -> Option<Handle> {
                 scale_pick_px(pixels_per_unit),
             );
         }
-    }
 
-    // Rotation ring: distance to the projected circle, sampled as a polyline.
-    let ring_axis = view.ring_axis();
-    let ring_threshold = ring_pick_px(pixels_per_unit);
-    const RING_SEGMENTS: usize = 48;
-    let ring: Vec<Vec2> = (0..RING_SEGMENTS)
-        .filter_map(|index| {
-            let angle = index as f32 / RING_SEGMENTS as f32 * std::f32::consts::TAU;
-            view.project(view.ring_point(ring_axis, angle))
-        })
-        .collect();
-    if ring.len() > 1 {
-        let mut nearest = f32::INFINITY;
-        for index in 0..ring.len() {
-            let a = ring[index];
-            let b = ring[(index + 1) % ring.len()];
-            nearest = nearest.min(distance_to_segment(pointer, a, b));
+        // Rotation rings: distance to the projected circle, sampled as a
+        // polyline. The source picks only the diamond handle; the whole
+        // circumference is a far larger and steadier target, and each ring is
+        // its own plane so the three do not compete except where they cross.
+        let ring_threshold = ring_pick_px(pixels_per_unit);
+        const RING_SEGMENTS: usize = 48;
+        let ring: Vec<Vec2> = (0..RING_SEGMENTS)
+            .filter_map(|index| {
+                let angle = index as f32 / RING_SEGMENTS as f32 * std::f32::consts::TAU;
+                view.project(view.ring_point(axis, angle))
+            })
+            .collect();
+        if ring.len() > 1 {
+            let mut nearest = f32::INFINITY;
+            for index in 0..ring.len() {
+                let a = ring[index];
+                let b = ring[(index + 1) % ring.len()];
+                nearest = nearest.min(distance_to_segment(pointer, a, b));
+            }
+            consider(Handle::Ring(axis), nearest, ring_threshold);
         }
-        consider(Handle::Ring(ring_axis), nearest, ring_threshold);
     }
 
     best.map(|(handle, _)| handle)
