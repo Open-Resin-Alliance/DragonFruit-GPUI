@@ -1292,8 +1292,8 @@ fn cube_hit(view: &CubeView, faces: &[FaceProjection], pointer: [f32; 2]) -> Opt
 // The glyph's path spans 16x10 of a 24-unit viewBox, so the box has to be
 // larger than the triangle it draws: 44x30 renders a ~29x19 arrowhead, which is
 // a touch under the TS widget's.
-const QUARTER_W: f32 = 38.0;
-const QUARTER_H: f32 = 26.0;
+const QUARTER_W: f32 = 30.0;
+const QUARTER_H: f32 = 22.0;
 /// How far each arrow's centre sits from the widget centre. The cube is ~73% of
 /// the widget, so this leaves a small gap rather than a ring at the edge.
 const QUARTER_OFFSET: f32 = CUBE_WIDGET * 0.5 - 12.0;
@@ -1338,8 +1338,8 @@ fn quarter_arrow(
         .items_center()
         .justify_center()
         .cursor_pointer()
-        .opacity(fade * 0.9)
-        .hover(|style| style.opacity(fade))
+        .opacity(fade * 0.55)
+        .hover(|style| style.opacity(fade * 0.9))
         .on_click(move |_, _, cx| {
             let (yaw, pitch) = {
                 let camera = camera.borrow();
