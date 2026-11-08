@@ -235,7 +235,7 @@ pub(crate) fn ui_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>) -> 
                     );
                 let mut rows = div().flex().flex_col().gap(px(6.));
                 for row in section.rows {
-                    rows = rows.child(color_row(row, theme_color(state, row.key)));
+                    rows = rows.child(color_row(row, theme_color(state, row.key), entity.clone(), ColorRowTarget::Theme));
                 }
                 card = card.child(rows);
                 grid = grid.child(card);
@@ -270,7 +270,7 @@ pub(crate) fn ui_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>) -> 
                 );
             let mut grid = div().grid().grid_cols(2).gap(px(6.));
             for row in MESH_HIGHLIGHT_COLOR_FIELDS.iter() {
-                grid = grid.child(color_row(row, theme_color(state, row.key)));
+                grid = grid.child(color_row(row, theme_color(state, row.key), entity.clone(), ColorRowTarget::Theme));
             }
             card = card.child(grid);
             root.child(card)
@@ -308,7 +308,7 @@ pub(crate) fn ui_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>) -> 
                     .get(field.key)
                     .cloned()
                     .unwrap_or_else(|| field.placeholder.to_owned());
-                grid = grid.child(color_row(field, value));
+                grid = grid.child(color_row(field, value, entity.clone(), ColorRowTarget::Cut));
             }
             card = card.child(grid);
             root.child(card)
@@ -346,11 +346,29 @@ pub(crate) fn theme_sub_tab(
         .child(label)
 }
 
-/// One theme colour entry: label on the left, swatch and stored hex on the
-/// right (`grid-cols-[minmax(0,1fr)_10.75rem]`).
-pub(crate) fn color_row(field: &'static ColorField, value: String) -> Div {
+/// Which map a colour row writes: the UI & Theme table, or the Cut tool's
+/// palette.
+#[derive(Clone, Copy)]
+pub(crate) enum ColorRowTarget {
+    Theme,
+    Cut,
+}
+
+/// One theme colour entry: label on the left, swatch and the hex `<input>` on
+/// the right (`grid-cols-[minmax(0,1fr)_10.75rem]`).
+///
+/// The hex box commits on every keystroke, as `UISettingsTab.tsx:246-254` does
+/// (`onThemeColorChange(row.key, event.target.value)`), and shows the row's
+/// placeholder while the stored value is empty.
+pub(crate) fn color_row(
+    field: &'static ColorField,
+    value: String,
+    entity: WeakEntity<DragonFruit>,
+    target: ColorRowTarget,
+) -> Div {
     let label = field.label;
     let description = field.description;
+    let row_entity = entity;
     div()
         .rounded(px(6.))
         .border_1()
@@ -381,20 +399,27 @@ pub(crate) fn color_row(field: &'static ColorField, value: String) -> Div {
                         .gap(px(6.))
                         .child(swatch(&value, 32., 28.))
                         .child(
-                            div()
-                                .flex_1()
-                                .min_w(px(0.))
-                                .h(px(28.))
-                                .px(px(8.))
-                                .flex()
-                                .items_center()
-                                .rounded(px(6.))
-                                .border_1()
-                                .border_color(rgb(BORDER_SUBTLE))
-                                .bg(rgb(SURFACE_0))
-                                .text_size(px(12.))
-                                .text_color(rgb(TEXT_STRONG))
-                                .child(value),
+                            div().flex_1().min_w(px(0.)).child(text_input(
+                                field.key,
+                                value.clone(),
+                                field.placeholder,
+                                false,
+                                28.0,
+                                move |next, _, cx| {
+                                    let key = field.key;
+                                    edit_and_notify(&row_entity, cx, |draft| {
+                                        let next = next.to_owned();
+                                        match target {
+                                            ColorRowTarget::Theme => {
+                                                draft.theme_colors.insert(key, next);
+                                            }
+                                            ColorRowTarget::Cut => {
+                                                draft.cut_colors.insert(key, next);
+                                            }
+                                        }
+                                    });
+                                },
+                            )),
                         ),
                 ),
         )
@@ -407,7 +432,9 @@ pub(crate) fn color_row(field: &'static ColorField, value: String) -> Div {
         )
 }
 
-/// The Mesh tab's Selection/Hover colour input (`ColorSwatchInput` + `.ui-input`).
+/// The Mesh tab's Selection/Hover colour input (`ColorSwatchInput` + the hex
+/// `<input>` of `MeshSettingsTab.tsx:525-555`): the swatch cycles the stored
+/// value (no native picker here) and the box commits every keystroke.
 pub(crate) fn color_field(
     label: &'static str,
     value: String,
@@ -415,6 +442,7 @@ pub(crate) fn color_field(
     entity: WeakEntity<DragonFruit>,
     key: &'static str,
 ) -> Div {
+    let field_entity = entity.clone();
     div()
         .flex()
         .flex_col()
@@ -448,17 +476,19 @@ pub(crate) fn color_field(
                     div()
                         .w(px(120.)) // w-[7.5rem]
                         .min_w(px(0.))
-                        .h(px(32.))
-                        .px(px(8.))
-                        .flex()
-                        .items_center()
-                        .rounded(px(6.))
-                        .border_1()
-                        .border_color(rgb(BORDER_SUBTLE))
-                        .bg(rgb(SURFACE_0))
-                        .text_size(px(12.))
-                        .text_color(rgb(TEXT_STRONG))
-                        .child(value),
+                        .child(text_input(
+                            id,
+                            value.clone(),
+                            "#ec2a77",
+                            false,
+                            32.0,
+                            move |next, _, cx| {
+                                let next = next.to_owned();
+                                edit_and_notify(&field_entity, cx, |draft| {
+                                    draft.theme_colors.insert(key, next);
+                                });
+                            },
+                        )),
                 ),
         )
 }

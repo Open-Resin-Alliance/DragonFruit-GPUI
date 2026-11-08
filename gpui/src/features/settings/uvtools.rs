@@ -5,6 +5,7 @@ use gpui_ui::ui::button_with_content;
 
 pub(crate) fn uvtools_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>) -> Div {
     let uvtools = &state.uvtools;
+    let path_entity = entity.clone();
     let enabled_entity = entity;
     // `detectPlatform() === 'mac'` decides the executable label.
     let executable_label = if cfg!(target_os = "macos") {
@@ -105,11 +106,20 @@ pub(crate) fn uvtools_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>
                 ))
                 .child(
                     div().mt(px(8.)).child(text_field(
+                        "uvtools-custom-path",
                         &uvtools.custom_path,
-                        &format!("Select or type the path to {executable_label}"),
+                        format!("Select or type the path to {executable_label}"),
                         true,
                         30.0,
                         12.0,
+                        {
+                            let path_entity = path_entity.clone();
+                            move |text, _, cx| {
+                                edit_and_notify(&path_entity, cx, |draft| {
+                                    draft.uvtools.custom_path = text.to_owned();
+                                });
+                            }
+                        },
                     )),
                 ),
         );

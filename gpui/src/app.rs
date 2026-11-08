@@ -29,6 +29,11 @@ use gpui_core::theme::*;
 #[path = "scene/mod.rs"]
 mod scene;
 
+// `--scenario`'s driver lives at `src/automation.rs`, a sibling of this file
+// rather than in the `src/app/` submodule directory, so name the path.
+#[path = "automation.rs"]
+pub(crate) mod automation;
+
 /// A file the drop/launch path can open: a plain mesh or a VOXL scene.
 enum Loaded {
     Mesh(stl::MeshData),
@@ -212,6 +217,18 @@ pub(crate) struct DragonFruit {
     pub(crate) hovered: Rc<Cell<bool>>,
     pub(crate) smoke: bool,
     pub(crate) smoke_done: Rc<Cell<bool>>,
+    /// `--scenario`: the steps the first frame hands to the driver. Taken once,
+    /// so the driver is spawned exactly once.
+    pub(crate) scenario: Option<automation::Scenario>,
+    /// Whether the driver has been spawned (the `--scenario` run is one-shot).
+    pub(crate) automation_started: bool,
+    /// Frames rendered since launch. The automation driver waits for this to
+    /// advance before it clicks again, so a scenario never races a paint.
+    pub(crate) frames: u64,
+    /// The panel ids the last frame passed to `panel_stack`. The automation
+    /// snapshot reads this to prove a rail tile mounted its panel rather than
+    /// merely moved a flag.
+    pub(crate) mounted_panels: Vec<&'static str>,
     pub(crate) mode: Mode,
     pub(crate) show_settings: bool,
     pub(crate) layout: gpui_core::panel_layout::PanelLayout,
@@ -335,11 +352,21 @@ pub(crate) struct DragonFruit {
 
 impl DragonFruit {
     pub(crate) fn new(cx: &mut Context<Self>) -> Self {
-        let smoke = std::env::args().any(|arg| arg == "--smoke");
-        let path = std::env::args()
-            .skip(1)
-            .find(|arg| !arg.starts_with("--"))
-            .map(PathBuf::from);
+        let cli = cli_args();
+        let smoke = cli.smoke;
+        // A malformed scenario is a runner bug, not a UI state: report it and
+        // leave before a window exists.
+        let scenario = match cli.scenario {
+            Some(path) => match automation::Scenario::load(&path) {
+                Ok(scenario) => Some(scenario),
+                Err(error) => {
+                    eprintln!("scenario: {error}");
+                    std::process::exit(2);
+                }
+            },
+            None => None,
+        };
+        let path = cli.file;
 
         // The store is the only state that outlives the process:
         // `settings.json` hydrates the settings draft once, and `session.json`
@@ -347,7 +374,17 @@ impl DragonFruit {
         // The camera is not restored: a launch has no open file, so it starts
         // at the home pose the source uses. A store that cannot open leaves
         // every one of those at its default and disables the saves below.
-        let store = gpui_store::Store::open().ok();
+        //
+        // A scenario gets a throwaway store: it must not read the user's
+        // restored tool/rotation, or the same script would pass on one machine
+        // and fail on another, and it must not write over their session.
+        let store = if scenario.is_some() {
+            let root = std::env::temp_dir().join("dragonfruit-gpui-scenario");
+            let _ = std::fs::remove_dir_all(&root);
+            Some(gpui_store::Store::at(root))
+        } else {
+            gpui_store::Store::open().ok()
+        };
         let session = match &store {
             Some(store) => {
                 features::settings::hydrate(store.load_settings());
@@ -371,6 +408,10 @@ impl DragonFruit {
             hovered: Rc::new(Cell::new(false)),
             smoke,
             smoke_done: Rc::new(Cell::new(false)),
+            scenario,
+            automation_started: false,
+            frames: 0,
+            mounted_panels: Vec::new(),
             mode: Mode::Prepare,
             show_settings: false,
             layout: gpui_core::panel_layout::PanelLayout::new(),
@@ -1053,6 +1094,11 @@ impl Drop for DragonFruit {
 
 impl Render for DragonFruit {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // `--scenario`'s driver paces itself on this: a frame it can see here
+        // has already been painted, so the hitboxes of the state change before
+        // it are in `rendered_frame` by the time it clicks again.
+        self.frames = self.frames.wrapping_add(1);
+
         // `handleModeChange`: an empty scene can only be Prepare.
         if self.mesh.is_none() && self.mode != Mode::Prepare {
             self.mode = Mode::Prepare;
@@ -1616,6 +1662,15 @@ impl Render for DragonFruit {
             window.focus(&self.focus, cx);
             self.focused = true;
         }
+        // `--scenario`: hand the steps to the driver once, from the frame whose
+        // paint gives it hitboxes to click. The driver waits for that paint
+        // itself (see `automation::run`).
+        if !self.automation_started {
+            if let Some(scenario) = self.scenario.take() {
+                self.automation_started = true;
+                automation::start(scenario, window, cx);
+            }
+        }
         let key_entity = entity.clone();
         div()
             .size_full()
@@ -1948,6 +2003,10 @@ impl Render for DragonFruit {
                         .content(panels::content::printing_body(entity.clone())),
                     ),
                 }
+                // What the frame is about to mount, for `--scenario`'s
+                // snapshot: this is the panel stack's own input, so a rail tile
+                // that sets a flag but mounts nothing shows up as a missing id.
+                self.mounted_panels = defs.iter().map(|def| def.id).collect();
                 panels::list::panel_stack(&self.layout, defs, entity.clone())
             })
             // The Z-up gizmo sits 72px from the right edge, 22px from the
@@ -2155,6 +2214,50 @@ fn toast_view(toast: Toast) -> impl IntoElement {
                 .child(toast.text),
         ),
     )
+}
+
+/// The launch arguments the shell understands.
+///
+/// `--scenario <path>` takes a value, so its argument must not be mistaken for
+/// the model file the way a bare first non-flag argument is.
+struct Cli {
+    smoke: bool,
+    scenario: Option<PathBuf>,
+    file: Option<PathBuf>,
+}
+
+fn cli_args() -> Cli {
+    let mut cli = Cli {
+        smoke: false,
+        scenario: None,
+        file: None,
+    };
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut index = 0;
+    while index < args.len() {
+        let argument = args[index].as_str();
+        let mut advance = 1;
+        match argument.split_once('=') {
+            Some(("--scenario", value)) => cli.scenario = Some(PathBuf::from(value)),
+            _ => match argument {
+                "--smoke" => cli.smoke = true,
+                "--scenario" => {
+                    if let Some(value) = args.get(index + 1) {
+                        cli.scenario = Some(PathBuf::from(value));
+                        advance = 2;
+                    }
+                }
+                other if other.starts_with("--") => {}
+                other => {
+                    if cli.file.is_none() {
+                        cli.file = Some(PathBuf::from(other));
+                    }
+                }
+            },
+        }
+        index += advance;
+    }
+    cli
 }
 
 /// Milliseconds since the Unix epoch, the unit `openedAt` uses.

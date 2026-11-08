@@ -86,15 +86,16 @@ use gpui::{
 };
 
 use gpui_core::icons::icon;
-use gpui_ui::panel_fields::{format_number, with_alpha};
+use gpui_ui::panel_fields::with_alpha;
 use gpui_core::theme::*;
 use gpui_ui::ui::{
     ButtonSize, ButtonSpec, ButtonVariant, IconButtonSize, IconButtonVariant, SelectOption,
-    SelectOptionTone, ToggleSize, button_with, icon_button, input_box, labeled_number_field,
-    select_dropdown, toggle_sized, tooltip,
+    SelectOptionTone, ToggleSize, button_with, icon_button, input_box, select_dropdown,
+    toggle_sized, tooltip,
 };
 use serde_json::{Value, json};
 
+use crate::features::settings::fields::number_on_blur;
 use crate::DragonFruit;
 
 // ── Constants ───────────────────────────────────────────────────────────────
@@ -1478,6 +1479,10 @@ fn help_text(text: &'static str) -> Div {
 
 /// `NumberField` — `LabeledNumberInput`'s labelled field with the default
 /// stepper, never a slider.
+///
+/// The box is `settings::fields::number_on_blur`: `LabeledNumberInput` commits
+/// from `onBlur` / Enter, never while typing (`profileFormAtoms.tsx:329-345`),
+/// and the two carets are its `nudge(±1)`.
 fn number_field(
     def: &'static KnobDef,
     value: f32,
@@ -1491,16 +1496,43 @@ fn number_field(
     let max = def.max;
     let key = def.key;
 
-    let up_entity = entity.clone();
-    let up = move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
-        let next = normalize_value(value + step, min, max, step);
-        edit_and_notify(&up_entity, cx, |state| state.draft.set_knob(key, next));
+    let commit_entity = entity.clone();
+    let commit = move |next: f32, _: &mut Window, cx: &mut App| {
+        let next = normalize_value(next, min, max, step);
+        edit_and_notify(&commit_entity, cx, |state| state.draft.set_knob(key, next));
     };
-    let down_entity = entity.clone();
-    let down = move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
-        let next = normalize_value(value - step, min, max, step);
-        edit_and_notify(&down_entity, cx, |state| state.draft.set_knob(key, next));
+
+    let chevron = |id: &'static str, slug: &'static str| {
+        div()
+            .id(id)
+            .w(px(12.0))
+            .h(px(12.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(4.0))
+            .child(icon(slug, 10.0, TEXT_MUTED))
     };
+    let mut up_button = chevron("auto-support-up", "chevron-up");
+    if locked {
+        up_button = up_button.opacity(0.5);
+    } else {
+        let up_entity = entity.clone();
+        up_button = up_button.cursor_pointer().on_click(move |_, _, cx| {
+            let next = normalize_value(value + step, min, max, step);
+            edit_and_notify(&up_entity, cx, |state| state.draft.set_knob(key, next));
+        });
+    }
+    let mut down_button = chevron("auto-support-down", "chevron-down");
+    if locked {
+        down_button = down_button.opacity(0.5);
+    } else {
+        let down_entity = entity.clone();
+        down_button = down_button.cursor_pointer().on_click(move |_, _, cx| {
+            let next = normalize_value(value - step, min, max, step);
+            edit_and_notify(&down_entity, cx, |state| state.draft.set_knob(key, next));
+        });
+    }
 
     let field = div()
         .flex()
@@ -1509,17 +1541,35 @@ fn number_field(
         .w_full()
         .child(label_row(def.label, hint, &id))
         .child(
-            labeled_number_field(
-                id.clone(),
-                format_number(value),
-                def.unit,
-                locked,
-                !locked,
-                !locked,
-                up,
-                down,
-            )
-            .w_full(),
+            div()
+                .relative()
+                .w_full()
+                .child(number_on_blur(
+                    id.clone(),
+                    value,
+                    def.unit.map(|unit| (unit, 1.0)),
+                    min,
+                    max,
+                    2,
+                    locked,
+                    36.0,
+                    commit,
+                ))
+                .child(
+                    div()
+                        .absolute()
+                        .top(px(0.0))
+                        .bottom(px(0.0))
+                        .right(px(4.0))
+                        .w(px(16.0))
+                        .flex()
+                        .flex_col()
+                        .items_center()
+                        .justify_center()
+                        .gap(px(2.0))
+                        .child(up_button)
+                        .child(down_button),
+                ),
         );
 
     if locked {

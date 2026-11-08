@@ -109,8 +109,11 @@ pub(crate) fn round_to(value: f32, decimals: u32) -> f32 {
 /// `NumberInput` — the value box with the source's stacked `ChevronUp` /
 /// `ChevronDown` stepper (`absolute inset-y-0 right-0.5 w-4`, two 12px tiles).
 ///
-/// The box is not editable here: typing needs a text-input entity this slice
-/// does not have (see the module note).
+/// The box is a real editor now: [`number_typed`] commits each keystroke the
+/// way `NumberInput.tsx:74-97` does, and the two tiles are the same steppers.
+/// `font` and `background` no longer size the box — `.ui-input`'s unlayered
+/// `font-size: 13px` and `background: var(--surface-0)` win over the
+/// `text-sm`/inline-background the source passes, as they do in the app.
 pub(crate) fn number_input(
     id: &'static str,
     value: f32,
@@ -119,15 +122,15 @@ pub(crate) fn number_input(
     step: f32,
     width: Option<f32>,
     height: f32,
-    font: f32,
-    background: u32,
+    _font: f32,
+    _background: u32,
     enabled: bool,
     on_change: impl Fn(f32, &mut App) + 'static,
 ) -> Div {
     let decimals = step_decimals(step);
     let on_change: Rc<dyn Fn(f32, &mut App)> = Rc::new(on_change);
     let up = on_change.clone();
-    let down = on_change;
+    let down = on_change.clone();
     let at_max = value >= max;
     let at_min = value <= min;
 
@@ -166,23 +169,21 @@ pub(crate) fn number_input(
     };
 
     container
-        .child(
-            div()
-                .h(px(height))
-                .w_full()
-                .flex()
-                .items_center()
-                .rounded(px(6.)) // rounded-md
-                .border_1()
-                .border_color(rgb(BORDER_SUBTLE))
-                .bg(rgb(background))
-                .pl(px(10.))
-                .pr(px(20.)) // pr-5
-                .text_size(px(font))
-                .text_color(rgb(TEXT_STRONG))
-                .when(!enabled, |this| this.opacity(0.5))
-                .child(format_number(value)),
-        )
+        .child(number_typed(
+            id,
+            value,
+            min,
+            max,
+            // `fmt.field(value, 2)`: at most two fraction digits, no trailing
+            // zeros; the stepper rounds to its own step above.
+            2,
+            !enabled,
+            height,
+            {
+                let on_change = on_change.clone();
+                move |next, _, cx| on_change(next, cx)
+            },
+        ))
         .child(
             div()
                 .absolute()
@@ -279,36 +280,23 @@ pub(crate) fn stat_label(label: &str) -> Div {
         .child(label.to_owned())
 }
 
-/// A read-only text field in the source's shape. Typing needs a text-input
-/// entity this slice does not have, so the value (or placeholder) is painted.
-/// `mono` is accepted for the source's `font-mono` call sites; no monospace
-/// face is registered in this slice.
+/// The source's `.ui-input` text box, now a real editor: [`text_input`] commits
+/// every keystroke, the way `PluginsSettingsTab.tsx:805-812` writes `repoUrl`.
+///
+/// `mono` is accepted for the source's `font-mono` call sites; no monospace face
+/// is registered in this slice. `font` is kept for the call sites' own
+/// bookkeeping — `.ui-input`'s unlayered 13px type wins over it.
 pub(crate) fn text_field(
+    key: &'static str,
     value: &str,
-    placeholder: &str,
+    placeholder: impl Into<SharedString>,
     mono: bool,
     height: f32,
-    font: f32,
-) -> Div {
+    _font: f32,
+    on_change: impl Fn(&str, &mut Window, &mut App) + 'static,
+) -> AnyElement {
     let _ = mono;
-    let empty = value.is_empty();
-    div()
-        .h(px(height))
-        .w_full()
-        .flex()
-        .items_center()
-        .rounded(px(6.))
-        .border_1()
-        .border_color(rgb(BORDER_SUBTLE))
-        .bg(rgb(SURFACE_1))
-        .px(px(10.))
-        .text_size(px(font))
-        .text_color(rgb(if empty { TEXT_MUTED } else { TEXT_STRONG }))
-        .child(if empty {
-            placeholder.to_owned()
-        } else {
-            value.to_owned()
-        })
+    text_input(key, value, placeholder, false, height, on_change)
 }
 
 /// `rounded-md border px-3 py-2` callout with a leading icon.
@@ -507,6 +495,10 @@ pub(crate) fn segmented(
 }
 
 /// `ScrollableNumberField`: 32px steppers around a centred value box.
+///
+/// The box is editable: [`number_on_blur`] matches this control's
+/// `commitOnBlur` mode (`scrollableNumberField.tsx:94-131`), which is the mode
+/// the General tab's custom scale uses (`GeneralSettingsTab.tsx:237`).
 pub(crate) fn number_control(
     id: &'static str,
     value: f32,
@@ -544,29 +536,20 @@ pub(crate) fn number_control(
                 .on_click(move |_, _, cx| decrease((value - step).max(min), cx)),
         )
         .child(
-            div()
-                .flex_1()
-                .min_w(px(0.))
-                .h(px(32.))
-                .flex()
-                .items_center()
-                .justify_center()
-                .gap(px(2.))
-                .rounded(px(6.))
-                .border_1()
-                .border_color(rgb(BORDER_SUBTLE))
-                .bg(rgb(SURFACE_0))
-                .text_size(px(12.))
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(rgb(TEXT_STRONG))
-                .child(format_number(value))
-                .child(
-                    div()
-                        .text_size(px(10.))
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(rgb(TEXT_MUTED))
-                        .child(unit),
-                ),
+            div().flex_1().min_w(px(0.)).child(number_on_blur(
+                id,
+                value,
+                Some((unit, 1.0)),
+                min,
+                max,
+                2,
+                false,
+                32.0,
+                {
+                    let increase = increase.clone();
+                    move |next, _, cx| increase(next, cx)
+                },
+            )),
         )
         .child(
             div()

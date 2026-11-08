@@ -1,0 +1,8 @@
+{
+  "name": "DELIBERATELY WRONG: the gate must reject this",
+  "steps": [
+    { "kind": "click", "target": "appbar/settings" },
+    { "kind": "expect", "state": { "show_settings": true } },
+    { "kind": "expect", "state": { "show_settings": false } }
+  ]
+}

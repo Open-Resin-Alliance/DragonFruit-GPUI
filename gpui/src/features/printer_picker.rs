@@ -38,10 +38,16 @@
 //!    source's `networkAdapter ? 'choose' : 'manual'`. Scanning never yields a
 //!    device, so the scan tab renders the source's `No printers found.` state,
 //!    and the manual-IP card cannot connect.
-//! 3. GPUI has no editable text field in this port (`gpui-ui`'s own note), so
-//!    the library search box shows its placeholder and the manual-IP field shows
-//!    `192.168.1.100`. The catalogue is small enough that the manufacturer rail
-//!    is the filter that matters.
+//! 3. The library search box and the manual-IP box are real editors
+//!    (`settings::fields::text_input`): the search commits per keystroke into
+//!    `search` and filters name / manufacturer / family exactly as
+//!    `OnboardingPrinterLibrary.tsx:86-97` does (a non-empty term drops the
+//!    manufacturer filter and shows one flat grid), and the IP box commits into
+//!    `networkIpAddress` with Enter/Connect following the source's enabled
+//!    state. Connect still cannot reach an adapter (deviation 2). The source's
+//!    `Search` glyph inside the search box is omitted: the shared `.ui-input`
+//!    element's text inset is fixed at 10px, so the glyph and the first
+//!    characters would overlap.
 //! 4. Printer artwork is not part of the GPUI asset set, so every card renders
 //!    the source's own fallback (`Printer` for the generic preset, `ImagePlus`
 //!    for the rest). `profile.thumbnail` on the bar stays `None`.
@@ -76,9 +82,10 @@ use gpui_core::icons::icon;
 use gpui_core::theme::*;
 use gpui_ui::ui::{
     ButtonSize, ButtonSpec, ButtonVariant, IconTone, ProgressSize, button, button_with,
-    button_with_content, dialog_modal, fade_text, input_box, progress_bar, spinner,
+    button_with_content, dialog_modal, fade_text, progress_bar, spinner,
 };
 
+use crate::features::settings::fields::text_input;
 use crate::DragonFruit;
 use crate::chrome::app_bar::PrinterBadge;
 
@@ -304,6 +311,11 @@ pub struct PrinterStore {
     family_preset: Option<String>,
 
     mode: SetupMode,
+    /// `search` (`OnboardingPrinterLibrary.tsx:46`): the library's search term.
+    search: String,
+    /// `networkIpAddress` (`ProfileSettingsModal.tsx:435`): the manual-IP
+    /// card's host.
+    manual_ip: String,
     /// The network scan's results. Empty in this port (deviation 2) but modelled
     /// so the device rows are real when an adapter exists.
     devices: Vec<DeviceRow>,
@@ -358,6 +370,8 @@ impl PrinterStore {
             selected_preset: None,
             family_preset: None,
             mode: SetupMode::Manual,
+            search: String::new(),
+            manual_ip: String::new(),
             devices: Vec::new(),
             scanning: false,
             scan_error: None,
@@ -694,6 +708,16 @@ struct PickerView {
     materials: Vec<MaterialRow>,
     active_material: Option<String>,
     mode: SetupMode,
+    /// The library's search term, as typed.
+    search: String,
+    /// `isSearching`: a non-empty term bypasses the manufacturer filter and
+    /// shows one flat grid instead of the family sections.
+    is_searching: bool,
+    /// `networkIpAddress`: the manual-IP card's host.
+    manual_ip: String,
+    /// The filtered presets in catalogue order, which is the order the flat
+    /// searching grid uses.
+    flat: Vec<PresetRow>,
     devices: Vec<(String, String, Option<u32>)>,
     scanning: bool,
     scan_error: Option<String>,
@@ -759,11 +783,32 @@ fn view() -> PickerView {
         _ => manufacturers.first().cloned(),
     };
 
-    // `filteredPresets`: the search term is empty in this port, so the
-    // manufacturer is the only filter.
+    // `filteredPresets` (`OnboardingPrinterLibrary.tsx:86-97`): a search term
+    // matches name / manufacturer / family and drops the manufacturer filter,
+    // an empty term filters by the selected manufacturer only.
+    let term = store.search.trim().to_lowercase();
+    let is_searching = !term.is_empty();
     let filtered: Vec<&PrinterPreset> = store
         .library_presets()
-        .filter(|preset| manufacturer.as_deref() == Some(preset.manufacturer.as_str()))
+        .filter(|preset| {
+            let manufacturer_match = term.is_empty()
+                || manufacturer.as_deref() == Some(preset.manufacturer.as_str());
+            let search_match = term.is_empty()
+                || preset.name.to_lowercase().contains(&term)
+                || preset.manufacturer.to_lowercase().contains(&term)
+                || preset
+                    .family
+                    .as_deref()
+                    .unwrap_or("")
+                    .to_lowercase()
+                    .contains(&term);
+            manufacturer_match && search_match
+        })
+        .collect();
+    // The flat grid keeps catalogue order.
+    let flat: Vec<PresetRow> = filtered
+        .iter()
+        .map(|preset| store.row(preset))
         .collect();
     // `groupedPresets`: family order is first-seen order.
     let mut groups: Vec<(String, Vec<PresetRow>)> = Vec::new();
@@ -847,6 +892,10 @@ fn view() -> PickerView {
         materials,
         active_material: store.active_material.clone(),
         mode: store.mode,
+        search: store.search.clone(),
+        is_searching,
+        manual_ip: store.manual_ip.clone(),
+        flat,
         devices,
         scanning: store.scanning,
         scan_error: store.scan_error.clone(),
@@ -987,37 +1036,29 @@ fn library_body(view: &PickerView, entity: WeakEntity<DragonFruit>) -> Div {
 }
 
 fn library_sidebar(view: &PickerView, entity: WeakEntity<DragonFruit>) -> Div {
-    // `p-2` search band, `border-b`.
+    // `p-2` search band, `border-b`. The source draws a `Search` glyph at
+    // `left-3` inside the box and pads the text to 2.5rem; the shared `.ui-input`
+    // element's text inset is fixed at 10px, so the glyph would sit on top of the
+    // first characters and is left out (see the module deviations).
     let search = div()
         .p(px(8.0))
         .border_b_1()
         .border_color(rgb(BORDER_SUBTLE))
-        .child(
-            div()
-                .relative()
-                .flex()
-                .items_center()
-                .child(
-                    div()
-                        .absolute()
-                        .left(px(12.0))
-                        .child(icon("search", 16.0, TEXT_MUTED)),
-                )
-                .child(
-                    input_box("printer-library-search", false)
-                        .h(px(32.0))
-                        // `paddingLeft: 2.5rem; paddingRight: 0.625rem`.
-                        .pl(px(40.0))
-                        .pr(px(10.0))
-                        .py(px(0.0))
-                        .w_full()
-                        .text_size(px(12.0))
-                        .text_color(rgb(TEXT_MUTED))
-                        // The placeholder the source shows while the term is
-                        // empty (deviation 3: the box cannot be typed into).
-                        .child("Search printers"),
-                ),
-        );
+        .child({
+            let search_entity = entity.clone();
+            div().w_full().child(text_input(
+                "printer-library-search",
+                view.search.clone(),
+                "Search printers",
+                false,
+                32.0,
+                move |text, _, cx| {
+                    let text = text.to_owned();
+                    edit(move |store| store.search = text);
+                    search_entity.update(cx, |_, cx| cx.notify()).ok();
+                },
+            ))
+        });
 
     let mut list = div()
         .id("printer-library-manufacturers")
@@ -1036,6 +1077,7 @@ fn library_sidebar(view: &PickerView, entity: WeakEntity<DragonFruit>) -> Div {
             // `setSelectedManufacturer` + `setSearch('')`; the source keeps the
             // card selection, and `handleAdd` resolves it in the full set.
             store.manufacturer = Some(click_manufacturer.clone());
+            store.search.clear();
         });
         list = list.child(
             div()
@@ -1088,6 +1130,16 @@ fn library_grid(view: &PickerView, entity: WeakEntity<DragonFruit>) -> Div {
             .text_size(px(12.0))
             .text_color(rgb(TEXT_MUTED))
             .child("No printers match your search.");
+    }
+
+    if view.is_searching {
+        // `isSearching`: one flat `grid-cols-[repeat(auto-fill,minmax(176px,1fr))]`
+        // of every match, without the family sections.
+        let mut cards = div().flex().flex_wrap().gap(px(10.0));
+        for row in &view.flat {
+            cards = cards.child(preset_card(row, view, entity.clone()));
+        }
+        return cards;
     }
 
     let mut column = div().flex().flex_col().gap(px(8.0));
@@ -1458,9 +1510,9 @@ fn setup_body(view: &PickerView, entity: WeakEntity<DragonFruit>) -> Div {
     }
 
     let content = match view.mode {
-        SetupMode::Manual => variant_rows(view, entity),
+        SetupMode::Manual => variant_rows(view, entity.clone()),
         SetupMode::Scan => scan_body(view, entity.clone()),
-        SetupMode::Ip => ip_body(view),
+        SetupMode::Ip => ip_body(view, entity),
     };
     // `overflow_y_scroll` needs an element id, and an id makes the element
     // stateful; the extra plain wrapper keeps this function returning `Div`.
@@ -1785,7 +1837,7 @@ fn scan_body(view: &PickerView, entity: WeakEntity<DragonFruit>) -> Div {
     body
 }
 
-fn ip_body(view: &PickerView) -> Div {
+fn ip_body(view: &PickerView, entity: WeakEntity<DragonFruit>) -> Div {
     let mut body = div().flex().flex_col().gap(px(12.0));
 
     if let Some(detected) = &view.detected {
@@ -1822,15 +1874,21 @@ fn ip_body(view: &PickerView) -> Div {
                 ),
         );
     } else {
-        body = body.child(manual_ip_card(view));
+        body = body.child(manual_ip_card(view, entity));
     }
     body
 }
 
-/// `ManualIpEntryCard`. The field cannot be typed into (deviation 3), so the
-/// connect action is the source's disabled state.
-fn manual_ip_card(view: &PickerView) -> Div {
+/// `ManualIpEntryCard` (`SetupMethodChooser.tsx:106-160`): the IP box commits
+/// every keystroke into `networkIpAddress`, Enter connects, and Connect stays in
+/// the source's disabled state while the host is blank.
+///
+/// The connect action still cannot reach a network adapter in this slice
+/// (deviation 2), so pressing it clears nothing and reports nothing — the box
+/// and its enabled/disabled state are the source's.
+fn manual_ip_card(view: &PickerView, entity: WeakEntity<DragonFruit>) -> Div {
     let connecting = view.connecting.is_some();
+    let can_connect = !view.manual_ip.trim().is_empty();
     let connect: AnyElement = if connecting {
         let spec = ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Auto)
             .radius(999.0)
@@ -1859,17 +1917,26 @@ fn manual_ip_card(view: &PickerView) -> Div {
             .gap(4.0)
             .icon("wifi", 14.0, ACCENT_SECONDARY)
             .fill(SURFACE_1, BORDER_SUBTLE, ACCENT_SECONDARY);
-        // An empty host makes `handleManualIpConnect` return without doing
-        // anything; the port cannot fill the field, so the tile stays muted.
-        button_with_content(
+        let connect = button_with_content(
             "printer-manual-connect",
             &spec,
             div().flex().items_center().child("Connect"),
         )
-        .h(px(34.0))
-        .opacity(0.45)
-        .cursor_not_allowed()
-        .into_any_element()
+        .h(px(34.0));
+        if can_connect {
+            connect
+                .on_click(click_edit(&entity, |_store: &mut PrinterStore| {
+                    // `handleManualIpConnect` needs the network adapter this
+                    // slice does not ship (deviation 2).
+                }))
+                .into_any_element()
+        } else {
+            // `disabled={isConnecting || !value.trim()}`.
+            connect
+                .opacity(0.45)
+                .cursor_not_allowed()
+                .into_any_element()
+        }
     };
 
     div()
@@ -1891,17 +1958,21 @@ fn manual_ip_card(view: &PickerView) -> Div {
                 .flex()
                 .items_center()
                 .gap(px(8.0))
-                .child(
-                    input_box("printer-manual-ip", false)
-                        .h(px(34.0))
-                        .min_w(px(0.0))
-                        .flex_1()
-                        .px(px(10.0))
-                        .py(px(6.0))
-                        .text_size(px(FONT_MD))
-                        .text_color(rgb(TEXT_MUTED))
-                        .child("192.168.1.100"),
-                )
+                .child({
+                    let ip_entity = entity.clone();
+                    div().min_w(px(0.0)).flex_1().child(text_input(
+                        "printer-manual-ip",
+                        view.manual_ip.clone(),
+                        "192.168.1.100",
+                        false,
+                        34.0,
+                        move |text, _, cx| {
+                            let text = text.to_owned();
+                            edit(move |store| store.manual_ip = text);
+                            ip_entity.update(cx, |_, cx| cx.notify()).ok();
+                        },
+                    ))
+                })
                 .child(connect),
         )
 }

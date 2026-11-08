@@ -22,9 +22,12 @@
 //!   renders as an absolute child under the trigger (6px below, full trigger
 //!   width, 320px cap) and therefore scrolls with the panel; a click outside
 //!   does not dismiss it — selecting a row or re-clicking the trigger does.
-//! - `NumberInput` / `ScrollableNumberField` show the value and the source's
-//!   steppers; typing (and wheel stepping) needs a text-input entity this slice
-//!   does not have, so the box is not editable.
+//! - `NumberInput` / `ScrollableNumberField` are real editors now: the box is
+//!   `gpui_ui`'s `text_field` driven through `fields` (an element that builds
+//!   the field in `request_layout`, where `App` exists), and each one keeps the
+//!   source's commit timing — `NumberInput` per keystroke, `LabeledNumberInput`
+//!   and `ScrollableNumberField`'s `commitOnBlur` mode on blur/Enter. Wheel
+//!   stepping and ArrowUp/Down nudging are still not wired.
 //! - Range inputs render as the `.ui-range` track with the accent fill and a
 //!   knob at the current value; dragging is not wired in this slice.
 //! - The shader preview canvas, `react-colorful` picker and colour-swatch
@@ -86,8 +89,8 @@ use std::rc::Rc;
 use std::sync::{LazyLock, Mutex};
 
 use gpui::{
-    App, Div, FontWeight, IntoElement, MouseButton, SharedString, Stateful, WeakEntity, div,
-    linear_color_stop, linear_gradient, prelude::*, px, relative, rgb, rgba,
+    AnyElement, App, Div, FontWeight, IntoElement, MouseButton, SharedString, Stateful, WeakEntity,
+    Window, div, linear_color_stop, linear_gradient, prelude::*, px, relative, rgb, rgba,
 };
 
 use gpui_core::icons::icon;
@@ -105,6 +108,7 @@ pub mod backups;
 pub mod camera;
 pub mod defaults;
 pub mod experiments;
+pub mod fields;
 pub mod general;
 pub mod hotkeys;
 pub mod logging;
@@ -128,6 +132,7 @@ pub(crate) use backups::*;
 pub(crate) use camera::*;
 pub(crate) use defaults::*;
 pub(crate) use experiments::*;
+pub(crate) use fields::*;
 pub(crate) use general::*;
 pub(crate) use hotkeys::*;
 pub(crate) use logging::*;

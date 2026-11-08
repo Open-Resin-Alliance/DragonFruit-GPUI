@@ -32,11 +32,12 @@
 //!
 //! # PORT DEVIATIONS
 //!
-//! 1. **Text entry.** GPUI has no editable text input in this port (the same
-//!    note `features::settings` and `features::printer_picker` carry), so the
-//!    `LabeledInput` fields paint their value and the number fields are stepped
-//!    only. The source's `onChange` paths exist as the stepping handlers; a
-//!    typed character cannot reach them yet.
+//! 1. **Text entry.** The `LabeledInput` fields are real `.ui-input` editors
+//!    (`settings::fields::text_input`, committed per keystroke as
+//!    `profileFormAtoms.tsx:201-212` does) and the number fields commit on
+//!    blur/Enter through `fields::number_on_blur`, which is
+//!    `LabeledNumberInput`'s `commit()` timing. The two carets stay as its
+//!    `nudge(±1)`.
 //! 2. **Profile artwork.** `imageDataUrl` is a data URL and the port has no
 //!    decoder or asset pipeline for it, so an uploaded image renders the
 //!    well with a `printer` glyph in the image's place — the source's own
@@ -97,7 +98,7 @@ use gpui_ui::ui::{
     button_with, icon_button, select_dropdown,
 };
 
-use crate::features::settings::widgets::number_input;
+use crate::features::settings::fields::{locked_box, number_on_blur, text_input};
 use crate::DragonFruit;
 
 use super::model::{self, BitDepth, PixelSize, PrinterProfile, SafetyMarginMm};
@@ -374,6 +375,10 @@ fn field_shell(text: &str) -> Div {
 
 /// `LabeledNumberInput`: `min` defaults to 0, no default upper cap, and the
 /// stepper's own default step (`|value| < 1 ? 0.01 : 1`) is the caller's.
+///
+/// The box is [`number_on_blur`] — `LabeledNumberInput` commits from `onBlur`
+/// and Enter, never while typing (`profileFormAtoms.tsx:329-345`) — and the two
+/// carets are its `nudge(1)` / `nudge(-1)`.
 fn labeled_number(
     id: &'static str,
     label: &str,
@@ -384,56 +389,85 @@ fn labeled_number(
     disabled: bool,
     on_change: impl Fn(f32, &mut App) + 'static,
 ) -> Div {
-    let background = if disabled {
-        // `color-mix(in srgb, var(--surface-2), black 8%)`.
-        mix(SURFACE_2, BLACK, 0.92)
-    } else {
-        SURFACE_0
+    let on_change: std::rc::Rc<dyn Fn(f32, &mut App)> = std::rc::Rc::new(on_change);
+    let up = on_change.clone();
+    let down = on_change.clone();
+    let nudge = |id: &'static str,
+                 slug: &'static str,
+                 delta: f32,
+                 callback: std::rc::Rc<dyn Fn(f32, &mut App)>| {
+        let mut button = div()
+            .id(id)
+            .w(px(12.0))
+            .h(px(12.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(4.0))
+            .child(icon(slug, 10.0, TEXT_MUTED));
+        if disabled {
+            button = button.opacity(0.5);
+        } else {
+            let callback = callback.clone();
+            button = button.cursor_pointer().on_click(move |_, _, cx| {
+                let next = (value + delta).clamp(min, max);
+                callback(next, cx);
+            });
+        }
+        button
     };
-    field_shell(label).child(number_input(
-        id,
-        value,
-        min,
-        max,
-        step,
-        None,
-        36.0,
-        // `.ui-input` is unlayered, so its `font-size: var(--font-size-sm)`
-        // (13px) outranks the field's `text-sm` in the source.
-        FONT_SM,
-        background,
-        !disabled,
-        on_change,
-    ))
-}
 
-/// `.ui-input w-full h-[36px] px-2.5 leading-tight text-sm`, painted rather
-/// than typed into (deviation 1). The unlayered `.ui-input` rule keeps its
-/// 13px type and 1.3 line-height against the field's `text-sm`.
-fn readonly_input(value: &str) -> Div {
-    div()
-        .h(px(36.0))
-        .w_full()
-        .flex()
-        .items_center()
-        .rounded(px(ROUNDED_SM))
-        .border_1()
-        .border_color(rgb(BORDER_SUBTLE))
-        .bg(rgb(SURFACE_0))
-        .px(px(10.0))
-        .text_size(px(FONT_SM))
-        .line_height(px(FONT_SM * 1.3))
-        .text_color(rgb(TEXT_STRONG))
-        .child(SharedString::from(value.to_owned()))
-}
-
-/// `LabeledInput`'s read-only painting (deviation 1).
-fn labeled_text(label: &str, value: &str, disabled: bool) -> Div {
     field_shell(label).child(
         div()
-            .when(disabled, |this| this.opacity(0.55))
-            .child(readonly_input(value)),
+            .relative()
+            .w_full()
+            .child(number_on_blur(
+                id,
+                value,
+                None,
+                min,
+                max,
+                2,
+                disabled,
+                36.0,
+                {
+                    let on_change = on_change.clone();
+                    move |next, _, cx| on_change(next, cx)
+                }
+            ))
+            .child(
+                div()
+                    .absolute()
+                    .top(px(0.0))
+                    .bottom(px(0.0))
+                    .right(px(4.0))
+                    .w(px(16.0))
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .justify_center()
+                    .gap(px(2.0))
+                    .child(nudge("editor-up", "chevron-up", step, up))
+                    .child(nudge("editor-down", "chevron-down", -step, down)),
+            ),
     )
+}
+
+/// `LabeledInput` (`profileFormAtoms.tsx:186-216`): the label above an editable
+/// `.ui-input` that commits every keystroke, or — for a field the source
+/// disables on an official profile — the same box painted and locked.
+fn labeled_text(
+    key: &'static str,
+    label: &str,
+    value: &str,
+    disabled: bool,
+    on_change: impl Fn(&str, &mut Window, &mut App) + 'static,
+) -> Div {
+    field_shell(label).child(if disabled {
+        locked_box(key, value.to_owned(), 36.0)
+    } else {
+        text_input(key, value.to_owned(), "", false, 36.0, on_change)
+    })
 }
 
 /// `LabeledSelectInput` / `SelectDropdown` with `h-[36px] px-2.5 pr-10 text-sm`.
@@ -836,22 +870,55 @@ fn official_banner(profile_id: &str, entity: &WeakEntity<DragonFruit>) -> Div {
 
 /// `Identity` (`:5577-5640`).
 fn identity_section(profile: &PrinterProfile, entity: &WeakEntity<DragonFruit>, official: bool) -> Div {
+    let name_entity = WeakEntity::clone(entity);
+    let name_id = profile.id.clone();
+    let manufacturer_entity = WeakEntity::clone(entity);
+    let manufacturer_id = profile.id.clone();
+    let notes_entity = WeakEntity::clone(entity);
+    let notes_id = profile.id.clone();
+
     let fields = div()
         .flex_1()
         .min_w(px(0.0))
         .flex()
         .flex_col()
         .gap(px(12.0))
-        .child(labeled_text("Printer Name", &profile.name, official))
         .child(labeled_text(
+            "printer-editor-name",
+            "Printer Name",
+            &profile.name,
+            official,
+            move |value, _, cx| {
+                write(
+                    &name_entity,
+                    &name_id,
+                    |p| p.name = value.to_owned(),
+                    cx,
+                );
+            },
+        ))
+        .child(labeled_text(
+            "printer-editor-manufacturer",
             "Manufacturer",
             profile.manufacturer.as_deref().unwrap_or(""),
             official,
+            move |value, _, cx| {
+                write(
+                    &manufacturer_entity,
+                    &manufacturer_id,
+                    |p| p.manufacturer = Some(value.to_owned()),
+                    cx,
+                );
+            },
         ))
         .child(labeled_text(
+            "printer-editor-notes",
             "User Notes",
             profile.notes.as_deref().unwrap_or(""),
             false,
+            move |value, _, cx| {
+                write(&notes_entity, &notes_id, |p| p.notes = Some(value.to_owned()), cx);
+            },
         ));
 
     section_card()

@@ -25,12 +25,10 @@
 //!
 //! # PORT DEVIATIONS
 //!
-//! 1. **No text entry.** The GPUI slice has no editable text field
-//!    (`gpui_ui::ui`'s own module note), so `Name` and `Manufacturer` render
-//!    their value in an input frame without a caret. Create therefore starts
-//!    from the source's literal `New Material` / `Default` draft and Save cannot
-//!    rename it. The source's draft fields are still modelled and written, so
-//!    the day a text input lands only the two `input_field` calls change.
+//! 1. **Text entry.** `Name` and `Manufacturer` are real `.ui-input` editors
+//!    (`settings::fields::text_input`) that commit into the form's draft on
+//!    every keystroke, as the source's `LabeledInput` does. Nothing reaches the
+//!    store until the form's own Save, which is the source's draft contract.
 //! 2. **Custom colours** need the source's `ColorSwatchInput` + native picker;
 //!    GPUI has only a filled swatch. `Custom Color` commits the source's own
 //!    fallback `#8a8f98`, and the row's swatch previews it. The ten named
@@ -90,10 +88,10 @@ use gpui_core::theme::*;
 use gpui_ui::ui::{
     ButtonSize, ButtonSpec, ButtonVariant, CheckboxSize, CheckboxTone, IconButtonSize,
     IconButtonVariant, IconTone, SelectOption, SelectOptionTone, button_with, checkbox_with,
-    color_swatch, dialog_modal, fade_text, icon_button, input_field, labeled_number_field,
-    select_dropdown, tooltip,
+    color_swatch, dialog_modal, fade_text, icon_button, select_dropdown, tooltip,
 };
 
+use crate::features::settings::fields::{number_on_blur, text_input};
 use super::model::{self, MaterialProfile, PrinterProfile};
 use crate::DragonFruit;
 
@@ -1689,25 +1687,20 @@ fn field_label(label: &str) -> Div {
         .child(label.to_owned())
 }
 
-/// `LabeledInput` without the caret (deviation 1): the `.ui-input` frame and
-/// the value. An empty value shows the source's empty field.
-fn read_only_field(id: String, value: &str) -> Div {
-    let input = input_field(
-        ElementId::Name(SharedString::from(id)),
-        if value.is_empty() {
-            SharedString::default()
-        } else {
-            SharedString::from(value.to_owned())
-        },
-        false,
-    );
+/// `LabeledInput` (`profileFormAtoms.tsx:186-216`): the `.ui-input` frame with a
+/// real editor that commits every keystroke into the form's draft.
+fn editable_field(
+    id: String,
+    value: &str,
+    on_change: impl Fn(&str, &mut Window, &mut App) + 'static,
+) -> Div {
     div()
         .flex()
         .flex_col()
         .gap(px(4.0))
         .flex_1()
         .min_w(px(0.0))
-        .child(input.h(px(36.0)))
+        .child(text_input(id, value.to_owned(), "", false, 36.0, on_change))
 }
 
 fn paired_cell(left: Div, right: Option<Div>) -> Div {
@@ -1718,7 +1711,12 @@ fn paired_cell(left: Div, right: Option<Div>) -> Div {
     row
 }
 
-fn labelled_text(label: &str, id: String, value: &str) -> Div {
+fn labelled_text(
+    label: &str,
+    id: String,
+    value: &str,
+    on_change: impl Fn(&str, &mut Window, &mut App) + 'static,
+) -> Div {
     div()
         .flex()
         .flex_col()
@@ -1726,7 +1724,7 @@ fn labelled_text(label: &str, id: String, value: &str) -> Div {
         .flex_1()
         .min_w(px(0.0))
         .child(field_label(label))
-        .child(read_only_field(id, value))
+        .child(editable_field(id, value, on_change))
 }
 
 fn nudge(value: &mut f32, direction: f32) {
@@ -1769,15 +1767,7 @@ fn number_cell(
     entity: &WeakEntity<DragonFruit>,
 ) -> Div {
     let up_entity = entity.clone();
-    let up = move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
-        ui_edit(|state| toggle_draft(state, target, |draft| nudge(draft_mut(draft, field), 1.0)));
-        notify(&up_entity, cx);
-    };
     let down_entity = entity.clone();
-    let down = move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
-        ui_edit(|state| toggle_draft(state, target, |draft| nudge(draft_mut(draft, field), -1.0)));
-        notify(&down_entity, cx);
-    };
     div()
         .flex()
         .flex_col()
@@ -1785,16 +1775,86 @@ fn number_cell(
         .flex_1()
         .min_w(px(0.0))
         .child(field_label(label))
-        .child(labeled_number_field(
-            SharedString::from(id),
-            format_value(value),
-            None,
-            false,
-            true,
-            value > 0.0,
-            up,
-            down,
-        ))
+        .child({
+            let field_entity = entity.clone();
+            div()
+                .relative()
+                .w_full()
+                .child(number_on_blur(
+                    id,
+                    value,
+                    None,
+                    0.0,
+                    f32::INFINITY,
+                    3,
+                    false,
+                    36.0,
+                    move |next, _, cx| {
+                        let next = if next.is_finite() { next.max(0.0) } else { 0.0 };
+                        ui_edit(move |state| {
+                            toggle_draft(state, target, |draft| {
+                                *draft_mut(draft, field) = next;
+                            })
+                        });
+                        notify(&field_entity, cx);
+                    },
+                ))
+                .child(
+                    div()
+                        .absolute()
+                        .top(px(0.0))
+                        .bottom(px(0.0))
+                        .right(px(4.0))
+                        .w(px(16.0))
+                        .flex()
+                        .flex_col()
+                        .items_center()
+                        .justify_center()
+                        .gap(px(2.0))
+                        .child({
+                            let button = div()
+                                .id("material-field-up")
+                                .w(px(12.0))
+                                .h(px(12.0))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .rounded(px(4.0))
+                                .child(icon("chevron-up", 10.0, TEXT_MUTED));
+                            button.cursor_pointer().on_click(move |_, _, cx| {
+                                ui_edit(|state| {
+                                    toggle_draft(state, target, |draft| {
+                                        nudge(draft_mut(draft, field), 1.0)
+                                    })
+                                });
+                                notify(&up_entity, cx);
+                            })
+                        })
+                        .child({
+                            let button = div()
+                                .w(px(12.0))
+                                .id("material-field-down")
+                                .h(px(12.0))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .rounded(px(4.0))
+                                .child(icon("chevron-down", 10.0, TEXT_MUTED));
+                            if value > 0.0 {
+                                button.cursor_pointer().on_click(move |_, _, cx| {
+                                    ui_edit(|state| {
+                                        toggle_draft(state, target, |draft| {
+                                            nudge(draft_mut(draft, field), -1.0)
+                                        })
+                                    });
+                                    notify(&down_entity, cx);
+                                })
+                            } else {
+                                button.opacity(0.5)
+                            }
+                        }),
+                )
+        })
 }
 
 fn target_key(target: FormTarget) -> &'static str {
@@ -1988,8 +2048,28 @@ fn identity_card(
     entity: &WeakEntity<DragonFruit>,
 ) -> Div {
     let target_key = target_key(target);
-    let brand = labelled_text("Manufacturer", format!("{target_key}-brand"), &draft.brand);
-    let name = labelled_text("Name", format!("{target_key}-name"), &draft.name);
+    let brand_entity = entity.clone();
+    let brand = labelled_text(
+        "Manufacturer",
+        format!("{target_key}-brand"),
+        &draft.brand,
+        move |text, _, cx| {
+            let text = text.to_owned();
+            ui_edit(move |state| toggle_draft(state, target, |draft| draft.brand = text));
+            notify(&brand_entity, cx);
+        },
+    );
+    let name_entity = entity.clone();
+    let name = labelled_text(
+        "Name",
+        format!("{target_key}-name"),
+        &draft.name,
+        move |text, _, cx| {
+            let text = text.to_owned();
+            ui_edit(move |state| toggle_draft(state, target, |draft| draft.name = text));
+            notify(&name_entity, cx);
+        },
+    );
 
     let color_value = color_token(draft.color.as_deref());
     let color_select = {

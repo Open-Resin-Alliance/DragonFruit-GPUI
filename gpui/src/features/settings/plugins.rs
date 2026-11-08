@@ -6,6 +6,7 @@ pub(crate) fn plugins_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>
     let plugins = &state.plugins;
     let allowance_entity = entity.clone();
     let install_entity = entity.clone();
+    let repo_entity = entity.clone();
 
     // `installedRows` is empty: the profile store and the generated built-in
     // plugin manifests are not part of this slice.
@@ -54,11 +55,20 @@ pub(crate) fn plugins_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>
             .w(px(420.))
             .child(
                 div().flex_1().min_w(px(0.)).child(text_field(
+                    "plugins-repo-url",
                     &plugins.repo_url,
                     "https://github.com/owner/repo",
                     false,
                     34.0,
                     14.0,
+                    {
+                        let repo_entity = repo_entity.clone();
+                        move |text, _, cx| {
+                            edit_and_notify(&repo_entity, cx, |draft| {
+                                draft.plugins.repo_url = text.to_owned();
+                            });
+                        }
+                    },
                 )),
             )
             .child(

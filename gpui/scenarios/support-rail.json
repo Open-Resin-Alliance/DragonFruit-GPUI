@@ -1,0 +1,61 @@
+{
+  "name": "support rail: every tile mounts its panel",
+  "steps": [
+    { "kind": "wait", "ms": 1400 },
+    {
+      "kind": "expect",
+      "state": { "mode": "Prepare", "has_mesh": true, "panels": ["models"] }
+    },
+
+    { "kind": "click", "target": "step/support" },
+    {
+      "kind": "expect",
+      "state": { "mode": "Support", "panels": ["models", "support-settings"] }
+    },
+
+    { "kind": "click", "target": "rail/islands" },
+    {
+      "kind": "expect",
+      "state": {
+        "support_panel": "islands",
+        "panels": ["models", "support-islands"]
+      }
+    },
+
+    { "kind": "click", "target": "rail/manual" },
+    {
+      "kind": "expect",
+      "state": {
+        "support_panel": "manual",
+        "panels": ["models", "support-settings"]
+      }
+    },
+
+    { "kind": "click", "target": "rail/auto" },
+    {
+      "kind": "expect",
+      "state": {
+        "support_panel": "auto",
+        "panels": ["models", "support-auto"]
+      }
+    },
+
+    { "kind": "click", "target": "rail/hollowing" },
+    {
+      "kind": "expect",
+      "state": {
+        "support_panel": "hollowing",
+        "panels": ["models", "support-hollowing"]
+      }
+    },
+
+    { "kind": "click", "target": "rail/islands" },
+    {
+      "kind": "expect",
+      "state": {
+        "support_panel": "islands",
+        "panels": ["models", "support-islands"]
+      }
+    }
+  ]
+}

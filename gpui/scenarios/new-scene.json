@@ -1,0 +1,42 @@
+{
+  "name": "New scene: empties the plate and homes the camera",
+  "steps": [
+    { "kind": "wait", "ms": 1400 },
+    {
+      "kind": "expect",
+      "state": {
+        "has_mesh": true,
+        "selected": true,
+        "mode": "Prepare",
+        "camera_at_home": false,
+        "panels": ["models"]
+      }
+    },
+
+    { "kind": "click", "target": "appbar/menu" },
+    { "kind": "expect", "state": { "show_app_menu": true } },
+
+    { "kind": "click", "target": "menu/new-scene" },
+    {
+      "kind": "expect",
+      "state": {
+        "has_mesh": false,
+        "selected": false,
+        "show_app_menu": false,
+        "mode": "Prepare",
+        "panels": []
+      }
+    },
+
+    { "kind": "wait", "ms": 900 },
+    {
+      "kind": "expect",
+      "state": {
+        "has_mesh": false,
+        "camera_at_home": true,
+        "camera_target": [0, 0, 110],
+        "panels": []
+      }
+    }
+  ]
+}
