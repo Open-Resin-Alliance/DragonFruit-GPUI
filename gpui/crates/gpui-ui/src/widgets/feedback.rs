@@ -189,12 +189,14 @@ pub fn progress_bar_phase(value: f32, size: ProgressSize, indeterminate: bool, p
         .rounded_full()
         .bg(rgb(mix(SURFACE_2, BLACK, 0.80)));
     if indeterminate {
-        // The caller passes the travelling phase (0..1); the fill is 32% wide
-        // and sweeps the remaining 68%.
+        // The caller passes the travelling phase (0..1). The fill is 32% wide
+        // and travels from fully off the left edge to fully off the right, so it
+        // exits and re-enters instead of snapping back at the end: the offset
+        // range is -0.32..1.0 of the track, i.e. 1.32 units wide.
         track = track.child(
             div()
                 .absolute()
-                .left(relative(phase * 0.68))
+                .left(relative(-0.32 + phase.clamp(0.0, 1.0) * 1.32))
                 .top(px(0.0))
                 .bottom(px(0.0))
                 .w(relative(0.32))
