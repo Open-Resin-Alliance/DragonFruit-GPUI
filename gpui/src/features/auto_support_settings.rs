@@ -93,7 +93,7 @@ use gpui_ui::ui::{
     SelectOptionTone, ToggleSize, button_with, icon_button, input_box, labeled_number_field,
     select_dropdown, toggle_sized, tooltip,
 };
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 
 use crate::DragonFruit;
 

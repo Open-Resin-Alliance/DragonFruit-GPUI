@@ -572,9 +572,12 @@ impl DragonFruit {
         let mesh = Arc::new(mesh);
         // The intro animates from wherever the camera is (the parked home pose
         // in a fresh scene) to the model's framing.
+        // Frame where the model actually lands: the import placement moves it, so
+        // the raw bbox centre is no longer the model's world centre.
+        let world_center = mesh.center + glam::Vec3::from_array(self.translate);
         self.camera
             .borrow_mut()
-            .focus(mesh.center, mesh.radius.max(1.0));
+            .focus(world_center, mesh.radius.max(1.0));
         // `useSlicingManager`: `numLayers = ceil(heightMm / layerHeightMm)`.
         self.num_layers = (mesh.size[2] / LAYER_HEIGHT_MM).ceil().max(0.0) as u32;
         // The source opens with the upper thumb at the top and the lower at the

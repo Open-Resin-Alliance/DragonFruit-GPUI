@@ -24,18 +24,18 @@
 //!    — and `savePreset` restores the record's own block rather than writing
 //!    the live one into it (`presets.ts:723-731`). This module therefore holds
 //!    the panel's knobs in its own live block ([`StudioPresets::draft`]),
-//!    seeded once from the selected record at load and never re-seeded by a
-//!    selection nor written back by `Save`. (Persisting that block is the Auto
-//!    Support module's own job — `autoSupportPresets.ts`'s `writeStoredState` —
-//!    and is not ported in this slice; the dialog's copy is still memory-only.)
+//!    seeded once from the Auto Support module's live settings at load
+//!    ([`crate::features::auto_support_settings::live_settings`]) and never re-seeded by a
+//!    selection nor written back by `Save`.
 //! 2. **Factory records are ordinary editable records, not a lock.** All three
 //!    ship `isBuiltIn: false` (`presets.ts:146-153,210-217,239-246`) and
 //!    `presets.ts:779` states "All presets are now editable (no built-in
 //!    lock)". Their ids only identify the code-owned records the document never
 //!    stores; the panel's lock is [`active_locked`], the record's own flag.
-//!    Their complete `autoSupport` block is the seed for the live block on
-//!    load; their geometry tree is not reproduced, because no ported UI reads
-//!    it and every other key of a stored record round-trips untouched.
+//!    Their complete `autoSupport` block is carried through the record, but it
+//!    is never the live settings; their geometry tree is not reproduced, because
+//!    no ported UI reads it and every other key of a stored record round-trips
+//!    untouched.
 //! 3. **Save acknowledges the live block.** The source persists the live
 //!    settings on every edit and the preset on `Save`; the port's `Save` marks
 //!    the live block as acknowledged (clearing the dirty star) and leaves the
@@ -74,8 +74,9 @@ struct StudioPresets {
     /// `activePresetId`.
     active: String,
     /// The live auto-support block the panel edits (`getSettings().autoSupport`).
-    /// Seeded once from the selected record at load; a selection never re-seeds
-    /// it. `Save` acknowledges the block, `Reset` restores the acknowledgement.
+    /// Seeded once from [`crate::features::auto_support_settings::live_settings`]; a selection
+    /// never re-seeds it. `Save` acknowledges the block, `Reset` restores the
+    /// acknowledgement.
     draft: SupportSettingsValues,
     /// The block as last acknowledged by `Save`; `Reset` restores it.
     baseline: SupportSettingsValues,
@@ -108,7 +109,7 @@ impl StudioPresets {
             .active_preset_id
             .filter(|id| presets.iter().any(|preset| &preset.id == id))
             .unwrap_or_else(|| DEFAULT_PRESET_ID.to_string());
-        let values = values_of(&presets, &active);
+        let values = values_from_live(crate::features::auto_support_settings::live_settings());
 
         Self {
             store,
@@ -394,80 +395,31 @@ fn save(state: &StudioPresets) {
 
 // ── The `autoSupport` block ─────────────────────────────────────────────────
 
-/// The live block's initial seed: the selected record's stored
-/// `settings.autoSupport`.
+/// The panel's nine knobs, read from the live block the Auto Support module owns
+/// (`getSettings().autoSupport`).
 ///
-/// This is the one moment a record's block is read; a later selection never
-/// re-seeds the live block (`setActivePreset` preserves it).
-fn values_of(presets: &[SupportPreset], id: &str) -> SupportSettingsValues {
-    presets
-        .iter()
-        .find(|preset| preset.id == id)
-        .map(|preset| values_from_settings(&preset.settings))
-        .unwrap_or_default()
-}
-
-/// The panel's nine knobs, read out of a record's `settings.autoSupport`.
-///
-/// A key the record does not carry falls back to the constraint default the
-/// whole app shares (`SupportSettingsValues::default()`, i.e.
-/// `AUTO_SUPPORT_CONSTRAINTS`), never to a value of this module's own.
-fn values_from_settings(settings: &Value) -> SupportSettingsValues {
-    let defaults = SupportSettingsValues::default();
-    let Some(block) = settings.get("autoSupport").and_then(Value::as_object) else {
-        return defaults;
-    };
+/// This is the one moment the panel reads the block; a later selection never
+/// re-seeds it (`setActivePreset` preserves it, `presets.ts:683-693`), and it is
+/// never read from a preset record — a studio preset's `settings.autoSupport`
+/// is not the live settings.
+fn values_from_live(
+    live: crate::features::auto_support_settings::AutoSupportSettings,
+) -> SupportSettingsValues {
     SupportSettingsValues {
-        area_per_support_mm2: number(
-            block,
-            "areaPerSupportMm2",
-            defaults.area_per_support_mm2,
-        ),
-        size_scale: number(block, "sizeScale", defaults.size_scale),
-        grid_area_threshold_mm2: number(
-            block,
-            "gridAreaThresholdMm2",
-            defaults.grid_area_threshold_mm2,
-        ),
-        flat_density_boost: number(block, "flatDensityBoost", defaults.flat_density_boost),
-        slope_relax_factor: number(block, "slopeRelaxFactor", defaults.slope_relax_factor),
-        suction_area_exponent: number(
-            block,
-            "suctionAreaExponent",
-            defaults.suction_area_exponent,
-        ),
-        self_support_angle_deg: number(
-            block,
-            "overhangSelfSupportAngleDeg",
-            defaults.self_support_angle_deg,
-        ),
-        stabilization_enabled: flag(
-            block,
-            "stabilizationEnabled",
-            defaults.stabilization_enabled,
-        ),
-        minima_reinforcement_enabled: flag(
-            block,
-            "minimaReinforcementEnabled",
-            defaults.minima_reinforcement_enabled,
-        ),
+        area_per_support_mm2: live.area_per_support_mm2,
+        size_scale: live.size_scale,
+        grid_area_threshold_mm2: live.grid_area_threshold_mm2,
+        flat_density_boost: live.flat_density_boost,
+        slope_relax_factor: live.slope_relax_factor,
+        suction_area_exponent: live.suction_area_exponent,
+        self_support_angle_deg: live.overhang_self_support_angle_deg,
+        stabilization_enabled: live.stabilization_enabled,
+        minima_reinforcement_enabled: live.minima_reinforcement_enabled,
     }
 }
 
-fn number(block: &Map<String, Value>, key: &str, fallback: f32) -> f32 {
-    block
-        .get(key)
-        .and_then(Value::as_f64)
-        .map(|value| value as f32)
-        .unwrap_or(fallback)
-}
-
-fn flag(block: &Map<String, Value>, key: &str, fallback: bool) -> bool {
-    block.get(key).and_then(Value::as_bool).unwrap_or(fallback)
-}
-
 /// `same_values`, by bit pattern: the draft and the baseline come from the same
-/// document, so an untouched field is identical, not merely close.
+/// block, so an untouched field is identical, not merely close.
 fn same_values(a: &SupportSettingsValues, b: &SupportSettingsValues) -> bool {
     a.area_per_support_mm2.to_bits() == b.area_per_support_mm2.to_bits()
         && a.size_scale.to_bits() == b.size_scale.to_bits()

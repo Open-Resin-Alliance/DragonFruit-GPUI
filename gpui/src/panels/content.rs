@@ -13,11 +13,10 @@
 //!
 //! ## Shared
 //!
-//! 1. `panels.rs::card_header` has no right slot, so the Models panel's plus is
-//!    rendered at the top of the body, right-aligned, where the header slot
-//!    would have put it. The Auto Supports gear has no destination (its dialog
-//!    is not ported) and the Export panel's "Meshes" badge has no body
-//!    equivalent, so neither is rendered.
+//! 1. `panels.rs::card_header` has no right slot; the Models panel's plus and
+//!    the Auto Supports gear are mounted through `PanelDef::header_right`
+//!    (`models_add_button`, `tool_panels::supports_settings_gear`). The Export
+//!    panel's "Meshes" badge has no body equivalent, so it is not rendered.
 //! 2. GPUI has no CSS transitions, `backdrop-blur`, portals or `letter-spacing`:
 //!    hover/active fills apply instantly, popovers are absolute children of their
 //!    trigger, and `tracking-wide` labels are not tracked.
@@ -62,11 +61,17 @@
 //!     state never renders.
 //! 17. No busy flag: the run button never shows "Running…" and never takes
 //!     `disabled:opacity-50`.
-//! 18. No preset store and no auto-lift flag: the preset row renders the
-//!     no-preset trigger label and the Auto-Lift OFF state, both inert.
-//! 19. The header's settings gear is not rendered: the full-screen
-//!     `AutoSupportSettingsBody` dialog is not ported, so the button would have
-//!     no destination.
+//! 18. The preset row is live: the collection, the selection and the Auto-Lift
+//!     flag are `features::auto_support_settings`'s (the store the settings
+//!     dialog edits), so the trigger names the active preset and the dropdown
+//!     lists every record — as `AutoSupportPanel.tsx:360-364` does. The menu is
+//!     a `ui::context_menu` drawn under the trigger (the source portals its
+//!     `SelectDropdown` and tints the selected row; the menu marks it with a
+//!     tick), and the Auto-Lift flag is the one switch both this panel and the
+//!     Transform panel's `Auto` are meant to read.
+//! 19. The header's settings gear is not part of this body: it is
+//!     `tool_panels::supports_settings_gear`, mounted on the panel's
+//!     `header_right`, and it opens the ported `AutoSupportSettingsBody`.
 //! 20. No debug mode, diagnostics or forest report: not rendered.
 //! 21. The hint's condition is `!hasGeometry` in the source; the body only
 //!     receives the support count, so it is keyed on `count == 0`.
@@ -107,8 +112,8 @@
 //!     `PrintingPanel.tsx`; it is removed.
 
 use gpui::{
-    BoxShadow, Div, FontWeight, IntoElement, SharedString, Stateful, WeakEntity, div, prelude::*,
-    px, relative, rgb, rgba,
+    App, BoxShadow, Div, FontWeight, IntoElement, SharedString, Stateful, WeakEntity, Window, div,
+    prelude::*, px, relative, rgb, rgba,
 };
 
 use gpui_core::icons::icon;
@@ -116,8 +121,9 @@ use gpui_core::theme::*;
 use gpui_ui::ui::{
     ButtonSize, ButtonSpec, ButtonVariant, ContextMenuEntry, IconButtonSize, IconButtonVariant,
     IconTone, SettingDensity, SettingSurface, button_with, button_with_content, context_menu,
-    icon_button_toned, setting_row, sub_card, sub_card_with, toggle,
+    context_menu_sized, icon_button_toned, setting_row, sub_card, sub_card_with, toggle,
 };
+use crate::features::auto_support_settings as auto_support;
 use crate::DragonFruit;
 use gpui_core::stl;
 
@@ -596,9 +602,10 @@ fn models_context_menu() -> Div {
 /// The Auto Supports body: the run button, the island counts, the preset row
 /// and the load-a-model hint.
 ///
-/// PORT GAP: the header's settings gear has no destination — the full-screen
-/// `AutoSupportSettingsBody` is opened by the panel's header gear
-/// (`tool_panels::supports_settings_gear`), which sets `show_support_settings`.
+/// The run button starts the placeholder generator (W6 replaces it with the
+/// real `autoSupport` engine); the gear that opens the full-screen
+/// `AutoSupportSettingsBody` is the panel's `header_right`
+/// (`tool_panels::supports_settings_gear`), not part of this body.
 pub fn supports_body(count: usize, entity: WeakEntity<DragonFruit>) -> impl IntoElement {
     let generate_entity = entity.clone();
 
@@ -616,11 +623,18 @@ pub fn supports_body(count: usize, entity: WeakEntity<DragonFruit>) -> impl Into
         .bg(rgb(mix(ACCENT, SURFACE_0, 0.14)))
         .text_color(rgb(ACCENT))
         .on_click(move |_, _, cx| {
+            // The scan classifies with the *applied* auto-support block
+            // (`getSettings().autoSupport.overhangSelfSupportAngleDeg`), not a
+            // copy on the entity: the store is loaded before the first frame, so
+            // a restart uses the saved policy even if the dialog was never
+            // opened. `DragonFruit::support_angle` is kept in step by the
+            // dialog's mutations and reads the same value.
+            let angle = auto_support::live_settings().overhang_self_support_angle_deg;
             generate_entity
                 .update(cx, |this, cx| {
                     if let Some(mesh) = this.mesh.as_ref() {
                         let model = this.model_matrix();
-                        let points = stl::overhang_points(mesh, this.support_angle);
+                        let points = stl::overhang_points(mesh, angle);
                         let target = (300.0 * this.support_density).max(1.0) as usize;
                         let stride = (points.len() / target).max(1);
                         // Placeholder generation until W6 ports `autoSupport`: one
@@ -841,6 +855,7 @@ fn island_stat(label: &'static str, value: &str, accent: bool) -> impl IntoEleme
 /// source rotates it 180°; GPUI swaps the icon).
 fn preset_select_trigger(label: SharedString, open: bool) -> Stateful<Div> {
     div()
+        .id("supports-preset-trigger")
         .relative()
         .w_full()
         .h(px(32.))
