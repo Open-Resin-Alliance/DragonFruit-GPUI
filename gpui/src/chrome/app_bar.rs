@@ -613,13 +613,13 @@ pub fn app_bar(state: AppBarState, entity: WeakEntity<DragonFruit>) -> impl Into
         div(
             id = "app-bar",
             absolute, top_0, left_0, right_0,
-            h = px(TOPBAR_HEIGHT),
             flex, items_center, gap_12,
-            // 36px controls + 6px top and bottom.
-            // `height: 52px; padding: 3px 4px 9px 4px` — the source's own
-            // values, which leave 40px of content for the `h_40` controls.
-            h = px(TOPBAR_HEIGHT),
-            px_4, pt(px(3.)), pb(px(9.)),
+            // Deliberate deviation: the source is `height: 52px` with
+            // `padding: 3px 4px 9px 4px`, the extra 6px at the bottom carrying
+            // its edge fade/blur-off. The port does not draw that fade, so the
+            // bar is 48 with symmetric padding and the controls keep 36.
+            h = px(48.),
+            px_4, pt_1p5, pb_1p5,
             on_mouse_down = move |_, window, _| {
                 gpui_core::log::log("appbar: drag root");
                 start_window_drag(window);
