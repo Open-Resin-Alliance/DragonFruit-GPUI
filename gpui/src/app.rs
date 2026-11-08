@@ -356,17 +356,33 @@ impl DragonFruit {
         let smoke = cli.smoke;
         // A malformed scenario is a runner bug, not a UI state: report it and
         // leave before a window exists.
-        let scenario = match cli.scenario {
+        let (scenario, scenario_model) = match cli.scenario {
             Some(path) => match automation::Scenario::load(&path) {
-                Ok(scenario) => Some(scenario),
+                Ok(scenario) => {
+                    let model = scenario.model_path(&path);
+                    (Some(scenario), model)
+                }
                 Err(error) => {
                     eprintln!("scenario: {error}");
                     std::process::exit(2);
                 }
             },
-            None => None,
+            None => (None, None),
         };
-        let path = cli.file;
+        // A file named on the command line wins over the one a scenario
+        // declares, which keeps `--scenario x.json other.stl` working.
+        let path = cli.file.or(scenario_model);
+
+        if scenario.is_some() {
+            // A scenario must never hang a gate: if the driver stalls (a frame
+            // that never paints, a dead window), fail loudly rather than sit
+            // until the harness kills the process and reports nothing useful.
+            std::thread::spawn(|| {
+                std::thread::sleep(Duration::from_secs(90));
+                eprintln!("scenario: timed out after 90s");
+                std::process::exit(1);
+            });
+        }
 
         // The store is the only state that outlives the process:
         // `settings.json` hydrates the settings draft once, and `session.json`

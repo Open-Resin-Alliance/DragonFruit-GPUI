@@ -2,6 +2,10 @@
   "name": "app bar: the three controls open their surfaces",
   "steps": [
     {
+      "kind": "wait",
+      "ms": 1400
+    },
+    {
       "kind": "expect",
       "state": {
         "show_app_menu": false,
@@ -10,24 +14,85 @@
         "show_view_menu": false
       }
     },
-    { "kind": "click", "target": "appbar/menu" },
-    { "kind": "expect", "state": { "show_app_menu": true } },
-    { "kind": "key", "key": "Escape" },
-    { "kind": "expect", "state": { "show_app_menu": false } },
-
-    { "kind": "click", "target": "appbar/printer" },
-    { "kind": "expect", "state": { "show_printer_profiles": true } },
-    { "kind": "key", "key": "Escape" },
-    { "kind": "expect", "state": { "show_printer_profiles": false } },
-
-    { "kind": "click", "target": "appbar/settings" },
-    { "kind": "expect", "state": { "show_settings": true } },
-    { "kind": "key", "key": "Escape" },
-    { "kind": "expect", "state": { "show_settings": false } },
-
-    { "kind": "click", "target": "appbar/view" },
-    { "kind": "expect", "state": { "show_view_menu": true } },
-    { "kind": "key", "key": "Escape" },
-    { "kind": "expect", "state": { "show_view_menu": false } }
+    {
+      "kind": "click",
+      "target": "appbar/menu"
+    },
+    {
+      "kind": "expect",
+      "state": {
+        "show_app_menu": true
+      }
+    },
+    {
+      "kind": "key",
+      "key": "Escape"
+    },
+    {
+      "kind": "expect",
+      "state": {
+        "show_app_menu": false
+      }
+    },
+    {
+      "kind": "click",
+      "target": "appbar/printer"
+    },
+    {
+      "kind": "expect",
+      "state": {
+        "show_printer_profiles": true
+      }
+    },
+    {
+      "kind": "key",
+      "key": "Escape"
+    },
+    {
+      "kind": "expect",
+      "state": {
+        "show_printer_profiles": false
+      }
+    },
+    {
+      "kind": "click",
+      "target": "appbar/settings"
+    },
+    {
+      "kind": "expect",
+      "state": {
+        "show_settings": true
+      }
+    },
+    {
+      "kind": "key",
+      "key": "Escape"
+    },
+    {
+      "kind": "expect",
+      "state": {
+        "show_settings": false
+      }
+    },
+    {
+      "kind": "click",
+      "target": "appbar/view"
+    },
+    {
+      "kind": "expect",
+      "state": {
+        "show_view_menu": true
+      }
+    },
+    {
+      "kind": "key",
+      "key": "Escape"
+    },
+    {
+      "kind": "expect",
+      "state": {
+        "show_view_menu": false
+      }
+    }
   ]
 }

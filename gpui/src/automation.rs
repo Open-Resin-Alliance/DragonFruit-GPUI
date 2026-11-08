@@ -20,6 +20,7 @@
 //! ```json
 //! {
 //!   "name": "app bar",
+//!   "model": "../test-cube.stl",
 //!   "steps": [
 //!     { "kind": "click", "target": "appbar/settings" },
 //!     { "kind": "expect", "state": { "show_settings": true } },
@@ -30,6 +31,10 @@
 //!   ]
 //! }
 //! ```
+//!
+//! `model` is optional: when the command line names no file, the app opens it,
+//! resolved against the scenario file's directory. A scenario without a `model`
+//! runs on an empty plate, which is all the app bar needs.
 //!
 //! A `click` needs either `target` (a name from [`resolve`]) or both `x` and
 //! `y`; `button` is `left` (default), `right` or `middle`. A snapshot is taken
@@ -83,6 +88,11 @@ pub(crate) struct Scenario {
     /// Shown in the report's heading; defaults to the file name.
     #[serde(default)]
     name: Option<String>,
+    /// The mesh the scenario needs, relative to the scenario file. Used when
+    /// the command line names no file, so `dragonfruit-gpui --scenario
+    /// scenarios/support-rail.json` works on its own.
+    #[serde(default)]
+    model: Option<String>,
     steps: Vec<Step>,
 }
 
@@ -168,6 +178,17 @@ impl Scenario {
 
     fn title(&self) -> String {
         self.name.clone().unwrap_or_else(|| "scenario".to_owned())
+    }
+
+    /// The model the scenario declared, resolved against the scenario file's
+    /// own directory so a relative path in the JSON is not relative to the
+    /// process's working directory.
+    pub(crate) fn model_path(&self, scenario: &Path) -> Option<std::path::PathBuf> {
+        let model = std::path::PathBuf::from(self.model.as_deref()?);
+        if model.is_absolute() {
+            return Some(model);
+        }
+        scenario.parent().map(|parent| parent.join(model))
     }
 }
 
@@ -966,12 +987,18 @@ pub(crate) fn resolve(name: &str, app: &DragonFruit) -> Option<Rect> {
             h: 800.0 - BAR_HEIGHT,
         }),
         _ => {
-            let row = name.strip_prefix("menu/").unwrap_or(name);
-            if APP_MENU_ROWS.iter().any(|(id, _)| *id == row) {
-                return app_menu_row(row);
+            // `menu/new-scene` names `menu-new-scene`; the table stores the
+            // element id, so rebuild it rather than stripping the prefix.
+            if let Some(row) = name.strip_prefix("menu/") {
+                return app_menu_row(&format!("menu-{row}"));
             }
-            let tile = name.strip_prefix("rail/").unwrap_or(name);
-            rail_rect(tile, app.mode)
+            if let Some(tile) = name.strip_prefix("rail/") {
+                return rail_rect(tile, app.mode);
+            }
+            if APP_MENU_ROWS.iter().any(|(id, _)| *id == name) {
+                return app_menu_row(name);
+            }
+            rail_rect(name, app.mode)
         }
     }
 }

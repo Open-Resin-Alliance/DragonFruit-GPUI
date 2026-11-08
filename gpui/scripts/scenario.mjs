@@ -9,8 +9,11 @@
 //
 // Options:
 //   --scenario <path>  a scenario file instead of a shipped one
-//   --model <path>     the mesh the app opens (default: test-cube.stl)
-//   --bin <path>       the executable (default: target/debug/dragonfruit-gpui)
+//   --model <path>     the mesh the app opens, overriding the scenario's own
+//                      "model" field (a scenario may declare one)
+//   --bin <path>       the executable (default: the newest built
+//                      dragonfruit-gpui in target/, target-check/, target-verify/)
+//   --allow-stale      run even when the executable predates the driver sources
 //   --list             print the shipped scenarios and exit
 //
 // Each run prints the scenario's Markdown report on stdout. The runner exits 0
@@ -21,23 +24,48 @@
 //   # must exit 1 and print the expected/actual pair
 
 import { spawn } from 'node:child_process';
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, statSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const crateRoot = resolve(scriptDir, '..');
 const scenarioDir = resolve(crateRoot, 'scenarios');
+const executable =
+  process.platform === 'win32' ? 'dragonfruit-gpui.exe' : 'dragonfruit-gpui';
 
-const defaultBinary = resolve(
-  crateRoot,
-  'target',
-  'debug',
-  process.platform === 'win32' ? 'dragonfruit-gpui.exe' : 'dragonfruit-gpui',
+// A gate that runs a stale executable reports yesterday's code. Every target
+// directory this worktree uses is a candidate and the newest wins; `--bin`
+// overrides the choice.
+const binaryCandidates = ['target', 'target-check', 'target-verify'].map((dir) =>
+  resolve(crateRoot, dir, 'debug', executable),
 );
-const defaultModel = resolve(crateRoot, 'test-cube.stl');
 
-/** The scenarios this port ships, in the order the report lists them. */
+// The sources a scenario exercises. A binary older than either cannot be
+// trusted to contain the driver, so the run stops instead of reporting a pass.
+const scenarioSources = ['src/automation.rs', 'src/app.rs'].map((path) =>
+  resolve(crateRoot, path),
+);
+
+function newestOf(paths) {
+  let newest = 0;
+  for (const path of paths) {
+    try {
+      newest = Math.max(newest, statSync(path).mtimeMs);
+    } catch {
+      // A missing file simply does not contribute an mtime.
+    }
+  }
+  return newest;
+}
+
+function defaultBinary() {
+  const existing = binaryCandidates.filter((path) => existsSync(path));
+  if (existing.length === 0) return binaryCandidates[0];
+  return existing.sort((a, b) => newestOf([b]) - newestOf([a]))[0];
+}
+
+// The scenarios this port ships, in the order the report lists them.
 export const shipped = ['app-bar', 'support-rail', 'new-scene'];
 
 function usage(message) {
@@ -66,8 +94,9 @@ function resolveInput(value) {
 function parseArgs(argv) {
   const options = {
     list: false,
-    binary: defaultBinary,
-    model: defaultModel,
+    binary: defaultBinary(),
+    model: null,
+    allowStale: false,
     paths: [],
     names: [],
   };
@@ -94,6 +123,9 @@ function parseArgs(argv) {
       case '--list':
         options.list = true;
         break;
+      case '--allow-stale':
+        options.allowStale = true;
+        break;
       default:
         if (argument.startsWith('-')) usage(`unknown option ${argument}`);
         options.names.push(argument);
@@ -103,8 +135,12 @@ function parseArgs(argv) {
 }
 
 function run(binary, scenario, model) {
+  const args = ['--scenario', scenario];
+  // Without `--model` the app falls back to the scenario's own "model" field,
+  // which is what makes `--scenario <file>` work on its own.
+  if (model) args.push(model);
   return new Promise((resolveExit) => {
-    const child = spawn(binary, ['--scenario', scenario, model], {
+    const child = spawn(binary, args, {
       cwd: crateRoot,
       stdio: 'inherit',
     });
@@ -145,13 +181,26 @@ async function main() {
   for (const { path } of scenarios) {
     if (!existsSync(path)) usage(`no such scenario file: ${path}`);
   }
-  if (!existsSync(options.model)) usage(`no such model: ${options.model}`);
+  if (options.model && !existsSync(options.model)) usage(`no such model: ${options.model}`);
   if (!existsSync(options.binary)) {
     console.error(
       `scenario: ${options.binary} is missing; build it first (cargo build -p dragonfruit-gpui)`,
     );
     return 2;
   }
+  // A binary that predates the driver silently runs the previous code (or no
+  // scenario at all). Refuse rather than report a meaningless pass.
+  const binaryTime = newestOf([options.binary]);
+  const sourceTime = newestOf(scenarioSources);
+  if (!options.allowStale && sourceTime > binaryTime) {
+    const age = ((sourceTime - binaryTime) / 1000).toFixed(1);
+    console.error(
+      `scenario: ${options.binary} is ${age}s older than src/automation.rs or src/app.rs; ` +
+        'rebuild before running (cargo build -p dragonfruit-gpui), or pass --allow-stale',
+    );
+    return 2;
+  }
+  console.log(`scenario: binary ${options.binary}`);
 
   let failed = 0;
   for (const scenario of scenarios) {
