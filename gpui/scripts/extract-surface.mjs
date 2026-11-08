@@ -42,6 +42,10 @@ const SKIP_FILE = /\.(test|stories)\.tsx$|\.d\.tsx?$/;
 const HANDLERS = ['onSubmit', 'onClick', 'onChange', 'onSelect'];
 const NAMED_INTERACTIVE = /(Button|Input|Select|Toggle|Switch|Checkbox|Radio|Link|Tab|Slider|Field)$/;
 const INTERACTIVE_TAGS = new Set(['button', 'a', 'input', 'select', 'textarea', 'summary', 'option']);
+const TEXT_ELEMENT_TAGS = new Set([
+  'Trans', 'span', 'strong', 'em', 'b', 'i', 'p', 'label', 'small', 'code', 'abbr',
+  'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+]);
 const NON_CONTAINER_COMPONENTS = /^(Trans|Icon|[A-Za-z0-9]+Icon|Spinner|Loader[A-Za-z0-9]*|Fragment)$/;
 const CONTAINER_KINDS = new Set(['modal', 'panel', 'popover', 'tab', 'notification']);
 const INTRINSIC_CONTAINERS = new Set(['div', 'section', 'aside', 'article', 'ul', 'li', 'header', 'footer', 'nav', 'main', 'dialog']);
@@ -93,6 +97,9 @@ export function loadTypeScript() {
 }
 
 const toPosix = (p) => p.split('\\').join('/');
+
+const compareStrings = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+const areaOfId = (id) => id.slice(0, id.indexOf('/'));
 
 function tidy(text, limit = 120) {
   if (!text) return '';
@@ -273,7 +280,7 @@ function classifyElement(name, attrs, ts) {
   if (role === 'dialog' || role === 'alertdialog') return 'modal';
   if (role === 'menu' || role === 'listbox') return 'popover';
   if (role === 'tab') return 'tab';
-  if (/(Modal|Dialog)$/.test(name)) return 'modal';
+  if (/(Modal|Dialog)$/.test(name) || name === 'dialog') return 'modal';
   if (/(Select|Combobox)$/.test(name) || name === 'select') return 'select';
   if (/(Popover|Dropdown|Flyout)$/.test(name) || /Menu$/.test(name)) return 'popover';
   if (/(Panel|Sidebar|Drawer|Sheet|Pane)$/.test(name)) return 'panel';
@@ -292,15 +299,15 @@ function classifyElement(name, attrs, ts) {
  * Extract the surface rows from one source string. `filePath` is used for the
  * source reference and the area; it may be a virtual path for tests.
  */
-export function extractFromSource(source, filePath) {
+export function extractFromSource(source, filePath, state = null) {
   const ts = loadTypeScript();
   const relPath = toPosix(isAbsolute(filePath) ? relative(repoRoot, filePath) : filePath);
   const area = areaFor(relPath);
   const sf = ts.createSourceFile(relPath, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const rows = [];
-  const collisions = [];
-  const usedIds = new Map();
-  const signatures = new Set();
+  const usedIds = state?.usedIds ?? new Map();
+  const signatures = state?.signatures ?? new Set();
+  const collisions = state?.collisions ?? [];
 
   const lineOf = (node) => sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
   const sourceOf = (node) => `${relPath}:${lineOf(node)}`;
@@ -319,36 +326,65 @@ export function extractFromSource(source, filePath) {
       const name = prop.name.getText(sf);
       const init = prop.initializer;
       let text = null;
+      let exprText = '';
       if (init) {
-        if (ts.isStringLiteral(init)) text = init.text;
-        else if (ts.isJsxExpression(init) && init.expression) text = resolveText(init.expression, ts);
+        if (ts.isStringLiteral(init)) {
+          text = init.text;
+          exprText = init.text;
+        } else if (ts.isJsxExpression(init) && init.expression) {
+          text = resolveText(init.expression, ts);
+          exprText = tidy(init.expression.getText(sf), 70);
+        }
       }
-      attrs.set(name, { name, node: prop, init, text: text ?? '' });
+      attrs.set(name, { name, node: prop, init, text: text ?? '', exprText });
     }
     return attrs;
   }
 
   function visibleLabel(children) {
-    const parts = [];
+    // Only direct, text-bearing children name a container. Joining every
+    // descendant produces "Model volume Est. weight Candidates …", which is a
+    // description, not a label.
     for (const child of children) {
       if (ts.isJsxText(child)) {
         const text = tidy(child.text, 160);
-        if (text) parts.push(text);
+        if (text) return text;
         continue;
       }
-      const text = resolveText(child, ts);
-      if (text) parts.push(text);
-      if (parts.length >= 4) break;
+      if (ts.isJsxExpression(child)) {
+        const text = resolveText(child, ts);
+        if (text) return text;
+        continue;
+      }
+      if (ts.isJsxElement(child)) {
+        const tag = child.openingElement.tagName.getText(sf).split('.').pop();
+        if (TEXT_ELEMENT_TAGS.has(tag)) {
+          const text = resolveText(child, ts);
+          if (text) return text;
+        }
+      }
     }
-    return parts.length ? tidy(parts.join(' '), 160) : null;
+    return null;
   }
 
-  function pickLabel(attrs, children, handler) {
-    const visible = visibleLabel(children);
-    if (visible) return visible;
-    for (const key of ['aria-label', 'ariaLabel', 'title', 'label', 'placeholder', 'header', 'heading']) {
-      const text = attrs.get(key)?.text;
-      if (text) return tidy(text, 160);
+  function pickLabel(attrs, children, handler, preferName) {
+    const nameKeys = ['aria-label', 'ariaLabel', 'title', 'label', 'header', 'heading', 'placeholder'];
+    // A modal's body paragraph is not its name; the accessible name or the
+    // `title` prop is. Interactive elements still lead with their visible text.
+    if (preferName) {
+      for (const key of nameKeys) {
+        const text = attrs.get(key)?.text;
+        if (text) return tidy(text, 160);
+      }
+      const visible = visibleLabel(children);
+      if (visible) return visible;
+    } else {
+      const visible = visibleLabel(children);
+      if (visible) return visible;
+      for (const key of nameKeys) {
+        const text = attrs.get(key)?.text;
+        if (text) return tidy(text, 160);
+      }
     }
     if (handler) return tidy(handler, 120);
     return null;
@@ -359,8 +395,9 @@ export function extractFromSource(source, filePath) {
     if (ctx.when) gates.push(`when:${tidy(ctx.when, 100)}`);
     if (earlyReturn) gates.push(`early-return:${tidy(earlyReturn, 100)}`);
     const disabled = attrs.get('disabled');
-    if (disabled) gates.push(`disabled:${disabled.text || 'true'}`);
-    if (attrs.has('hidden')) gates.push(`hidden:${attrs.get('hidden').text || 'true'}`);
+    if (disabled) gates.push(`disabled:${disabled.exprText || disabled.text || 'true'}`);
+    const hidden = attrs.get('hidden');
+    if (hidden) gates.push(`hidden:${hidden.exprText || hidden.text || 'true'}`);
     const className = attrs.get('className');
     if (className?.init) {
       for (const gate of classNameGates(className.init, ts)) gates.push(gate);
@@ -388,7 +425,10 @@ export function extractFromSource(source, filePath) {
     }
     for (const prop of ['open', 'isOpen', 'expanded']) {
       const attr = attrs.get(prop);
-      if (attr) return `${prop}:${attr.text || tidy(attr.node.getText(sf), 60)}`;
+      if (!attr) continue;
+      const expr = attr.init && ts.isJsxExpression(attr.init) ? attr.init.expression : attr.init;
+      const name = expr ? handlerName(expr, ts) || tidy(expr.getText(sf), 60) : attr.text;
+      return `${prop}:${name || 'true'}`;
     }
     if (ctx.when) return `conditional:${tidy(ctx.when, 70)}`;
     return `renders:${kind}`;
@@ -442,15 +482,14 @@ export function extractFromSource(source, filePath) {
     const handler = handlerSource?.init
       ? handlerName(ts.isJsxExpression(handlerSource.init) ? handlerSource.init.expression : handlerSource.init, ts)
       : '';
-    const label = pickLabel(attrs, children, handler);
+    const label = pickLabel(attrs, children, handler, CONTAINER_KINDS.has(kind) || (container && !interactive));
 
     // A conditional wrapper with no text, accessible name or handler is layout,
     // not a surface. Named container kinds (modal/panel/popover/tab) still emit
     // so an untitled shell cannot disappear from the map.
     if (!emptyStateCond && !interactive && !label && !CONTAINER_KINDS.has(kind)) return;
 
-    const fallbackLabel = emptyStateCond === 'null' ? '(no render)' : elementName;
-    const finalLabel = label || ctx.component || fallbackLabel;
+    const finalLabel = label || (!intrinsicTag ? elementName : null) || ctx.component || elementName;
     const action = emptyStateCond
       ? `early-return:${tidy(emptyStateCond, 70)}`
       : actionFor(attrs, ctx, kind, handler);
@@ -509,6 +548,22 @@ export function extractFromSource(source, filePath) {
     }
   }
 
+  function elementHasSurfaceLabel(node) {
+    const opening = ts.isJsxElement(node)
+      ? node.openingElement
+      : ts.isJsxSelfClosingElement(node)
+        ? node
+        : null;
+    if (!opening) return false;
+    const attrs = readAttrs(opening);
+    for (const key of ['aria-label', 'ariaLabel', 'title', 'label']) {
+      if (attrs.get(key)?.text) return true;
+    }
+    const name = opening.tagName.getText(sf).split('.').pop();
+    if (/(Empty|Placeholder|Notice|Message|Banner)/.test(name)) return true;
+    return Boolean(visibleLabel(node.children ?? []));
+  }
+
   function handleReturn(ret, ctx) {
     const expr = ret.expression;
     if (!expr) return;
@@ -521,6 +576,13 @@ export function extractFromSource(source, filePath) {
 
     if (ctx.earlyReturn && (isJsx || isNullish) && ctx.fn && functionReturnsJsx(ctx.fn)) {
       if (isJsx) {
+        // `if (!locked) return <div>{field}</div>` is a branch, not an empty
+        // state. Only a labelled branch (or an explicitly empty one) is a state
+        // worth its own ledger row; the unlabelled wrapper stays layout.
+        if (!elementHasSurfaceLabel(expr)) {
+          walk(expr, { ...ctx, earlyReturn: null });
+          return;
+        }
         const opening = ts.isJsxElement(expr) ? expr.openingElement : ts.isJsxSelfClosingElement(expr) ? expr : null;
         if (opening) {
           emitElement(expr, opening, ctx, ctx.earlyReturn);
@@ -646,10 +708,10 @@ export function extractFromSource(source, filePath) {
 
   rows.sort(
     (a, b) =>
-      a._area.localeCompare(b._area) ||
-      a._file.localeCompare(b._file) ||
+      compareStrings(a._area, b._area) ||
+      compareStrings(a._file, b._file) ||
       a._line - b._line ||
-      a.id.localeCompare(b.id),
+      compareStrings(a.id, b.id),
   );
 
   const cleanRows = rows.map(({ id, source, kind, label, action, gates }) => ({ id, source, kind, label, action, gates }));
@@ -724,6 +786,7 @@ export function extractAll() {
   const collisions = [];
   const diagnostics = [];
   const files = [];
+  const state = { usedIds: new Map(), signatures: new Set(), collisions: [] };
 
   for (const root of SOURCE_ROOTS) {
     for (const file of walkFiles(root, skipped)) files.push(file);
@@ -737,17 +800,13 @@ export function extractAll() {
 
   for (const file of files.sort()) {
     const source = readFileSync(file, 'utf8');
-    const result = extractFromSource(source, file);
+    const result = extractFromSource(source, file, state);
     rows.push(...result.rows);
-    collisions.push(...result.collisions);
     if (result.parseDiagnostics) diagnostics.push({ file: toPosix(relative(repoRoot, file)), count: result.parseDiagnostics });
   }
+  collisions.push(...state.collisions);
 
-  rows.sort(
-    (a, b) =>
-      a.id.slice(0, a.id.indexOf('/')).localeCompare(b.id.slice(0, b.id.indexOf('/'))) ||
-      a.id.localeCompare(b.id),
-  );
+  rows.sort((a, b) => compareStrings(areaOfId(a.id), areaOfId(b.id)) || compareStrings(a.id, b.id));
 
   return { rows, collisions, skipped: [...new Set(skipped)].sort(), diagnostics, ts };
 }
@@ -760,7 +819,7 @@ export function countsFor(rows) {
     byArea[area] = (byArea[area] ?? 0) + 1;
     byKind[row.kind] = (byKind[row.kind] ?? 0) + 1;
   }
-  const sortObject = (obj) => Object.fromEntries(Object.entries(obj).sort(([a], [b]) => a.localeCompare(b)));
+  const sortObject = (obj) => Object.fromEntries(Object.entries(obj).sort(([a], [b]) => compareStrings(a, b)));
   return { total: rows.length, byArea: sortObject(byArea), byKind: sortObject(byKind) };
 }
 
@@ -789,7 +848,9 @@ export function seedLedger(rows, path = ledgerPath) {
     });
     added += 1;
   }
-  ledger.rows = [...existing.values()].sort((a, b) => a.id.localeCompare(b.id));
+  ledger.rows = [...existing.values()].sort(
+    (a, b) => compareStrings(areaOfId(a.id), areaOfId(b.id)) || compareStrings(a.id, b.id),
+  );
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, `${JSON.stringify(ledger, null, 2)}\n`);
   return { added, total: ledger.rows.length, path };
@@ -803,6 +864,7 @@ function main() {
     roots: ['src/components/**/*.tsx', 'src/app/page.tsx'],
     skipped,
     collisions,
+    diagnostics,
     counts,
     rows,
   };
