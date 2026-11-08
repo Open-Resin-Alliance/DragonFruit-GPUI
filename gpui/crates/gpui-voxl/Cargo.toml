@@ -1,0 +1,14 @@
+[package]
+name = "gpui-voxl"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# The VOXL scene container: a chunked binary reader for the files the React
+# app's `src/features/scene/voxl/codec-v2.ts` writes. Deliberately tiny —
+# serde_json for the JSON chunks, flate2 for the zlib payloads.
+
+[dependencies]
+flate2 = "1"
+serde_json = "1"
+thiserror = "2"

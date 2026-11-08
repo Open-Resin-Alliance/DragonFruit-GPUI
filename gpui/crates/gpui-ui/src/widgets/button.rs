@@ -385,6 +385,20 @@ impl ButtonSpec {
         self
     }
 
+
+    /// An icon-only tile: `IconButton`'s `h-8 w-8 !p-0`.
+    ///
+    /// The recipe's `px-11` is for text buttons; a fixed-width tile that keeps
+    /// it has almost no content box, which is how a 14px glyph once rendered as
+    /// a speck. Every icon tile should come through here rather than setting
+    /// `width` by hand.
+    pub fn icon_tile(mut self, size: f32) -> Self {
+        self.width = Some(Width::Fixed(size));
+        self.padding_x = Some(0.0);
+        self.gap = Some(0.0);
+        self
+    }
+
     pub fn padding_x(mut self, padding: f32) -> Self {
         self.padding_x = Some(padding);
         self
