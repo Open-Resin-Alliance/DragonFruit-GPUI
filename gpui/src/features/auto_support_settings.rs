@@ -74,9 +74,9 @@ use crate::DragonFruit;
 const WHITE: u32 = 0xffffff;
 const BLACK: u32 = 0x000000;
 
-/// Tailwind's bare `rounded` (4px) and `rounded-lg` (8px).
+/// Tailwind's bare `rounded` (4px). `rounded-lg` comes from the theme's 14px —
+/// `globals.css` overrides `--radius-lg`, so a local 8px copy was wrong.
 const ROUNDED_BARE: f32 = 4.0;
-const ROUNDED_LG: f32 = 8.0;
 /// `rounded-xl` (12px).
 const ROUNDED_XL: f32 = 12.0;
 
@@ -1974,7 +1974,7 @@ fn dialog_header(entity: &WeakEntity<DragonFruit>) -> Div {
                         .w(px(36.0))
                         .h(px(36.0))
                         .flex_shrink_0()
-                        .rounded(px(ROUNDED_LG))
+                        .rounded(px(gpui_core::theme::ROUNDED_LG))
                         .border_1()
                         .border_color(rgb(BORDER_SUBTLE))
                         .bg(linear_gradient(

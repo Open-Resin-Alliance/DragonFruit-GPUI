@@ -112,7 +112,7 @@ pub use gpui_supports::{NodeInstance, ShaftInstance, SupportBatches};
 /// `DEFAULT_SUPPORT_COLOR` in `src/supports/SupportProxyMeshLayer.tsx` — the
 /// proxy layer's base grey, the colour `meshBasicMaterial` paints a support
 /// with when nothing is selected or hovered.
-pub const SUPPORT_COLOR: u32 = 0x9a9a9a;
+pub const SUPPORT_COLOR: u32 = crate::theme::SUPPORT;
 
 #[derive(Clone, Copy)]
 pub struct ViewLayers {

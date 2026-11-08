@@ -24,6 +24,8 @@ pub const ACCENT_SECONDARY_CONTRAST: u32 = 0x182106;
 pub const TOPBAR_ACCENT: u32 = 0xec2a77;
 pub const DANGER: u32 = 0xe45454;
 pub const SUCCESS: u32 = 0x2eb67d;
+/// `DEFAULT_SUPPORT_COLOR`: the flat `meshBasicMaterial` a support draws with.
+pub const SUPPORT: u32 = 0x9a9a9a;
 
 pub const RADIUS_SM: f32 = 6.0;
 pub const RADIUS_MD: f32 = 10.0;
