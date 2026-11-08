@@ -1166,8 +1166,9 @@ impl Render for DragonFruit {
         .on_mouse_up(MouseButton::Left, {
             let drag = drag.clone();
             let entity = entity.clone();
+            let camera = camera.clone();
             let sync_entity = entity.clone();
-            move |_, _, cx| {
+            move |event, window, cx| {
                 if drag.get() != Some(MouseButton::Left) {
                     return;
                 }
@@ -1188,6 +1189,20 @@ impl Render for DragonFruit {
                     // push a whole gesture makes.
                     features::tool_panels::sync_from_entity(&sync_entity, cx);
                 }
+                // Re-evaluate the hover from the release point: without this the
+                // handle keeps the held highlight until the pointer next moves.
+                let size = window.viewport_size();
+                let hover_camera = camera.borrow();
+                entity
+                    .update(cx, |this, _| {
+                        this.update_gizmo_hover(
+                            glam::Vec2::new(event.position.x.0, event.position.y.0),
+                            size.width.0.max(1.0),
+                            size.height.0.max(1.0),
+                            &hover_camera,
+                        )
+                    })
+                    .ok();
             }
         })
         .on_mouse_up(MouseButton::Right, {
