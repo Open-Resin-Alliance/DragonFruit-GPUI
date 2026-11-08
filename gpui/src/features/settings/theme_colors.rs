@@ -6,6 +6,9 @@ pub(crate) struct ColorField {
     pub(crate) key: &'static str,
     pub(crate) label: &'static str,
     pub(crate) description: &'static str,
+    /// The source's default for this colour. Only the Cut tool colours still
+    /// read it — the theme colours come from `gpui_store::ThemeColors`, and
+    /// this value records what the source module ships for them.
     pub(crate) placeholder: &'static str,
 }
 

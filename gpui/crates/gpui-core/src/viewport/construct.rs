@@ -15,11 +15,11 @@ use super::plate::{
 };
 use super::shaders::{
     AXIS_SHADER, BACKGROUND_SHADER, COMPOSITE_SHADER, DECAL_SHADER, FOOTPRINT_SHADER, MESH_SHADER,
-    PLATE_SHADER, SPRITE_SHADER, VOLUME_SHADER,
+    PLATE_SHADER, SPRITE_SHADER, SUPPORT_SHADER, VOLUME_SHADER,
 };
 use super::targets::Targets;
-use super::uniforms::{DecalUniform, SpriteUniform, Uniforms};
-use super::{SAMPLE_COUNT, Viewport};
+use super::uniforms::{ColorUniform, DecalUniform, SpriteUniform, SupportInstance, Uniforms};
+use super::{SAMPLE_COUNT, SUPPORT_COLOR, Viewport};
 
 /// The cube's owned GPU resources, built once in `Viewport::new`.
 pub(super) struct CubeResources {
@@ -1218,14 +1218,24 @@ impl Viewport {
             mesh: None,
             mesh_ptr: 0,
             mesh_matrix: glam::Mat4::IDENTITY,
-            support_buffer: device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("viewport supports"),
-                size: 24,
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }),
-            support_vertex_count: 0,
-            support_ptr: 0,
+            support,
+            support_uniform,
+            support_bind,
+            support_cylinder,
+            support_cylinder_count,
+            support_sphere,
+            support_sphere_count,
+            support_disk,
+            support_disk_count,
+            support_straight_instances: None,
+            support_straight_count: 0,
+            support_tapered_instances: None,
+            support_tapered_count: 0,
+            support_node_instances: None,
+            support_node_count: 0,
+            support_disk_instances: None,
+            support_disk_instance_count: 0,
+            supports_ptr: 0,
             model_uniform,
             model_bind,
             gizmo_buffer: device.create_buffer(&wgpu::BufferDescriptor {

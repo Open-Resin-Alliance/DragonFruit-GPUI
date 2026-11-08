@@ -626,11 +626,25 @@ pub fn supports_body(count: usize, entity: WeakEntity<DragonFruit>) -> impl Into
                         let points = stl::overhang_points(mesh, this.support_angle);
                         let target = (300.0 * this.support_density).max(1.0) as usize;
                         let stride = (points.len() / target).max(1);
-                        *this.supports.borrow_mut() = points
-                            .into_iter()
-                            .step_by(stride)
-                            .map(|p| model.transform_point3(glam::Vec3::from_array(p)).to_array())
-                            .collect();
+                        // Placeholder generation until W6 ports `autoSupport`: one
+                        // straight shaft from each sampled overhang point down to
+                        // the plate, in the model's world space.
+                        let mut batches = gpui_core::viewport::SupportBatches::default();
+                        for point in points.into_iter().step_by(stride) {
+                            let world =
+                                model.transform_point3(glam::Vec3::from_array(point));
+                            batches.push(gpui_core::viewport::ShaftInstance {
+                                from: glam::Vec3::new(world.x, world.y, 0.0),
+                                to: world,
+                                diameter: 0.8,
+                                diameter_end: None,
+                            });
+                            batches.nodes.push(gpui_core::viewport::NodeInstance {
+                                position: world,
+                                radius: 0.6,
+                            });
+                        }
+                        *this.supports.borrow_mut() = Some(batches);
                     }
                     cx.notify();
                 })

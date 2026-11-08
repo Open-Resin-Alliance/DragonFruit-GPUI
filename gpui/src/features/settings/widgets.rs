@@ -4,9 +4,10 @@
 
 use super::*;
 
-/// `#rrggbb` → `u32`.
+/// `#rrggbb` → `u32`; unparseable text paints black rather than borrowing a
+/// control's default colour.
 pub(crate) fn hex_color(value: &str) -> u32 {
-    u32::from_str_radix(value.trim().trim_start_matches('#'), 16).unwrap_or(0xa3a3a3)
+    u32::from_str_radix(value.trim().trim_start_matches('#'), 16).unwrap_or(BLACK)
 }
 
 pub(crate) fn swatch(value: &str, width: f32, height: f32) -> Div {

@@ -1271,7 +1271,7 @@ fn app_menu(
                 entity
                     .update(cx, |this, cx| {
                         this.mesh = None;
-                        this.supports.borrow_mut().clear();
+                        *this.supports.borrow_mut() = None;
                         this.status = "No model loaded".to_owned();
                         this.mode = Mode::Prepare;
                         this.show_app_menu = false;

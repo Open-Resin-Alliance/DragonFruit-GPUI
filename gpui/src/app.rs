@@ -158,7 +158,7 @@ pub(crate) struct DragonFruit {
     /// The cross-section switch (`crossSectionEnabled`).
     pub(crate) cross_section: bool,
     pub(crate) num_layers: u32,
-    pub(crate) supports: Rc<RefCell<Vec<[f32; 3]>>>,
+    pub(crate) supports: Rc<RefCell<Option<gpui_core::viewport::SupportBatches>>>,
     pub(crate) show_grid: bool,
     pub(crate) show_plate: bool,
     pub(crate) show_box: bool,
@@ -241,7 +241,7 @@ impl DragonFruit {
             lower_layer: 0.0,
             cross_section: true,
             num_layers: 0,
-            supports: Rc::new(RefCell::new(Vec::new())),
+            supports: Rc::new(RefCell::new(None)),
             show_grid: true,
             show_plate: true,
             show_box: true,
@@ -412,7 +412,7 @@ impl DragonFruit {
     pub(crate) fn delete_model(&mut self) {
         self.mesh = None;
         self.scene = None;
-        self.supports.borrow_mut().clear();
+        *self.supports.borrow_mut() = None;
         self.selected.set(false);
         self.num_layers = 0;
         self.layer = 0.0;
@@ -598,7 +598,7 @@ impl Render for DragonFruit {
                 &device,
                 &queue,
                 mesh_ref,
-                &supports.borrow(),
+                supports.borrow().as_ref(),
                 show_layers,
                 model_matrix,
                 clip_z,

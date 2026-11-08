@@ -1183,7 +1183,7 @@ impl ThemeColors {
     /// `themeCustomizations.ts`'s `ThemeCustomColors`, which are also the keys
     /// of the Settings → UI & Theme colour tables.
     pub fn get(&self, key: &str) -> Option<&str> {
-        Some(match key {
+        let value = match key {
             "background" => &self.background,
             "foreground" => &self.foreground,
             "surface0" => &self.surface0,
@@ -1211,7 +1211,8 @@ impl ThemeColors {
             "danger" => &self.danger,
             "success" => &self.success,
             _ => return None,
-        })
+        };
+        Some(value.as_str())
     }
 
     /// Write one colour by its document key. Returns `false` for a key no

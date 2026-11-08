@@ -453,7 +453,7 @@ impl ExperimentsState {
         // experiments the user moved away from their default are written.
         store.enabled.clear();
         for (id, _, _, default_enabled) in EXPERIMENTS.iter() {
-            let value = self.enabled.get(id).copied().unwrap_or(*default_enabled);
+            let value = self.enabled.get(*id).copied().unwrap_or(*default_enabled);
             if value != *default_enabled {
                 store.enabled.insert((*id).to_owned(), value);
             }
@@ -759,9 +759,6 @@ pub struct SettingsState {
     pub about: AboutState,
     /// `showRestoreDefaultsConfirm` in the modal shell.
     pub show_restore_confirm: bool,
-    /// The document this draft was hydrated from; [`snapshot`] writes into a
-    /// copy of it so fields the draft does not expose are preserved.
-    base: Settings,
 }
 
 // ── Store ↔ draft conversions ────────────────────────────────────────────
@@ -938,7 +935,7 @@ impl SettingsState {
         Self {
             language: LANGUAGE_VALUES
                 .iter()
-                .position(|code| *code == general.language)
+                .position(|code| *code == general.language.as_str())
                 .unwrap_or(0),
             ui_scale: general.ui_scale,
             custom_scale: !UI_SCALE_PRESETS
@@ -1004,7 +1001,7 @@ impl SettingsState {
             png_compression: png_mode_index(settings.performance.png_compression_strategy),
             theme_preset: THEME_PRESET_VALUES
                 .iter()
-                .position(|preset| *preset == settings.ui.theme_preset)
+                .position(|preset| *preset == settings.ui.theme_preset.as_str())
                 .unwrap_or(0),
             theme_preference: match settings.ui.theme {
                 ThemePreference::Dark => 0,
@@ -1027,17 +1024,16 @@ impl SettingsState {
             updates: UpdatesState::from_store(&settings.updates),
             about: AboutState::default(),
             show_restore_confirm: false,
-            base: settings.clone(),
         }
     }
 
-    /// The draft as a document: the hydrated value with every field the draft
-    /// exposes written over it. Fields this draft does not expose (the
-    /// `printing` camera default, `safety`-style additions from a newer
-    /// document, hotkeys for actions this build does not list) keep their
-    /// loaded value because `base` is the starting point.
-    fn to_settings(&self) -> Settings {
-        let mut out = self.base.clone();
+    /// The draft as a document: `base` (the document this draft was hydrated
+    /// from) with every field the draft exposes written over it. Fields the
+    /// draft does not expose (`printing` builds a camera default, a newer
+    /// document's extra keys, hotkeys for actions this build does not list)
+    /// keep their loaded value.
+    fn to_settings(&self, base: &Settings) -> Settings {
+        let mut out = base.clone();
 
         out.general.ui_scale = self.ui_scale;
         out.general.language = LANGUAGE_VALUES
@@ -1194,6 +1190,11 @@ impl Default for SettingsState {
 pub(crate) static SETTINGS: LazyLock<Mutex<SettingsState>> =
     LazyLock::new(|| Mutex::new(SettingsState::default()));
 
+/// The document the draft was hydrated from. [`snapshot`] writes over a copy of
+/// it, so anything the draft cannot express survives a save. Kept out of
+/// [`SettingsState`] so the modal's per-frame clone stays small.
+static BASE: LazyLock<Mutex<Settings>> = LazyLock::new(|| Mutex::new(Settings::default()));
+
 /// True between [`edit`] and the next [`hydrate`] / [`take_dirty`].
 static DIRTY: AtomicBool = AtomicBool::new(false);
 
@@ -1207,6 +1208,10 @@ pub(crate) fn state() -> &'static Mutex<SettingsState> {
 /// default.
 pub fn hydrate(settings: Settings) {
     let next = SettingsState::from_settings(&settings);
+    match BASE.lock() {
+        Ok(mut base) => *base = settings,
+        Err(poisoned) => *poisoned.into_inner() = settings,
+    }
     match state().lock() {
         Ok(mut guard) => *guard = next,
         Err(poisoned) => *poisoned.into_inner() = next,
@@ -1220,9 +1225,13 @@ pub fn hydrate(settings: Settings) {
 /// express — a shader type the Mesh tab does not list, a PNG strategy with no
 /// segment — survives unless the user moved that control.
 pub fn snapshot() -> Settings {
+    let base = match BASE.lock() {
+        Ok(guard) => guard.clone(),
+        Err(poisoned) => poisoned.into_inner().clone(),
+    };
     match state().lock() {
-        Ok(guard) => guard.to_settings(),
-        Err(poisoned) => poisoned.into_inner().to_settings(),
+        Ok(guard) => guard.to_settings(&base),
+        Err(poisoned) => poisoned.into_inner().to_settings(&base),
     }
 }
 

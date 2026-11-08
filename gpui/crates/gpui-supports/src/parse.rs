@@ -11,7 +11,9 @@
 //! recipes that describe what one support set draws as instanced primitives.
 //! Each recipe pushes shafts, joints (spheres), roots (a disk, a frustum and a
 //! top ball) and contact cones; this module turns the same records into the four
-//! batches [`SupportBatches`] draws.
+//! batches [`SupportBatches`] draws. A root is not a fifth batch: its disk and
+//! frustum are shaft instances and its top ball is a node, so a root costs no
+//! extra draw call.
 //!
 //! # Fidelity notes
 //!
@@ -20,7 +22,9 @@
 //!   so the endpoints and diameter are kept and the control points are ignored.
 //! - The contact cone's nib is drawn as the flat disk [`DiskInstance`] models.
 //!   The source's disk has a small cylinder body; at 0.1–0.35 mm thick it is
-//!   sub-pixel at plate zoom and the port draws the pad only.
+//!   sub-pixel at plate zoom and the port draws the pad only. Its
+//!   `penetrationMm` pull-back is ignored: the pad sits at
+//!   `pos + surfaceNormal * thickness / 2`.
 //! - The knot spheres come from the `knots` array itself, at `KnotRenderer`'s
 //!   blend (`diameter - JOINT_DIAMETER_OFFSET_MM`). Branch and leaf recipes
 //!   re-push their parent knot at the joint blend in the source; doing that here
@@ -384,9 +388,10 @@ fn index<T>(
 
 /// The records of one collection, or nothing when it is absent.
 fn entities<'a>(document: &'a Map<String, Value>, key: &str) -> std::slice::Iter<'a, Value> {
+    const EMPTY: &[Value] = &[];
     match document.get(key).and_then(Value::as_array) {
         Some(entries) => entries.iter(),
-        None => [].iter(),
+        None => EMPTY.iter(),
     }
 }
 
@@ -413,8 +418,13 @@ fn vec3_at(value: &Value, key: &str) -> Option<Vec3> {
 }
 
 /// The world point the trunk's shaft grows from: the top of its root stack.
+///
+/// The trunk recipes build this from the authored heights and do **not** add
+/// `ROOT_RENDER_LIFT_MM` — the lift is only the root stack's own render offset,
+/// so the shaft starts a hundredth of a millimetre inside the root's top ball,
+/// exactly as the source does.
 fn root_top(root: &RootAnchor) -> Vec3 {
-    root.position + Vec3::Z * (ROOT_RENDER_LIFT_MM + root.disk_height + root.cone_height)
+    root.position + Vec3::Z * (root.disk_height + root.cone_height)
 }
 
 /// The root's three pieces: a disk, a frustum and a top ball.

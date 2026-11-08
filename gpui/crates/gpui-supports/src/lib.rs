@@ -11,9 +11,9 @@
 //! - **Instancing is kept, in `instance`.** `InstancedShaftGroup.tsx` draws one
 //!   `cylinderGeometry` per batch and multiplies by a per-instance matrix; the
 //!   port keeps the same unit meshes and per-instance matrices in
-//!   [`instance::SupportBatches`], so a support set is one `draw_indexed` per
-//!   primitive. [`mesh::SupportMesh`] is the flattening fallback for tests and
-//!   for the smoke run.
+//!   [`instance::SupportBatches`], so a support set is one instanced draw per
+//!   non-empty batch. [`mesh::SupportMesh`] is the flattening fallback for tests
+//!   and for the smoke run.
 //! - **Curved shafts are truncated.** `InstancedShaftGroup` renders a bezier
 //!   shaft as a `TubeGeometry` warped along the curve; [`mesh::SupportMesh`]
 //!   builds straight shafts only until the curve types are ported.

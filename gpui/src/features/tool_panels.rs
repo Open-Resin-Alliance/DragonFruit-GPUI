@@ -340,7 +340,12 @@ pub(crate) fn sync_from_entity(entity: &WeakEntity<DragonFruit>, cx: &mut App) {
         .read_with(cx, |this, _| {
             with_store(|store| {
                 store.has_mesh = this.mesh.is_some();
-                store.support_count = this.supports.borrow().len();
+                store.support_count = this
+                    .supports
+                    .borrow()
+                    .as_ref()
+                    .map(|batches| batches.straight_shafts.len() + batches.tapered_shafts.len())
+                    .unwrap_or(0);
                 store.transform.position = this.translate;
                 store.transform.rotation = [0.0, 0.0, this.rotate_z];
                 store.transform.scale = [this.scale; 3];

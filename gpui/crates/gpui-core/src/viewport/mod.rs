@@ -1,5 +1,5 @@
 //! The wgpu viewport: background, build plate, grid, build-volume box, decals,
-//! axes, the clay mesh and the app's mood overlay.
+//! axes, the support sets, the clay mesh and the app's mood overlay.
 //!
 //! PORT DEVIATIONS (against `src/components/scene/SceneCanvas/SceneEnvironment.tsx`,
 //! `SceneCanvas.tsx`, `StlMesh.tsx` and `src/features/shaders/mesh/softClay.tsx`):
@@ -28,6 +28,10 @@
 //! - FRONT decal: plane at `(centerX, centerY + frontMarkerY, 0.001)`, size
 //!   `markerWidth x markerDepth`, opacity `dimFactor` (1), UVs flipped 180° with
 //!   the source's `depthMm`-wide hysteresis band around the plate centre.
+//! - Supports: one instanced pass per non-empty `SupportBatches` batch with
+//!   `meshBasicMaterial`'s flat `#9a9a9a` (`DEFAULT_SUPPORT_COLOR`). The taper
+//!   rides a per-instance attribute instead of the source's ratio-bucketed
+//!   meshes, so a whole support set is four draws rather than one per bucket.
 //! - Logo decal: plane at `(logoX, logoY, 0.12)`, size `logoWidth x logoHeight`,
 //!   opacity `0.4 * dimFactor` applied as alpha (the texture is no longer
 //!   pre-multiplied by 0.4), double-sided, depth bias -2/-2.
@@ -62,6 +66,9 @@
 //!   nothing either; a profile with margins would show stripes here.
 //! - Plate name label, side buttons and ghost plates are 2D/widget work owned by
 //!   other modules; nothing is drawn for them here.
+//! - Support selection/hover tints and per-model support colours
+//!   (`instanceColorWriter.ts`) are interaction state; the viewport draws the
+//!   base grey only, and the interior support view is not decoded.
 //! - The grid's `material-opacity` fade for inactive plates, multi-plate
 //!   offsets and the `circle` plate silhouette have no counterpart: this
 //!   viewport draws one rectangular plate at the origin.
@@ -96,6 +103,11 @@ use self::targets::Targets;
 use self::uniforms::GpuMesh;
 
 const SAMPLE_COUNT: u32 = 4;
+
+/// The support batches `Viewport::render` draws, with their instance records;
+/// re-exported so a caller can build and name them without depending on
+/// `gpui-supports` directly.
+pub use gpui_supports::{NodeInstance, ShaftInstance, SupportBatches};
 
 /// `DEFAULT_SUPPORT_COLOR` in `src/supports/SupportProxyMeshLayer.tsx` — the
 /// proxy layer's base grey, the colour `meshBasicMaterial` paints a support

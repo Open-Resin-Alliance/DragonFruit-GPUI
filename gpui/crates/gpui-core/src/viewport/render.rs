@@ -2,6 +2,7 @@
 
 use anyhow::Result;
 use gpui_interop::WgpuSurface;
+use gpui_supports::SupportBatches;
 
 use crate::camera::Camera;
 use crate::stl::MeshData;
@@ -11,7 +12,9 @@ use wgpu::util::DeviceExt;
 use super::mesh::srgb_linear;
 use super::plate::BUILD_PLATE_COLOR;
 use super::targets::Targets;
-use super::uniforms::{ColorUniform, DecalUniform, GpuMesh, ModelUniform, SpriteUniform, Uniforms};
+use super::uniforms::{
+    ColorUniform, DecalUniform, GpuMesh, ModelUniform, SpriteUniform, SupportInstance, Uniforms,
+};
 use super::{ViewLayers, Viewport};
 
 impl Viewport {
@@ -24,7 +27,7 @@ impl Viewport {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         mesh: Option<&MeshData>,
-        supports: &[[f32; 3]],
+        supports: Option<&SupportBatches>,
         layers: ViewLayers,
         model: glam::Mat4,
         clip_z: f32,
@@ -260,24 +263,14 @@ impl Viewport {
             }
             _ => {}
         }
-        let support_ptr = supports.as_ptr() as usize;
-        if support_ptr != self.support_ptr {
-            self.support_ptr = support_ptr;
-            let mut vertices = Vec::with_capacity(supports.len() * 2);
-            for point in supports {
-                vertices.push([point[0], point[1], point[2], 0.49, 0.93, 0.03]);
-                vertices.push([point[0], point[1], 0.0, 0.49, 0.93, 0.03]);
-            }
-            if vertices.is_empty() {
-                self.support_vertex_count = 0;
-            } else {
-                self.support_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("viewport supports"),
-                    contents: bytemuck::cast_slice(&vertices),
-                    usage: wgpu::BufferUsages::VERTEX,
-                });
-                self.support_vertex_count = vertices.len() as u32;
-            }
+        // Supports upload only when the set itself changes; a frame that draws
+        // the same `SupportBatches` reuses every buffer, exactly as the mesh
+        // does. The caller owns the stable set (a fresh value per frame would
+        // rebuild here, so `app.rs` must hand over a held one).
+        let supports_ptr = supports.map_or(0, |batches| batches as *const SupportBatches as usize);
+        if supports_ptr != self.supports_ptr {
+            self.supports_ptr = supports_ptr;
+            self.upload_supports(device, supports);
         }
 
         let aspect = width as f32 / height as f32;
@@ -428,10 +421,35 @@ impl Viewport {
                 pass.set_bind_group(2, &self.z_label_bind, &[]);
                 pass.draw(12..18, 0..1);
             }
-            if self.support_vertex_count > 0 {
-                pass.set_pipeline(&self.axis);
-                pass.set_vertex_buffer(0, self.support_buffer.slice(..));
-                pass.draw(0..self.support_vertex_count, 0..1);
+            // One draw per non-empty batch, each `SupportBatches::draw_calls()`
+            // counts. The bind group is shared: the support colour is constant.
+            if self.support_straight_count > 0
+                || self.support_tapered_count > 0
+                || self.support_node_count > 0
+                || self.support_disk_instance_count > 0
+            {
+                pass.set_pipeline(&self.support);
+                pass.set_bind_group(1, &self.support_bind, &[]);
+                if let Some(instances) = &self.support_straight_instances {
+                    pass.set_vertex_buffer(0, self.support_cylinder.slice(..));
+                    pass.set_vertex_buffer(1, instances.slice(..));
+                    pass.draw(0..self.support_cylinder_count, 0..self.support_straight_count);
+                }
+                if let Some(instances) = &self.support_tapered_instances {
+                    pass.set_vertex_buffer(0, self.support_cylinder.slice(..));
+                    pass.set_vertex_buffer(1, instances.slice(..));
+                    pass.draw(0..self.support_cylinder_count, 0..self.support_tapered_count);
+                }
+                if let Some(instances) = &self.support_node_instances {
+                    pass.set_vertex_buffer(0, self.support_sphere.slice(..));
+                    pass.set_vertex_buffer(1, instances.slice(..));
+                    pass.draw(0..self.support_sphere_count, 0..self.support_node_count);
+                }
+                if let Some(instances) = &self.support_disk_instances {
+                    pass.set_vertex_buffer(0, self.support_disk.slice(..));
+                    pass.set_vertex_buffer(1, instances.slice(..));
+                    pass.draw(0..self.support_disk_count, 0..self.support_disk_instance_count);
+                }
             }
             if self.gizmo_vertex_count > 0 {
                 pass.set_pipeline(&self.axis);
@@ -534,5 +552,124 @@ impl Viewport {
         );
         queue.submit(Some(encoder.finish()));
         Ok(())
+    }
+
+    /// Upload one instance buffer per non-empty batch.
+    ///
+    /// Called from [`Viewport::render`] only when the set's identity changes,
+    /// so the per-frame cost is the pointer comparison, not this walk.
+    fn upload_supports(&mut self, device: &wgpu::Device, supports: Option<&SupportBatches>) {
+        let Some(batches) = supports else {
+            set_support_instances(
+                &mut self.support_straight_instances,
+                &mut self.support_straight_count,
+                None,
+            );
+            set_support_instances(
+                &mut self.support_tapered_instances,
+                &mut self.support_tapered_count,
+                None,
+            );
+            set_support_instances(
+                &mut self.support_node_instances,
+                &mut self.support_node_count,
+                None,
+            );
+            set_support_instances(
+                &mut self.support_disk_instances,
+                &mut self.support_disk_instance_count,
+                None,
+            );
+            return;
+        };
+
+        let straight: Vec<SupportInstance> = batches
+            .straight_shafts
+            .iter()
+            .map(|shaft| SupportInstance {
+                matrix: shaft.matrix().to_cols_array_2d(),
+                taper: 1.0,
+            })
+            .collect();
+        // The tapered batch carries its ratio per instance; the shader narrows
+        // the unit cylinder's `to` end.
+        let tapered: Vec<SupportInstance> = batches
+            .tapered_shafts
+            .iter()
+            .map(|shaft| SupportInstance {
+                matrix: shaft.matrix().to_cols_array_2d(),
+                taper: shaft.taper(),
+            })
+            .collect();
+        let nodes: Vec<SupportInstance> = batches
+            .nodes
+            .iter()
+            .map(|node| SupportInstance {
+                matrix: node.matrix().to_cols_array_2d(),
+                taper: 1.0,
+            })
+            .collect();
+        let disks: Vec<SupportInstance> = batches
+            .disks
+            .iter()
+            .map(|disk| SupportInstance {
+                matrix: disk.matrix().to_cols_array_2d(),
+                taper: 1.0,
+            })
+            .collect();
+
+        set_support_instances(
+            &mut self.support_straight_instances,
+            &mut self.support_straight_count,
+            support_instance_buffer(device, "viewport support straight", &straight),
+        );
+        set_support_instances(
+            &mut self.support_tapered_instances,
+            &mut self.support_tapered_count,
+            support_instance_buffer(device, "viewport support tapered", &tapered),
+        );
+        set_support_instances(
+            &mut self.support_node_instances,
+            &mut self.support_node_count,
+            support_instance_buffer(device, "viewport support nodes", &nodes),
+        );
+        set_support_instances(
+            &mut self.support_disk_instances,
+            &mut self.support_disk_instance_count,
+            support_instance_buffer(device, "viewport support disks", &disks),
+        );
+    }
+}
+
+fn support_instance_buffer(
+    device: &wgpu::Device,
+    label: &str,
+    instances: &[SupportInstance],
+) -> Option<(wgpu::Buffer, u32)> {
+    if instances.is_empty() {
+        return None;
+    }
+    let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some(label),
+        contents: bytemuck::cast_slice(instances),
+        usage: wgpu::BufferUsages::VERTEX,
+    });
+    Some((buffer, instances.len() as u32))
+}
+
+fn set_support_instances(
+    slot: &mut Option<wgpu::Buffer>,
+    count: &mut u32,
+    buffer: Option<(wgpu::Buffer, u32)>,
+) {
+    match buffer {
+        Some((buffer, instances)) => {
+            *slot = Some(buffer);
+            *count = instances;
+        }
+        None => {
+            *slot = None;
+            *count = 0;
+        }
     }
 }

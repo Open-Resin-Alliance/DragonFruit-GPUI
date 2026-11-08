@@ -10,9 +10,13 @@
 //!
 //! PORT DEVIATIONS (each one forced by the GPUI slice; nothing is silently
 //! simplified):
-//! - The draft values live in one process-wide [`SettingsState`] because
-//!   `DragonFruit` owns only `settings_tab`/`show_settings`. `Apply` and
-//!   `Cancel` close the modal; persistence belongs to the parent.
+//! - The draft values live in one process-wide [`SettingsState`] (see [`state`])
+//!   because `DragonFruit` owns only `settings_tab`/`show_settings`. The app
+//!   calls [`hydrate`] with `Store::load_settings()` at startup, watches
+//!   [`take_dirty`] and saves [`snapshot`] through
+//!   `Store::save_settings_debounced`; `Apply` and `Cancel` only close the
+//!   modal. The store is the single source of every default — the tabs read the
+//!   hydrated values and never a literal.
 //! - `SelectDropdown` is the real component now: the trigger opens a menu, the
 //!   chosen row writes the draft and closes it. GPUI has no portal, so the menu
 //!   renders as an absolute child under the trigger (6px below, full trigger
