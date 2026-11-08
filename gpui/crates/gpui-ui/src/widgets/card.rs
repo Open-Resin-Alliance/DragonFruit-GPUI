@@ -137,11 +137,45 @@ pub fn sub_card() -> Div {
 }
 
 /// [`sub_card`] with an accent tint — `(tone, background share)` — and padding.
+///
+/// The border keeps the `accentCardStyle` share (`accent 24%` of
+/// `--border-subtle`), which is also the Lift card's. A panel whose own tint
+/// pair differs — Move is 22%, Rotate and Scale are 20% — calls
+/// [`sub_card_tinted`] with its own border share.
 pub fn sub_card_with(tint: Option<(u32, f32)>, padding: f32) -> Div {
-    let (background, border) = match tint {
-        Some((tone, share)) => (mix(tone, SURFACE_1, share), mix(tone, BORDER_SUBTLE, 0.24)),
-        None => (SURFACE_1, mix(BORDER_SUBTLE, BLACK, 0.94)),
+    let (border, background) = match tint {
+        Some((tone, share)) => (
+            mix(tone, BORDER_SUBTLE, TINT_BORDER_SHARE),
+            mix(tone, SURFACE_1, share),
+        ),
+        None => (mix(BORDER_SUBTLE, BLACK, 0.94), SURFACE_1),
     };
+    card_shell(border, background, padding)
+}
+
+/// The share of `--border-subtle` a tinted sub-card keeps when the caller does
+/// not say otherwise: `accentCardStyle`'s `color-mix(accent, border-subtle 76%)`.
+pub const TINT_BORDER_SHARE: f32 = 0.24;
+
+/// A sub-card whose tint pair is stated in full — the source's inline
+/// `{ borderColor: color-mix(tone, border-subtle N%), background:
+/// color-mix(tone, surface-1 M%) }`.
+///
+/// `background_share` and `border_share` are the **tone's** share, so
+/// `sub_card_tinted(MOVE_TINT, 0.06, 0.22)` is `#4f8cff` at 6% over
+/// `--surface-1` and at 22% over `--border-subtle`
+/// (`TransformControls.tsx`'s `moveCardStyle`).
+pub fn sub_card_tinted(tone: u32, background_share: f32, border_share: f32) -> Div {
+    card_shell(
+        mix(tone, BORDER_SUBTLE, border_share),
+        mix(tone, SURFACE_1, background_share),
+        8.0,
+    )
+}
+
+/// The shape every sub-card shares: `rounded-md border p-2 space-y-1.5` with a
+/// flex column and a 6px gap.
+fn card_shell(border: u32, background: u32, padding: f32) -> Div {
     div()
         .rounded(px(ROUNDED_MD))
         .border_1()

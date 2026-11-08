@@ -296,7 +296,7 @@ fn sponsors_card() -> Div {
     let mut viewport = div()
         .relative()
         .mt(px(8.))
-        .rounded(px(6.))
+        .rounded(px(ROUNDED_MD)) // `rounded-md` — 10px in this app
         .overflow_hidden()
         .bg(rgba(with_alpha(SURFACE_0, 0xCC)))
         .child(
@@ -338,7 +338,7 @@ fn sponsors_card() -> Div {
 
     div()
         .flex_shrink_0()
-        .rounded(px(8.)) // rounded-lg
+        .rounded(px(ROUNDED_LG)) // `rounded-lg` — 14px in this app
         .border_1()
         .border_color(rgb(BORDER_SUBTLE))
         .bg(rgb(SURFACE_1))
@@ -558,7 +558,7 @@ pub(crate) fn about_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>) 
             // `color-mix(tone, surface-0 <bgMix>)` (`:1684-1697`).
             grid = grid.child(
                 div()
-                    .rounded(px(6.))
+                    .rounded(px(ROUNDED_MD)) // `rounded-md` — 10px in this app
                     .border_1()
                     .border_color(rgb(mix(BORDER_SUBTLE, tone_color, 0.45)))
                     .bg(rgb(mix(SURFACE_0, tone_color, background_mix)))
@@ -630,7 +630,7 @@ pub(crate) fn about_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>) 
     // `rounded-md border p-3` on `surface-1` (`:1647`), header at `text-xs
     // font-semibold uppercase` on `text-muted` (`:1648-1651`).
     let team = div()
-        .rounded(px(6.))
+        .rounded(px(ROUNDED_MD)) // `rounded-md` — 10px in this app
         .border_1()
         .border_color(rgb(BORDER_SUBTLE))
         .bg(rgb(SURFACE_1))

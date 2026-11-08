@@ -74,7 +74,7 @@ use std::sync::{LazyLock, Mutex, MutexGuard};
 
 use gpui::{
     AnyElement, App, ClickEvent, Div, FontWeight, IntoElement, SharedString, Stateful, WeakEntity,
-    Window, div, linear_color_stop, linear_gradient, prelude::*, px, relative, rgb, rgba,
+    Window, div, linear_color_stop, linear_gradient, prelude::*, px, relative, rgb,
 };
 use serde::Deserialize;
 
@@ -502,16 +502,6 @@ impl PrinterStore {
         let id = self.active_profile.as_ref()?;
         self.profiles.iter().find(|profile| &profile.id == id)
     }
-
-    fn materials_for_active(&self) -> Vec<&MaterialProfile> {
-        let Some(profile_id) = self.active_profile.as_ref() else {
-            return Vec::new();
-        };
-        self.materials
-            .iter()
-            .filter(|material| &material.printer_profile_id == profile_id)
-            .collect()
-    }
 }
 
 fn parse_presets(json: &str) -> Vec<PrinterPreset> {
@@ -587,6 +577,26 @@ fn click_edit(
     move |_, _, cx| {
         edit(&action);
         entity.update(cx, |_, cx| cx.notify()).ok();
+    }
+}
+
+/// [`click_edit`] plus a follow-up on the window: the source's `onAdded()`, which
+/// closes the library once a printer was added (the setup dialog it hosts closes
+/// with it).
+fn click_edit_then(
+    entity: &WeakEntity<DragonFruit>,
+    action: impl Fn(&mut PrinterStore) + 'static,
+    after: impl Fn(&mut DragonFruit) + 'static,
+) -> impl Fn(&ClickEvent, &mut Window, &mut App) + 'static {
+    let entity = entity.clone();
+    move |_, _, cx| {
+        edit(&action);
+        entity
+            .update(cx, |this, cx| {
+                after(this);
+                cx.notify();
+            })
+            .ok();
     }
 }
 
@@ -675,6 +685,8 @@ struct PresetRow {
     title: String,
     /// `libraryDisplayName ?? stripVariantSuffix(name)` — the setup row title.
     variant_title: String,
+    /// The preset's own `name`, which the detected card's subline shows.
+    raw_name: String,
     manufacturer: String,
     bits: Option<i64>,
     bit_description: Option<String>,
@@ -682,13 +694,6 @@ struct PresetRow {
     added: bool,
     is_generic: bool,
     opens_setup: bool,
-}
-
-struct MaterialRow {
-    id: String,
-    name: String,
-    color: Option<u32>,
-    layer_height_mm: f32,
 }
 
 struct PickerView {
@@ -705,8 +710,6 @@ struct PickerView {
     selected_opens_setup: bool,
     family_title: Option<String>,
     variants: Vec<PresetRow>,
-    materials: Vec<MaterialRow>,
-    active_material: Option<String>,
     mode: SetupMode,
     /// The library's search term, as typed.
     search: String,
@@ -739,6 +742,7 @@ impl PrinterStore {
                 .clone()
                 .filter(|name| !name.trim().is_empty())
                 .unwrap_or_else(|| strip_variant_suffix(&preset.name)),
+            raw_name: preset.name.clone(),
             manufacturer: preset.manufacturer.clone(),
             bits: preset
                 .bit_depth
@@ -856,17 +860,6 @@ fn view() -> PickerView {
         })
         .unwrap_or_default();
 
-    let materials = store
-        .materials_for_active()
-        .into_iter()
-        .map(|material| MaterialRow {
-            id: material.id.clone(),
-            name: material.name.clone(),
-            color: material.color,
-            layer_height_mm: material.layer_height_mm,
-        })
-        .collect();
-
     let devices = store
         .devices
         .iter()
@@ -889,8 +882,6 @@ fn view() -> PickerView {
         selected_opens_setup,
         family_title,
         variants,
-        materials,
-        active_material: store.active_material.clone(),
         mode: store.mode,
         search: store.search.clone(),
         is_searching,
@@ -1003,14 +994,13 @@ fn library_body(view: &PickerView, entity: WeakEntity<DragonFruit>) -> Div {
     let sidebar = library_sidebar(view, entity.clone());
     let grid = library_grid(view, entity.clone());
 
-    let mut body = div().flex().flex_col().gap(px(12.0)).child(
+    // The sidebar + preset grid (`grid-cols-[220px_minmax(0,1fr)]`). The source
+    // onboarding library has no material list: materials belong to the
+    // Printer & Material Profiles modal, not to the add flow.
+    div().flex().flex_col().gap(px(12.0)).child(
         div()
             .flex()
-            .h(px(if view.materials.is_empty() {
-                480.0
-            } else {
-                420.0
-            }))
+            .h(px(480.0))
             .min_h(px(0.0))
             .rounded(px(ROUNDED_MD))
             .border_1()
@@ -1027,12 +1017,7 @@ fn library_body(view: &PickerView, entity: WeakEntity<DragonFruit>) -> Div {
                     .p(px(12.0))
                     .child(grid),
             ),
-    );
-
-    if !view.materials.is_empty() {
-        body = body.child(material_section(view, entity));
-    }
-    body
+    )
 }
 
 fn library_sidebar(view: &PickerView, entity: WeakEntity<DragonFruit>) -> Div {
@@ -1336,85 +1321,6 @@ fn preset_card(
     card
 }
 
-/// The material rows for the active printer, mirroring the material tab's
-/// `Profile` list (`ProfileSettingsModal.tsx` around line 4940): a selectable
-/// row per material with its swatch and layer height.
-fn material_section(view: &PickerView, entity: WeakEntity<DragonFruit>) -> Div {
-    let mut rows = div().flex().flex_wrap().gap(px(8.0));
-    for material in &view.materials {
-        let active = view.active_material.as_deref() == Some(material.id.as_str());
-        let id = material.id.clone();
-        let click = click_edit(&entity, move |store: &mut PrinterStore| {
-            store.active_material = Some(id.clone());
-        });
-        let mut row = div()
-            .id(format!("printer-material-{}", material.id))
-            .flex()
-            .items_center()
-            .gap(px(8.0))
-            .rounded(px(ROUNDED_MD))
-            .border_1()
-            .border_color(rgb(if active {
-                mix(ACCENT, BORDER_SUBTLE, 0.70)
-            } else {
-                BORDER_SUBTLE
-            }))
-            .bg(rgb(if active {
-                mix(ACCENT, SURFACE_1, 0.11)
-            } else {
-                SURFACE_1
-            }))
-            .px(px(10.0))
-            .py(px(8.0))
-            .text_size(px(12.0))
-            .text_color(rgb(if active { TEXT_STRONG } else { TEXT_MUTED }))
-            .cursor_pointer()
-            .on_click(click);
-        if let Some(color) = material.color {
-            // `h-3.5 w-3.5 rounded-[4px]` swatch with a 1px inner edge.
-            row = row.child(
-                div()
-                    .w(px(14.0))
-                    .h(px(14.0))
-                    .rounded(px(4.0))
-                    .bg(rgb(color))
-                    .border_1()
-                    .border_color(rgba(0x00000059)),
-            );
-        }
-        row = row
-            .child(
-                div()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child(material.name.clone()),
-            )
-            .child(
-                div()
-                    .text_size(px(11.0))
-                    .text_color(rgb(TEXT_MUTED))
-                    // `Math.round(layerHeightMm * 1000) μm`.
-                    .child(format!(
-                        "{} μm",
-                        (material.layer_height_mm * 1000.0).round() as i64
-                    )),
-            );
-        rows = rows.child(row);
-    }
-
-    div()
-        .flex()
-        .flex_col()
-        .gap(px(6.0))
-        .child(
-            div()
-                .text_size(px(11.0))
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(rgb(TEXT_MUTED))
-                .child("MATERIAL"),
-        )
-        .child(rows)
-}
-
 fn library_actions(view: &PickerView, entity: WeakEntity<DragonFruit>) -> Div {
     let label: SharedString = view
         .selected_label
@@ -1458,19 +1364,29 @@ fn library_actions(view: &PickerView, entity: WeakEntity<DragonFruit>) -> Div {
     let add: AnyElement = if can_add {
         let selected = view.selected.clone().unwrap_or_default();
         let opens_setup = view.selected_opens_setup;
-        let click = click_edit(&entity, move |store: &mut PrinterStore| {
-            if opens_setup {
-                store.family_preset = Some(selected.clone());
-                store.surface = Surface::Setup;
-                store.mode = SetupMode::Manual;
-                store.detected = None;
-                store.detected_device_name = None;
-                store.detect_error = None;
-            } else {
-                store.add_preset(&selected);
-                store.selected_preset = None;
-            }
-        });
+        let click = click_edit_then(
+            &entity,
+            move |store: &mut PrinterStore| {
+                if opens_setup {
+                    store.family_preset = Some(selected.clone());
+                    store.surface = Surface::Setup;
+                    store.mode = SetupMode::Manual;
+                    store.detected = None;
+                    store.detected_device_name = None;
+                    store.detect_error = None;
+                } else {
+                    store.add_preset(&selected);
+                    store.selected_preset = None;
+                }
+            },
+            // `onAdded()`: the onboarding library closes once a printer is
+            // added. The setup dialog stays open until its own flow finishes.
+            move |this: &mut DragonFruit| {
+                if !opens_setup {
+                    this.show_printer_picker = false;
+                }
+            },
+        );
         button_with("printer-add", "Add printer", &spec)
             .h(px(32.0))
             .on_click(click)
@@ -1531,16 +1447,16 @@ fn variant_rows(view: &PickerView, entity: WeakEntity<DragonFruit>) -> Div {
     for row in &view.variants {
         let id = row.preset_id.clone();
         let added = row.added;
-        let click = click_edit(&entity, move |store: &mut PrinterStore| {
-            // `handleSelectVariant`: add the concrete variant and return to
-            // the library, where the profile is now active.
-            store.add_preset(&id);
-            store.surface = Surface::Library;
-            store.family_preset = None;
-            store.detected = None;
-            store.detected_device_name = None;
-            store.pending_network = None;
-        });
+        let click = click_edit_then(
+            &entity,
+            move |store: &mut PrinterStore| {
+                // `handleSelectVariant`: add the concrete variant and finish
+                // the add flow (`onAdded()` closes the library behind it).
+                store.add_preset(&id);
+                pop_to_library(store);
+            },
+            |this: &mut DragonFruit| this.show_printer_picker = false,
+        );
 
         // `flex w-full items-center gap-3 rounded-xl border px-3 py-2.5`.
         let mut row_el = div()
@@ -1628,7 +1544,8 @@ fn scan_body(view: &PickerView, entity: WeakEntity<DragonFruit>) -> Div {
             .detected_device_name
             .clone()
             .filter(|name| !name.trim().is_empty())
-            .unwrap_or_else(|| detected.variant_title.clone());
+            // `detectedDisplayName = detectedDeviceName?.trim() || detectedVariant?.name`
+            .unwrap_or_else(|| detected.raw_name.clone());
         status = status.child(
             div()
                 .flex()
@@ -1646,7 +1563,8 @@ fn scan_body(view: &PickerView, entity: WeakEntity<DragonFruit>) -> Div {
                         .text_size(px(11.0))
                         .text_color(rgb(TEXT_MUTED))
                         .child(if view.detected_device_name.is_some() {
-                            detected.variant_title.clone()
+                            // `detectedDeviceName ? detectedVariant.name : …`
+                            detected.raw_name.clone()
                         } else {
                             "The printer reported this variant.".to_owned()
                         }),
@@ -1845,7 +1763,8 @@ fn ip_body(view: &PickerView, entity: WeakEntity<DragonFruit>) -> Div {
             .detected_device_name
             .clone()
             .filter(|name| !name.trim().is_empty())
-            .unwrap_or_else(|| detected.variant_title.clone());
+            // `detectedDisplayName = detectedDeviceName?.trim() || detectedVariant?.name`
+            .unwrap_or_else(|| detected.raw_name.clone());
         body = body.child(
             div()
                 .rounded(px(12.0))
@@ -1867,7 +1786,8 @@ fn ip_body(view: &PickerView, entity: WeakEntity<DragonFruit>) -> Div {
                         .text_size(px(11.0))
                         .text_color(rgb(TEXT_MUTED))
                         .child(if view.detected_device_name.is_some() {
-                            detected.variant_title.clone()
+                            // `detectedDeviceName ? detectedVariant.name : …`
+                            detected.raw_name.clone()
                         } else {
                             "The printer reported this variant.".to_owned()
                         }),
@@ -2031,14 +1951,16 @@ fn setup_actions(view: &PickerView, entity: WeakEntity<DragonFruit>) -> Div {
                     );
                 let add = button_with("printer-confirm-detected", "Add printer", &spec)
                     .h(px(32.0))
-                    .on_click(click_edit(&entity, move |store: &mut PrinterStore| {
-                        store.add_preset(&id);
-                        store.surface = Surface::Library;
-                        store.family_preset = None;
-                        store.detected = None;
-                        store.detected_device_name = None;
-                        store.pending_network = None;
-                    }));
+                    .on_click(click_edit_then(
+                        &entity,
+                        move |store: &mut PrinterStore| {
+                            // `handleConfirmDetected` → `onSelect(id, networkContext)`
+                            // → `onAdded()`: the add flow ends here.
+                            store.add_preset(&id);
+                            pop_to_library(store);
+                        },
+                        |this: &mut DragonFruit| this.show_printer_picker = false,
+                    ));
                 right = right.child(add);
             }
         }

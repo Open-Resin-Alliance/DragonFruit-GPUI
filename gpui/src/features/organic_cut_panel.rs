@@ -114,8 +114,13 @@ impl Default for OrganicCutState {
 
 impl OrganicCutState {
     /// `DEFAULT_CUT_SETTINGS`: the cut's own factory settings (mode, clearance,
-    /// both smoothings, resolution).
-    pub fn default_cut_settings() -> Self {
+    /// both smoothings, resolution), applied over `self`.
+    ///
+    /// The source's reset is `setState({ ...DEFAULT_CUT_SETTINGS })`, and that
+    /// object holds the five cut keys only — the drawn loops and every tenon
+    /// setting survive it. Spreading the defaults over the current state is
+    /// what keeps that promise.
+    pub fn with_default_cut_settings(&self) -> Self {
         let defaults = Self::default();
         Self {
             cut_mode: defaults.cut_mode,
@@ -123,13 +128,34 @@ impl OrganicCutState {
             smoothing: defaults.smoothing,
             membrane_smoothing: defaults.membrane_smoothing,
             density: defaults.density,
-            ..defaults
+            ..self.clone()
         }
     }
 
-    /// `DEFAULT_TENON_SETTINGS`: every tenon field, `generate_tenon` included.
-    pub fn default_tenon_settings() -> Self {
-        Self::default()
+    /// `DEFAULT_TENON_SETTINGS` (`{ ...DEFAULT_TENON_SETTINGS, generateTenon:
+    /// state.generateTenon }`), applied over `self`.
+    ///
+    /// Same rule as the cut reset: the object is the tenon's keys, and the
+    /// comment on the source's button says it out loud — "The reset leaves the
+    /// No Tenon/on choice alone." Starting from a whole default state instead
+    /// would silently reset the cut mode, clearance, both smoothings and the
+    /// resolution with it.
+    pub fn with_default_tenon_settings(&self) -> Self {
+        let defaults = Self::default();
+        Self {
+            tenon_width_mm: defaults.tenon_width_mm,
+            tenon_depth_mm: defaults.tenon_depth_mm,
+            tenon_shape: defaults.tenon_shape,
+            tenon_fillet_mm: defaults.tenon_fillet_mm,
+            tenon_tolerance_mm: defaults.tenon_tolerance_mm,
+            tenon_anchor: defaults.tenon_anchor,
+            tenon_uniform_scale: defaults.tenon_uniform_scale,
+            tenon_swap_sides: defaults.tenon_swap_sides,
+            tenon_tilt_rad: defaults.tenon_tilt_rad,
+            tenon_roll_rad: defaults.tenon_roll_rad,
+            generate_tenon: self.generate_tenon,
+            ..self.clone()
+        }
     }
 
     /// `tenonSettingsDirty`: every tenon field except `generateTenon` differs.
@@ -258,14 +284,23 @@ fn max_tenon_fillet_mm(width_mm: f32, depth_mm: f32) -> f32 {
     value
 }
 
-/// `formatTenonFilletTitle`.
+/// `formatTenonFilletTitle` — the Edge Fillet field's `title`.
+///
+/// The panel records the wording but does not render it (see the module's
+/// tooltip deviation), so this has no caller. It stays because it is the one
+/// place the interpolated sentence exists: `{maxMm}` is recomputed from the live
+/// tenon, which is the whole point of the string.
+#[allow(dead_code)]
 fn tenon_fillet_title(max_mm: f32) -> String {
     format!(
         "Rounds the tenon's corners and tip. On this tenon the geometry accepts up to {max_mm}mm — a wider or deeper tenon raises that ceiling."
     )
 }
 
-/// `formatLoopTitle`.
+/// `formatLoopTitle` — a loop chip's `title`. Recorded, not rendered (see
+/// `tenon_fillet_title`); the four sentence shapes are the source's four
+/// branches.
+#[allow(dead_code)]
 fn loop_title(loop_index: usize, points: usize, incomplete: bool, active: bool) -> String {
     let points_label = if points == 1 {
         "1 point".to_string()
@@ -595,14 +630,9 @@ fn header_controls(view: &OrganicCutView, actions: &OrganicCutActions) -> Div {
                     .text_color(rgb(AXIS_X))
             })
             .on_click(move |_, _, _| {
-                let mut next = reset_state.clone();
-                let defaults = OrganicCutState::default_cut_settings();
-                next.cut_mode = defaults.cut_mode;
-                next.joint_clearance_mm = defaults.joint_clearance_mm;
-                next.smoothing = defaults.smoothing;
-                next.membrane_smoothing = defaults.membrane_smoothing;
-                next.density = defaults.density;
-                reset_cut(next);
+                // `setState({ ...DEFAULT_CUT_SETTINGS })` — the five cut keys,
+                // nothing else.
+                reset_cut(reset_state.with_default_cut_settings());
             })
     } else {
         reset.opacity(0.4).cursor_not_allowed()
@@ -850,13 +880,10 @@ fn tenon_card(view: &OrganicCutView, actions: &OrganicCutActions, busy: bool) ->
                     change(next);
                 }),
             );
-            // `className={state.tenonShape === 'frustum' ? undefined : 'col-span-2'}`
-            // — the dome has no fillet, so the tolerance takes the whole row.
-            knobs = knobs.child(if is_dome {
-                div().flex_1().min_w(px(0.0)).child(tolerance)
-            } else {
-                div().flex_1().min_w(px(0.0)).child(tolerance)
-            });
+            // `className={tenonShape === 'frustum' ? undefined : 'col-span-2'}` —
+            // with the fillet gone the dome's tolerance is the row's only field,
+            // so it already spans it.
+            knobs = knobs.child(div().flex_1().min_w(px(0.0)).child(tolerance));
         }
         details = details.child(knobs);
 
@@ -868,7 +895,9 @@ fn tenon_card(view: &OrganicCutView, actions: &OrganicCutActions, busy: bool) ->
             let colors = (
                 mix(ACCENT_SECONDARY, SURFACE_1, 0.05),
                 mix(ACCENT_SECONDARY, BORDER_SUBTLE, 0.38),
-                mix(ACCENT_SECONDARY, TEXT_STRONG, 0.55),
+                // `color-mix(accent-secondary, text-strong 55%)` — the accent is
+                // the 45% share, the theme token carries the percentage.
+                mix(ACCENT_SECONDARY, TEXT_STRONG, 0.45),
             );
             actions_row = actions_row.child(div().flex_1().child(panel_button(
                 "organic-tenon-flip",
@@ -889,7 +918,8 @@ fn tenon_card(view: &OrganicCutView, actions: &OrganicCutActions, busy: bool) ->
             let dirty = state.tenon_settings_dirty();
             let colors = (
                 mix(AXIS_X, SURFACE_1, 0.10),
-                mix(AXIS_X, BORDER_SUBTLE, 0.45),
+                // `color-mix(#f87171, border-subtle 45%)` — 55% of the red.
+                mix(AXIS_X, BORDER_SUBTLE, 0.55),
                 mix(AXIS_X, TEXT_STRONG, 0.70),
             );
             actions_row = actions_row.child(div().flex_1().child(panel_button(
@@ -899,9 +929,9 @@ fn tenon_card(view: &OrganicCutView, actions: &OrganicCutActions, busy: bool) ->
                 if dirty { Some(colors) } else { None },
                 !busy && dirty,
                 move |_, _, _| {
-                    let mut next = OrganicCutState::default_tenon_settings();
-                    next.generate_tenon = base.generate_tenon;
-                    change(next);
+                    // Over the current state, not a whole default one: the cut
+                    // settings and the tenon's No Tenon/on choice survive.
+                    change(base.with_default_tenon_settings());
                 },
             )));
         }

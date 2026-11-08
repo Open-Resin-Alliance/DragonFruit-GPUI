@@ -42,7 +42,9 @@
 //!    source's `${size} · ${polygons}` reduced to the polygon clause, because
 //!    `stl::MeshData` has no file size.
 //! 9. No rename state: the row renders the read-only name only.
-//! 10. No delete: the trash button is inert.
+//! 10. Delete is wired: the trash button runs `DragonFruit::delete_model`, the
+//!     same path the `Delete` key and the canvas menu take. The source's undo
+//!     stack does not exist here, so the delete cannot be undone.
 //! 11. No context-menu state (`PanelContextMenuState`): the menu cannot open.
 //! 12. Row click: the source calls `onSelect(id, 'single')`; the app's selection
 //!     is one boolean, so the row sets it true and the viewport's hit test can
@@ -50,9 +52,12 @@
 //! 13. The row has no second line: the previous port invented a triangle line,
 //!     which the source does not have. The count lives in the info tooltip.
 //! 14. The list's `overflow-y-auto` is not applied: the card grows to its content
-//!     in this shell, so a scroll container would collapse.
-//! 15. The inert row buttons swallow their clicks (`stopPropagation` in the
-//!     source), so pressing one does not select the model.
+//!     in this shell, so a scroll container would collapse. With that, the
+//!     source's viewport-derived `maxHeight` (`100vh - topbar - clearance`) is
+//!     not applied either: one row can never reach it.
+//! 15. Every row button swallows its press (`stopPropagation` in the source), so
+//!     pressing one never selects the model. The info and eye buttons are inert;
+//!     only delete acts (deviation 10).
 //!
 //! ## Auto Supports — `AutoSupportPanel.tsx`
 //!
@@ -112,8 +117,8 @@
 //!     `PrintingPanel.tsx`; it is removed.
 
 use gpui::{
-    App, BoxShadow, Div, FontWeight, IntoElement, SharedString, Stateful, WeakEntity, Window, div,
-    prelude::*, px, relative, rgb, rgba,
+    App, BoxShadow, Div, FontWeight, IntoElement, MouseButton, SharedString, Stateful, WeakEntity,
+    Window, div, prelude::*, px, relative, rgb, rgba,
 };
 
 use gpui_core::icons::icon;
@@ -187,8 +192,20 @@ fn hint(
 /// hover, `rounded` and `!p-1` (4px) at `size="sm"`.
 ///
 /// The source's row buttons all `stopPropagation` so pressing one never selects
-/// the model; these are inert, so the click is swallowed and nothing else.
+/// the model. This form is the inert one: the press is swallowed and nothing
+/// else happens.
 fn ghost_icon(id: &'static str, icon_name: &'static str, size: f32) -> Stateful<Div> {
+    ghost_icon_action(id, icon_name, size, |_, _| {})
+}
+
+/// [`ghost_icon`] with the row button's action: the press stops at the button
+/// (`e.stopPropagation()` in `ModelManagerPanel.tsx`), then the action runs.
+fn ghost_icon_action(
+    id: &'static str,
+    icon_name: &'static str,
+    size: f32,
+    on_click: impl Fn(&mut Window, &mut App) + 'static,
+) -> Stateful<Div> {
     icon_button_toned(
         id,
         icon_name,
@@ -198,7 +215,11 @@ fn ghost_icon(id: &'static str, icon_name: &'static str, size: f32) -> Stateful<
         IconTone::Neutral,
         false,
     )
-    .on_click(|_, _, cx| cx.stop_propagation())
+    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+    .on_click(move |_, window, cx| {
+        cx.stop_propagation();
+        on_click(window, cx);
+    })
 }
 
 /// `rounded-md border p-2` on `--border-subtle` / `--surface-1` — the neutral
@@ -320,6 +341,20 @@ fn model_row(
         format!("{triangles} polygons")
     };
 
+    let delete_entity = entity.clone();
+    // `Trash2` → `onDelete(model.id)`. The source's `scene.deleteModel` is the
+    // same path the `Delete` key and the canvas menu take
+    // (`DragonFruit::delete_model`), and it asks nothing first because deleting
+    // is undoable there; this build has no undo stack either way.
+    let delete_button = ghost_icon_action("model-delete", "trash-2", 14., move |_, cx| {
+        delete_entity
+            .update(cx, |this, cx| {
+                this.delete_model();
+                cx.notify();
+            })
+            .ok();
+    });
+
     div()
         .id("model-row")
         .flex()
@@ -362,12 +397,7 @@ fn model_row(
                     ghost_icon("model-eye", "eye", 16.),
                     "Hide",
                 ))
-                // PORT GAP: deleting a model is not implemented.
-                .child(hint(
-                    "model-delete-tip",
-                    ghost_icon("model-delete", "trash-2", 14.),
-                    "Delete model",
-                )),
+                .child(hint("model-delete-tip", delete_button, "Delete model")),
         )
         .on_click(move |_, _, cx| {
             // `onSelect(model.id, 'single')`: the app's selection is one flag.

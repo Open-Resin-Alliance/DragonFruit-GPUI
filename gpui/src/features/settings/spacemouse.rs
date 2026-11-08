@@ -15,7 +15,7 @@ pub(crate) fn spacemouse_tab(state: &SettingsState, entity: WeakEntity<DragonFru
     // empty and the source's empty state renders.
     let devices = div()
         .mt(px(8.))
-        .rounded(px(6.))
+        .rounded(px(ROUNDED_MD)) // `rounded-md` — 10px in this app
         .border_1()
         .border_color(rgb(BORDER_SUBTLE))
         .bg(rgb(SURFACE_0))
@@ -44,7 +44,7 @@ pub(crate) fn spacemouse_tab(state: &SettingsState, entity: WeakEntity<DragonFru
 
     let pivot = div()
         .mt(px(8.))
-        .rounded(px(6.))
+        .rounded(px(ROUNDED_MD)) // `rounded-md` — 10px in this app
         .border_1()
         .border_color(rgb(BORDER_SUBTLE))
         .bg(rgb(SURFACE_0))
@@ -133,28 +133,31 @@ pub(crate) fn spacemouse_tab(state: &SettingsState, entity: WeakEntity<DragonFru
                 .grid()
                 .grid_cols(2)
                 .gap(px(8.))
-                .child(slider_field(
+                // `mt-2 grid grid-cols-2 gap-2` of `space-y-0.5` slider groups:
+                // the section card is the only border in the source
+                // (`SpaceMouseSettingsTab.tsx:196-284`).
+                .child(slider_group(
                     "Translation",
                     format!("{:.2}", mouse.translation_sensitivity),
                     mouse.translation_sensitivity,
                     0.1,
                     4.0,
                 ))
-                .child(slider_field(
+                .child(slider_group(
                     "Rotation",
                     format!("{:.2}", mouse.rotation_sensitivity),
                     mouse.rotation_sensitivity,
                     0.1,
                     4.0,
                 ))
-                .child(slider_field(
+                .child(slider_group(
                     "Zoom",
                     format!("{:.2}", mouse.zoom_sensitivity),
                     mouse.zoom_sensitivity,
                     0.1,
                     4.0,
                 ))
-                .child(slider_field(
+                .child(slider_group(
                     "Deadzone",
                     format!("{:.2}", mouse.deadzone),
                     mouse.deadzone,
@@ -237,7 +240,7 @@ pub(crate) fn spacemouse_tab(state: &SettingsState, entity: WeakEntity<DragonFru
 
     root.child(
         div()
-            .rounded(px(6.))
+            .rounded(px(ROUNDED_MD)) // `rounded-md` — 10px in this app
             .border_1()
             .border_color(rgb(mix(BORDER_SUBTLE, ACCENT, 0.8)))
             .bg(rgb(mix(SURFACE_1, ACCENT, 0.96)))

@@ -371,24 +371,26 @@ pub fn materials_panel(
 }
 
 /// `useEscapeToClose` for this pane. Returns whether an overlay consumed the
-/// key: the compatibility list first, then the editor/create dialogs, then the
-/// lock and delete confirms.
+/// key. The source unwinds the *top-most* layer first, which is the z-index
+/// order: the compatible-machines list (`z-[120]`), then the delete
+/// confirmation (`z-[76]`), the lock dialog (`z-[75]`), and finally the editor
+/// and create dialogs (`z-[60]`).
 pub fn escape() -> bool {
     let mut state = ui();
     if state.compat.open {
         state.compat.open = false;
         return true;
     }
-    if state.editor.take().is_some() {
-        return true;
-    }
-    if state.create.take().is_some() {
+    if state.delete_confirm.take().is_some() {
         return true;
     }
     if state.lock_dialog.take().is_some() {
         return true;
     }
-    if state.delete_confirm.take().is_some() {
+    if state.editor.take().is_some() {
+        return true;
+    }
+    if state.create.take().is_some() {
         return true;
     }
     false
@@ -528,7 +530,12 @@ fn view(profile: &PrinterProfile) -> View {
     View {
         printer_id: profile.id.clone(),
         printer_name: profile.name.clone(),
-        multi_tank: profile.multi_tank(),
+        // `multiTankMaterialPicker = outputFormatSupportsMultiTank(outputFormat)
+        // && materialMode === 'multiTank'` (`:680`, gotcha 18). No built-in
+        // format declares `supportsMultiTank`, so with the shipped catalogue the
+        // section stays hidden, exactly as in the source.
+        multi_tank: profile.multi_tank()
+            && super::editor::supports_multi_tank(&profile.display.output_format),
         tank_count,
         tank_materials,
         output_format: profile.display.output_format.clone(),
@@ -992,12 +999,16 @@ fn rail_row(
     label: String,
     badge: Option<u32>,
     selected: bool,
+    accent: u32,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> Stateful<Div> {
+    // The manufacturer column is the source's accent-secondary selection; the
+    // material-type and profile columns use the accent
+    // (`ProfileSettingsModal.tsx:4870-4950`).
     let (border, background, text) = if selected {
         (
-            mix(ACCENT, BORDER_SUBTLE, 0.70),
-            mix(ACCENT, SURFACE_1, 0.11),
+            mix(accent, BORDER_SUBTLE, 0.70),
+            mix(accent, SURFACE_1, 0.11),
             TEXT_STRONG,
         )
     } else {
@@ -1050,6 +1061,7 @@ fn manufacturer_column(view: &View, entity: &WeakEntity<DragonFruit>) -> Div {
             picked.clone(),
             None,
             selected,
+            ACCENT_SECONDARY,
             move |_, _, cx| {
                 ui_edit(|state| {
                     state.manufacturer = Some(picked.clone());
@@ -1084,6 +1096,7 @@ fn resin_family_column(view: &View, entity: &WeakEntity<DragonFruit>) -> Div {
             label,
             None,
             selected,
+            ACCENT,
             move |_, _, cx| {
                 ui_edit(|state| {
                     state.resin_family = Some(picked.clone());
@@ -1395,17 +1408,26 @@ fn action_bar(view: &View, entity: &WeakEntity<DragonFruit>) -> Div {
     let delete = {
         let target = selected.map(|material| (material.id.clone(), material.name.clone()));
         let enabled = !delete_blocked;
+        // `materialOwnedByMessage`: a material owned by another printer cannot
+        // be deleted from this one, and the disabled button says who owns it.
+        let owner_name = selected
+            .filter(|material| material.printer_profile_id != view.printer_id)
+            .map(|material| {
+                view.profiles
+                    .iter()
+                    .find(|profile| profile.id == material.printer_profile_id)
+                    .map(|profile| profile.name.clone())
+                    .unwrap_or_else(|| "another printer".to_owned())
+            });
         let entity = entity.clone();
         let label = "Delete";
-        action_button(
+        // `variant="secondary"` with `color: var(--danger)` while enabled and
+        // `var(--text-muted)` while disabled (the button's own disabled branch).
+        let button = action_button(
             "material-delete",
             label,
             Some("trash-2"),
-            Some((
-                mix(SURFACE_1, BLACK, 0.92),
-                mix(BORDER_SUBTLE, BLACK, 0.90),
-                DANGER,
-            )),
+            Some((SURFACE_1, BORDER_SUBTLE, DANGER)),
             !enabled,
             move |_, _, cx| {
                 if let Some(target) = target.clone() {
@@ -1413,7 +1435,18 @@ fn action_bar(view: &View, entity: &WeakEntity<DragonFruit>) -> Div {
                 }
                 notify(&entity, cx);
             },
-        )
+        );
+        match owner_name {
+            Some(owner) => tooltip(
+                ElementId::Name(SharedString::from("material-delete-tooltip")),
+                button,
+                div()
+                    .w(px(240.0))
+                    .text_size(px(11.0))
+                    .child(format!("Owned by {owner}")),
+            ),
+            None => button,
+        }
     };
 
     let mut bar = div()
@@ -1455,11 +1488,57 @@ fn action_button(
     disabled: bool,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> Stateful<Div> {
+    button_recipe(
+        id,
+        label,
+        icon_name,
+        fill,
+        FONT_MD,
+        6.0,
+        disabled,
+        on_click,
+    )
+}
+
+/// The material editor's footer recipe: the source's `rounded-full` pills
+/// (`ProfileSettingsModal.tsx:5478-5520`), `text-sm` except `Cancel`
+/// (`text-xs`).
+fn pill_button(
+    id: &'static str,
+    label: &'static str,
+    icon_name: Option<&'static str>,
+    fill: Option<(u32, u32, u32)>,
+    font_size: f32,
+    disabled: bool,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> Stateful<Div> {
+    button_recipe(
+        id,
+        label,
+        icon_name,
+        fill,
+        font_size,
+        999.0,
+        disabled,
+        on_click,
+    )
+}
+
+fn button_recipe(
+    id: &'static str,
+    label: &'static str,
+    icon_name: Option<&'static str>,
+    fill: Option<(u32, u32, u32)>,
+    font_size: f32,
+    radius: f32,
+    disabled: bool,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> Stateful<Div> {
     let mut spec = ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Sm);
     spec.padding_x = Some(12.0);
     spec.padding_y = Some((0.0, 0.0));
-    spec.radius = Some(6.0);
-    spec.font_size = Some(FONT_MD);
+    spec.radius = Some(radius);
+    spec.font_size = Some(font_size);
     spec.gap = Some(6.0);
     spec.disabled = disabled;
     spec.fill = fill;
@@ -2354,16 +2433,23 @@ fn editor_dialog(
 
     let delete = {
         let target = material.map(|material| (material.id.clone(), material.name.clone()));
+        // `materialOwnedByMessage` on the disabled Delete Material button.
+        let owner_name = material
+            .filter(|material| material.printer_profile_id != view.printer_id)
+            .map(|material| {
+                view.profiles
+                    .iter()
+                    .find(|profile| profile.id == material.printer_profile_id)
+                    .map(|profile| profile.name.clone())
+                    .unwrap_or_else(|| "another printer".to_owned())
+            });
         let entity = entity.clone();
-        action_button(
+        let button = pill_button(
             "editor-delete",
             "Delete Material",
             Some("trash-2"),
-            Some((
-                mix(SURFACE_1, BLACK, 0.92),
-                mix(BORDER_SUBTLE, BLACK, 0.90),
-                DANGER,
-            )),
+            Some((SURFACE_1, BORDER_SUBTLE, DANGER)),
+            FONT_MD,
             delete_blocked,
             move |_, _, cx| {
                 if let Some(target) = target.clone() {
@@ -2374,15 +2460,27 @@ fn editor_dialog(
                 }
                 notify(&entity, cx);
             },
-        )
+        );
+        match owner_name {
+            Some(owner) => tooltip(
+                ElementId::Name(SharedString::from("editor-delete-tooltip")),
+                button,
+                div()
+                    .w(px(240.0))
+                    .text_size(px(11.0))
+                    .child(format!("Owned by {owner}")),
+            ),
+            None => button,
+        }
     };
 
     let cancel_entity = entity.clone();
-    let cancel = action_button(
+    let cancel = pill_button(
         "editor-cancel",
         "Cancel",
         None,
         None,
+        FONT_XS,
         false,
         move |_, _, cx| {
             ui_edit(|state| state.editor = None);
@@ -2393,11 +2491,12 @@ fn editor_dialog(
     let save_entity = entity.clone();
     let save_material_id = material_id.to_owned();
     let save_draft = draft.clone();
-    let save = action_button(
+    let save = pill_button(
         "editor-save",
         "Save Material",
         Some("check"),
         Some(accent_secondary_fill(0.08)),
+        FONT_MD,
         false,
         move |_, _, cx| {
             model::update_material(&save_material_id, |material| save_draft.apply_to(material));
@@ -2460,11 +2559,12 @@ fn create_dialog(view: &View, draft: &MaterialDraft, entity: &WeakEntity<DragonF
     };
 
     let cancel_entity = entity.clone();
-    let cancel = action_button(
+    let cancel = pill_button(
         "create-cancel",
         "Cancel",
         None,
         None,
+        FONT_XS,
         false,
         move |_, _, cx| {
             ui_edit(|state| state.create = None);
@@ -2477,11 +2577,12 @@ fn create_dialog(view: &View, draft: &MaterialDraft, entity: &WeakEntity<DragonF
     let printer_id = view.printer_id.clone();
     // `handleCreateMaterial`: `addMaterialProfile(selectedPrinter.id, {
     // ...newMaterialDraft, name: ..., brand: ..., localSettingsByOutput })`.
-    let save = action_button(
+    let save = pill_button(
         "create-save",
         "Save Material",
         Some("check"),
         Some(accent_secondary_fill(0.08)),
+        FONT_MD,
         false,
         move |_, _, cx| {
             let new_id = model::add_material(&printer_id);

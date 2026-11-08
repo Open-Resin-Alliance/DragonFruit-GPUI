@@ -55,18 +55,20 @@
 //!   new position, because the backdrop sits above the tiles.
 //!
 //! State the parent does not carry (rail-local, as in the source's own state):
-//! - `layout`: the source persists it in localStorage and the Settings "Toolbar
-//!   position" control also writes it. Rail-local here, and the default stays
-//!   `Vertical` because `panels.rs` hardcodes the 72px column inset
-//!   (`LEFT_DOCK_LEFT`) with no layout-dependent inset yet. The source defaults to
-//!   `horizontal`; flipping this default needs `panels::panel_stack` to take the
-//!   rail layout.
-//! - `models_visible`: persisted in the source. Mirrored into
-//!   `PanelLayout::set_collapsed("models", …)`; the source uses `display: none`
-//!   (`hidden`), so the GPUI panel keeps its 48px header instead of disappearing,
-//!   and its own chevron can re-expand it without updating this preference.
-//!   Switching to the bar re-shows it (`modelsPanelShown = modelsPanelVisible ||
-//!   toolLayout === 'horizontal'`); switching back re-applies the preference.
+//! - `layout`: the source persists it in localStorage under `app-tool-layout`
+//!   and the Settings "Toolbar position" control writes the same preference.
+//!   It is rail-local and unpersisted here, and the default stays `Vertical`
+//!   where the source defaults to `horizontal`; the two insets that depend on
+//!   it (`leftInsetPx` and `LOCKED_PANELS`) now follow
+//!   [`layout_is_column`] instead of assuming the column. The Settings control
+//!   writes `gpui_store`'s `general.tool_layout`, which nothing reads back into
+//!   this module — wiring it needs a settings snapshot at rail build time.
+//! - `models_visible`: persisted in the source (`app-models-panel-visible`).
+//!   Rail-local here. [`models_shown`] is what the panel stack reads to drop the
+//!   Models card from its dock, the source's `display: none`; the card's stored
+//!   placement and width survive, so switching to the bar re-shows it
+//!   (`modelsPanelShown = modelsPanelVisible || toolLayout === 'horizontal'`) and
+//!   switching back re-applies the preference.
 //! - `support_panel` (`supportRailMode`, default `'manual'`, plus
 //!   `transformMgr.transformMode === 'hollowing'`): this module writes it to the
 //!   entity, which mounts the matching panel. The source keeps the two fields
@@ -92,8 +94,10 @@
 //!   shell's gizmo check (`active_tool == 1` in `app.rs`) still sees Transform
 //!   while Support is showing a panel. Fixing that needs the gizmo check to read
 //!   the mode, not a per-workspace tool state on the entity.
-//! - The source renders the rail only when `scene.models.length > 0`; `main.rs`
-//!   renders it unconditionally (the entity carries no model count).
+//! - The source renders the rail only when `scene.models.length > 0`;
+//!   `app.rs:1898-1905` applies the same gate (`has_models && (prepare ||
+//!   support)`), so the two agree. [`tool_rail`] itself only refuses Export and
+//!   Printing.
 
 use std::cell::RefCell;
 
@@ -356,6 +360,30 @@ pub(crate) fn prepare_tool_count() -> usize {
     PREPARE_TOOLS.len()
 }
 
+/// Whether the rail is the docked left column right now (`ToolLayout ===
+/// 'vertical'`).
+///
+/// The panel stack reads it twice, and both come from `page.tsx`:
+/// `leftInsetPx` is `TOOL_RAIL_WIDTH_PX` only while the rail is a column
+/// (`:10718`), and `LOCKED_PANELS` keeps the model list from being dragged only
+/// while the rail is a column (`FloatingPanelStack.tsx`).
+pub(crate) fn layout_is_column() -> bool {
+    RAIL.with(|state| state.borrow().layout == Layout::Vertical)
+}
+
+/// `modelsPanelShown` (`page.tsx:8595`): `modelsPanelVisible || toolLayout ===
+/// 'horizontal'`.
+///
+/// The bar has no Models tile and no room beside it for the list to hide into,
+/// so there the list is always shown; the stored preference is not rewritten,
+/// it applies again when the rail returns to the column.
+pub(crate) fn models_shown() -> bool {
+    RAIL.with(|state| {
+        let state = state.borrow();
+        state.models_visible || state.layout == Layout::Horizontal
+    })
+}
+
 /// The three Support panel tools, in rail order (`buildSupportToolRailEntries`).
 const SUPPORT_PANELS: [(&str, &str, &str, &str, Option<Separated>); 3] = [
     (
@@ -522,17 +550,16 @@ fn apply_action(action: Action, entity: &WeakEntity<DragonFruit>, cx: &mut App) 
                 .ok();
         }
         Action::ToggleModels => {
-            let visible = RAIL.with(|state| {
+            RAIL.with(|state| {
                 let mut state = state.borrow_mut();
                 state.models_visible = !state.models_visible;
-                state.models_visible
             });
+            // The card is not collapsed any more: [`models_shown`] is what makes
+            // the stack leave it out of the dock, which is the source's
+            // `display: none` (`ModelManagerPanel.tsx:376-378`) — no 48px
+            // header is left behind, and its stored placement survives.
             entity
-                .update(cx, |this, cx| {
-                    // The panel layout owns collapse; `true` hides the body.
-                    this.layout.set_collapsed("models", !visible);
-                    cx.notify();
-                })
+                .update(cx, |_, cx| cx.notify())
                 .ok();
         }
         Action::ToggleInterior => {
@@ -774,22 +801,17 @@ fn menu_card(entity: WeakEntity<DragonFruit>) -> impl IntoElement {
     div().occlude().w(px(MENU_WIDTH)).child(menu)
 }
 
-/// Switch the rail's layout, and re-apply the Models panel's shown state:
-/// `modelsPanelShown = modelsPanelVisible || toolLayout === 'horizontal'`.
+/// Switch the rail's layout. The Models list's shown state follows from it —
+/// `modelsPanelShown = modelsPanelVisible || toolLayout === 'horizontal'`
+/// (`page.tsx:8595`) — which [`models_shown`] answers for the panel stack.
 fn set_layout(target: Layout, entity: &WeakEntity<DragonFruit>, cx: &mut App) {
-    let shown = RAIL.with(|state| {
+    RAIL.with(|state| {
         let mut state = state.borrow_mut();
         state.layout = target;
         state.menu = None;
         state.hovered = None;
-        state.models_visible || target == Layout::Horizontal
     });
-    entity
-        .update(cx, |this, cx| {
-            this.layout.set_collapsed("models", !shown);
-            cx.notify();
-        })
-        .ok();
+    entity.update(cx, |_, cx| cx.notify()).ok();
 }
 
 fn menu_backdrop(entity: WeakEntity<DragonFruit>) -> AnyElement {
@@ -914,9 +936,9 @@ pub fn tool_rail(
         Layout::Horizontal => horizontal_rail(entries, entity, overlays),
     };
     // The source's rail is `z-40`: above the panel stack (`zIndex: 20 + index`)
-    // and below the app bar (`z-50`). GPUI paints in child order and `main.rs`
-    // renders the panels after the rail, so deferring lifts the rail above them.
-    // The rail never overlaps the app bar — it starts at the bar's bottom edge —
-    // so painting above it is harmless.
+    // and below the app bar (`z-50`). GPUI paints in child order and `app.rs`
+    // renders the panel stack after the rail, so deferring lifts the rail above
+    // it. The rail never overlaps the app bar — it starts at the bar's bottom
+    // edge — so painting above it is harmless.
     deferred(rail).with_priority(0).into_any_element()
 }

@@ -31,6 +31,22 @@
 //!   `settings.rs`.
 //! * `Select` (the native `<select>`) is [`gpui_ui::panel_fields::select_field`]:
 //!   same box, an in-app menu instead of the OS menu.
+//! * `title` tooltips are not rendered: GPUI's tooltip needs a hover-state view
+//!   and the panel stack owns that layer (the same rule `arrange_panels` and
+//!   `organic_cut_panel` record). The three the source sets here are the Local
+//!   toggle's "Move and rotate along the model's own axes instead of the build
+//!   plate's", the Auto-lift toggle's "On, the selected models are lifted to this
+//!   distance and keep it through moves, rotations and scaling. Off, they return
+//!   to the height they were lifted from; Drop puts them on the plate." and the
+//!   Group toggle's "Rotate the selection as one block around its centre; turn
+//!   off to rotate each model in place".
+//! * A stepper press stands in for the source's blur, so it fires the same
+//!   commit pair in the same order: `on_rotation_complete` then
+//!   `on_transform_commit` for a rotation field, `on_scale_commit` for a scale
+//!   field, `on_transform_commit` for the lift distance, and
+//!   `on_position_commit` for a position field (`handlePositionBlur`'s optional
+//!   chain has no Rust equivalent; both callbacks are always present here and the
+//!   shell pairs them).
 
 use std::f32::consts::PI;
 use std::rc::Rc;
@@ -39,7 +55,7 @@ use gpui::{Div, FontWeight, IntoElement, SharedString, div, prelude::*, px, rgb}
 
 use gpui_ui::panel_fields::*;
 use gpui_ui::ui::{
-    ButtonSize, ButtonSpec, ButtonVariant, button_with, section_row, sub_card_with,
+    ButtonSize, ButtonSpec, ButtonVariant, button_with, section_row, sub_card_tinted,
 };
 use gpui_core::theme::*;
 
@@ -229,7 +245,7 @@ fn move_section(state: &TransformState, actions: &TransformActions) -> Div {
     let center = actions.on_center.clone();
     // `moveCardStyle`: `color-mix(#4f8cff, border-subtle 78%)` on
     // `color-mix(#4f8cff, surface-1 94%)`.
-    sub_card_with(Some((MOVE_TINT, 0.06)), 8.0)
+    sub_card_tinted(MOVE_TINT, 0.06, 0.22)
         .gap(px(0.0))
         .child(section_row(
             "Move",
@@ -273,9 +289,12 @@ fn lift_section(state: &TransformState, actions: &TransformActions) -> Div {
                          colors: (u32, u32, u32),
                          handler: Rc<dyn Fn()>| {
         let (background, border, text) = colors;
+        // The source puts these three colours in the button's inline `style`,
+        // and an inline declaration outranks `.ui-button-secondary:hover`, so
+        // Lift and Drop have no hover fill at all. `fill` pins the hover to the
+        // background for exactly that reason; do not add a `hover(...)` here.
         let spec = ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Sm)
-            .fill(background, border, text)
-            .hover(mix(background, WHITE, 0.92));
+            .fill(background, border, text);
         let el = button_with(id, label, &spec);
         if has_bbox {
             el.on_click(move |_, _, _| handler())
@@ -286,7 +305,7 @@ fn lift_section(state: &TransformState, actions: &TransformActions) -> Div {
 
     // `liftCardStyle`: `color-mix(#f59e0b, border-subtle 76%)` on
     // `color-mix(#f59e0b, surface-1 93%)`.
-    sub_card_with(Some((LIFT_TINT, 0.07)), 8.0)
+    sub_card_tinted(LIFT_TINT, 0.07, 0.24)
         .gap(px(0.0))
         .child(section_row(
             "Lift",
@@ -418,7 +437,7 @@ fn rotate_section(state: &TransformState, actions: &TransformActions) -> Div {
 
     // `rotateCardStyle`: `color-mix(#8f6cff, border-subtle 80%)` on
     // `color-mix(#8f6cff, surface-1 95%)`.
-    sub_card_with(Some((ROTATE_TINT, 0.05)), 8.0)
+    sub_card_tinted(ROTATE_TINT, 0.05, 0.20)
         .gap(px(0.0))
         .child(section_row(
             "Rotate",
@@ -525,7 +544,7 @@ fn scale_section(state: &TransformState, actions: &TransformActions) -> Div {
 
     // `scaleCardStyle`: `color-mix(#2eb67d, border-subtle 80%)` on
     // `color-mix(#2eb67d, surface-1 95%)`.
-    sub_card_with(Some((SCALE_TINT, 0.05)), 8.0)
+    sub_card_tinted(SCALE_TINT, 0.05, 0.20)
         .gap(px(0.0))
         .child(section_row(
             "Scale",

@@ -255,7 +255,11 @@ fn resolve_settings_mode(output_format: &str, requested: Option<&str>) -> Option
 }
 
 /// `resolveBuiltinPluginSlicingFormat(...)?.supportsMultiTank === true`.
-fn supports_multi_tank(output_format: &str) -> bool {
+///
+/// Shared with the materials pane, whose Multi-Tank section needs the same
+/// `outputFormatSupportsMultiTank(outputFormat)` gate as the source's
+/// `multiTankMaterialPicker`.
+pub(super) fn supports_multi_tank(output_format: &str) -> bool {
     format_spec(output_format).is_some_and(|spec| spec.multi_tank)
 }
 

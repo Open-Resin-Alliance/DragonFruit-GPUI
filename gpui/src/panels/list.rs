@@ -74,12 +74,19 @@
 //! - **Hidden panels.** The source hides unused panels with `display: none` on
 //!   their wrapper and still counts their width in `dockWidth`. A panel this
 //!   port is not given at all has no placement in the frame, so it does not
-//!   widen its dock; its stored placement survives, as in the source.
+//!   widen its dock; its stored placement survives, as in the source. The
+//!   Models card is dropped from the dock the same way while the rail's tile
+//!   hides it ([`crate::chrome::rail::models_shown`]).
 //! - **Collapse registration.** The source registers collapsible panels through
 //!   context (`useFloatingPanelCollapse`), with `autoCollapse` defaulting to
-//!   `true` and a per-panel default expanded state. Every [`PanelDef`] is
-//!   collapsible here, with [`PanelDef::collapsed`] and
-//!   [`PanelDef::auto_collapse`] carrying the call site's values.
+//!   `true` and a per-panel default expanded state. Every [`PanelDef`] here is
+//!   collapsible except the Models card in the rail's column layout, which the
+//!   source also pins expanded (`collapsible={modelsPanelCollapsible}`, and
+//!   `page.tsx:10731` makes that `toolLayout === 'horizontal'`).
+//!   [`PanelDef::collapsed`] and [`PanelDef::auto_collapse`] carry the call
+//!   site's values. The source's `py-4` header for the non-collapsible case is
+//!   not reachable through `ui::card_header_with`, whose header padding is
+//!   fixed at 10px.
 //! - **Collapsed height.** `COLLAPSED_PANEL_HEIGHT` is only the arithmetic
 //!   estimate the auto-compact pass subtracts; the source never renders a
 //!   48px-tall panel. The header is rendered at its natural height.
@@ -87,11 +94,12 @@
 //!   `overflow_y_scroll()` / `overflow_hidden()`; while a drag is in flight
 //!   both axes stay visible, as in the source.
 //! - **`leftInsetPx` / `rightInsetPx`.** `page.tsx` passes
-//!   `TOOL_RAIL_WIDTH_PX` (66) while a model list is on screen and the rail is
-//!   a column, and 48 while the layer-slider column is shown (every mode but
-//!   printing). [`panel_stack`] derives both from the panel set
-//!   ([`PanelStackInsets::for_panels`]) because this port has no `mode`; a
-//!   caller that knows better passes [`panel_stack_with`].
+//!   `TOOL_RAIL_WIDTH_PX` (66) only while a model list is on screen *and* the
+//!   rail is a column, and 48 while the layer-slider column is shown (every
+//!   mode but printing). [`panel_stack`] takes the panel set from
+//!   [`PanelStackInsets::for_panels`] (this port has no `mode`) and the rail
+//!   layout from [`crate::chrome::rail::layout_is_column`]; a caller that knows
+//!   better passes [`panel_stack_with`].
 //! - **Panel measurement.** `offsetWidth`/`offsetHeight` become the prepaint
 //!   bounds of the item wrapper (`on_children_prepainted`).
 //! - **`ui::card` / `ui::card_header_with`.** `Card.tsx`'s `rounded-lg` reads
@@ -233,17 +241,28 @@ fn panel_card(
         title,
         content,
         header_right,
+        kind,
         ..
     } = def;
+
+    // `collapsible={modelsPanelCollapsible}`, and `page.tsx:10731` sets it to
+    // `toolLayout === 'horizontal'`: only the bar's list has the chevron. In the
+    // column the rail's Models tile is the show/hide lever (and dropping the
+    // card from the dock is the hide), so the panel is pinned expanded and its
+    // header has no leading toggle.
+    let collapsible = !(kind == PanelKind::Models && insets.rail_is_column);
+    let collapsed = collapsed && collapsible;
 
     let drag_layout = layout.clone();
     let drag_entity = entity.clone();
 
-    let header = card_header_with(
-        title,
-        Some(collapse_toggle(id, collapsed, layout, entity)),
-        header_right,
-    )
+    let leading: Option<gpui::AnyElement> = if collapsible {
+        Some(collapse_toggle(id, collapsed, layout, entity).into_any_element())
+    } else {
+        None
+    };
+
+    let header = card_header_with(title, leading, header_right)
     .on_mouse_down(
         MouseButton::Left,
         move |event: &MouseDownEvent, _: &mut Window, cx: &mut App| {
@@ -511,10 +530,27 @@ fn panel_menu(
 /// panel between them is the only way its placement changes.
 pub fn panel_stack(
     layout: &PanelLayout,
-    panels: Vec<PanelDef>,
+    mut panels: Vec<PanelDef>,
     entity: WeakEntity<DragonFruit>,
 ) -> impl IntoElement {
-    let insets = PanelStackInsets::for_panels(&panels);
+    let mut insets = PanelStackInsets::for_panels(&panels);
+    // `leftInsetPx` is `TOOL_RAIL_WIDTH_PX` only while the rail is a column
+    // (`page.tsx:10718`: `… && toolLayout === 'vertical' ? TOOL_RAIL_WIDTH_PX :
+    // 0`); the bar takes no width from the stack. The layout is the rail's own
+    // state, so ask it rather than assuming the column default. The same flag is
+    // `LOCKED_PANELS`' condition (`is_locked`): the model list is drag-locked
+    // only while it has the column to hide beside.
+    let rail_is_column = crate::chrome::rail::layout_is_column();
+    insets.rail_is_column = rail_is_column;
+    if !rail_is_column {
+        insets.left = 0.0;
+    }
+    // The Models card leaves the dock while the rail's tile hides it — the
+    // source's `display: none` (`ModelManagerPanel.tsx:376-378`). It stays in
+    // [`PanelLayout`] (placement, width and collapse state), which is the part
+    // the window-layout profiles resolve against; only this frame's dock skips
+    // it, so no header and no `gap` is left behind.
+    panels.retain(|panel| panel.id != "models" || crate::chrome::rail::models_shown());
     panel_stack_with(insets, layout, panels, entity)
 }
 

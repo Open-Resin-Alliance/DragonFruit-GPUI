@@ -3,20 +3,23 @@ use super::*;
 // ── Updates (`UpdatesSettingsTab.tsx` + `UpdateCheckerSection.tsx`) ──────
 
 pub(crate) fn updates_tab(_state: &SettingsState, entity: WeakEntity<DragonFruit>) -> Div {
-    let gear_entity = entity;
-
-    let card = div()
+    let mut card = div()
         .relative()
         .flex()
         .flex_1()
         .min_h(px(0.))
         .flex_col()
-        .rounded(px(8.)) // rounded-lg
+        .rounded(px(ROUNDED_LG)) // `rounded-lg border p-3` — 14px here
         .border_1()
         .border_color(rgb(BORDER_SUBTLE))
         .bg(rgb(SURFACE_1))
-        .p(px(12.))
-        .child(
+        .p(px(12.));
+
+    // The gear is rendered only when `!isLinux`: Linux updates through Flatpak,
+    // so there is no feed to choose (`UpdatesSettingsTab.tsx`, `isLinux` prop).
+    if !cfg!(target_os = "linux") {
+        let gear_entity = entity;
+        card = card.child(
             // `IconButton` absolute right-3 top-3, accent tone.
             div()
                 .absolute()
@@ -38,7 +41,10 @@ pub(crate) fn updates_tab(_state: &SettingsState, entity: WeakEntity<DragonFruit
                         });
                     }),
                 ),
-        )
+        );
+    }
+
+    let card = card
         .child(
             div().flex().min_h(px(0.)).flex_1().flex_col().child(
                 // `useUpdateChecker` auto-checks on mount; without the update
@@ -69,8 +75,11 @@ pub(crate) fn updates_tab(_state: &SettingsState, entity: WeakEntity<DragonFruit
                                     .flex_shrink_0()
                                     .rounded(px(12.))
                                     .border_1()
-                                    .border_color(rgb(mix(SUCCESS, BORDER_SUBTLE, 0.4)))
-                                    .bg(rgb(mix(SUCCESS, SURFACE_1, 0.82)))
+                                    // `color-mix(success, border-subtle 40%)` /
+                                    // `color-mix(success, surface-1 82%)` —
+                                    // 60% / 18% success.
+                                    .border_color(rgb(mix(SUCCESS, BORDER_SUBTLE, 0.6)))
+                                    .bg(rgb(mix(SUCCESS, SURFACE_1, 0.18)))
                                     .child(icon("check", 24., SUCCESS)),
                             )
                             .child(
@@ -150,15 +159,17 @@ pub(crate) fn updates_overlay(state: &SettingsState, entity: WeakEntity<DragonFr
             .px(px(8.))
             .py(px(24.))
             .min_h(px(64.))
-            .rounded(px(6.))
+            .rounded(px(6.)) // `.ui-button` radius (--radius-sm)
             .border_1()
+            // `activeChannelStyle`: `color-mix(accent, border-subtle 30%)`
+            // (70% accent) over `color-mix(accent, surface-1 85%)` (15%).
             .border_color(rgb(if active {
-                mix(ACCENT, BORDER_SUBTLE, 0.3)
+                mix(ACCENT, BORDER_SUBTLE, 0.7)
             } else {
                 BORDER_SUBTLE
             }))
             .bg(rgb(if active {
-                mix(ACCENT, SURFACE_1, 0.85)
+                mix(ACCENT, SURFACE_1, 0.15)
             } else {
                 SURFACE_1
             }))
@@ -213,11 +224,14 @@ pub(crate) fn updates_overlay(state: &SettingsState, entity: WeakEntity<DragonFr
     if is_pending_dev_switch {
         body = body.child(
             div()
-                .mt(px(2.))
-                .rounded(px(6.))
+                .mt(px(12.))
+                // `rounded-md border px-3 py-2.5` with
+                // `color-mix(#f59e0b, border-subtle 40%)` (60% amber) over
+                // `color-mix(#f59e0b, surface-1 90%)` (10%).
+                .rounded(px(ROUNDED_MD))
                 .border_1()
-                .border_color(rgb(mix(0xf59e0b, BORDER_SUBTLE, 0.4)))
-                .bg(rgb(mix(0xf59e0b, SURFACE_1, 0.9)))
+                .border_color(rgb(mix(0xf59e0b, BORDER_SUBTLE, 0.6)))
+                .bg(rgb(mix(0xf59e0b, SURFACE_1, 0.1)))
                 .px(px(12.))
                 .py(px(10.))
                 .flex()

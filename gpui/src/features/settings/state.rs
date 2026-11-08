@@ -745,6 +745,10 @@ pub struct SettingsState {
     pub cut_colors: HashMap<&'static str, String>,
     /// The `SelectDropdown` whose menu is open, by element id.
     pub open_select: Option<&'static str>,
+    /// `previousTabRef` in the shell: the tab that was active before the
+    /// current one, so the Experiments disclaimer's "Take me back!" can return
+    /// there (`SettingsModal.tsx:418`, `:419-424`).
+    pub prev_tab: usize,
     pub view3d: View3dState,
     pub multi_plate: MultiPlateState,
     pub spacemouse: SpaceMouseState,
@@ -1011,6 +1015,7 @@ impl SettingsState {
             theme_colors,
             cut_colors,
             open_select: None,
+            prev_tab: 0,
             view3d: View3dState::from_store(&settings.view3d),
             multi_plate: MultiPlateState::from_store(&settings.multi_plate),
             spacemouse: SpaceMouseState::from_store(&settings.space_mouse),
@@ -1258,6 +1263,16 @@ pub(crate) fn edit(f: impl FnOnce(&mut SettingsState)) {
         Err(poisoned) => f(&mut poisoned.into_inner()),
     }
     mark_dirty();
+}
+
+/// Mutates view state (the previous tab, an open menu, a confirmation) without
+/// marking the draft dirty: nothing here reaches [`snapshot`], so a save would
+/// rewrite the document unchanged.
+pub(crate) fn edit_view(f: impl FnOnce(&mut SettingsState)) {
+    match state().lock() {
+        Ok(mut guard) => f(&mut guard),
+        Err(poisoned) => f(&mut poisoned.into_inner()),
+    }
 }
 
 pub(crate) fn edit_and_notify(

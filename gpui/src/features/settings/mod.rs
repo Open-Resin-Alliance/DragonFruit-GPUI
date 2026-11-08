@@ -5,8 +5,9 @@
 //! Logging, Updates (`UpdatesSettingsTab` + `UpdateCheckerSection`) and About.
 //!
 //! Every size, colour and label traces to a class string or inline style in the
-//! React source; Tailwind radii are the v4 scale (`rounded-sm` 4px, `-md` 6px,
-//! `-lg` 8px, `-xl` 12px, `-2xl` 16px).
+//! React source. The radii are the app's own `:root` overrides of the Tailwind
+//! radius variables (`globals.css:41-43`): `rounded-sm` 6px, `-md` 10px, `-lg`
+//! 14px; `-xl` (12px) and `-2xl` (16px) keep the framework defaults.
 //!
 //! PORT DEVIATIONS (each one forced by the GPUI slice; nothing is silently
 //! simplified):
@@ -46,9 +47,15 @@
 //!   Scene Autosave, Backups, UVTools, Logging, Updates and Plugins render the
 //!   source's own empty/never states with inert actions instead of inventing
 //!   data.
-//! - Hotkey rows show the source defaults; the recording overlay renders, but
-//!   capturing a key needs the hotkey store's global dispatch, so the binding
-//!   only changes once that store exists.
+//! - Hotkey rows show the source defaults; the recording overlay renders and
+//!   its backdrop cancels, but capturing a key needs the hotkey store's global
+//!   dispatch, so the binding only changes once that store exists. Escape
+//!   therefore still reaches the modal's own handler and closes Settings
+//!   instead of cancelling the recording.
+//! - The sidebar description line truncates with no hover tooltip; the source's
+//!   `TabDescription` only offers one when the text is actually clipped
+//!   (`SettingsModal.tsx:272-343`), which needs a measure pass GPUI does not
+//!   run here.
 //! - Sponsors: remote avatars are not fetched, so every sponsor renders the
 //!   source's initials monogram; the 34s marquee has no GPUI equivalent and the
 //!   row is a horizontal scroller. The tier ring is a conic gradient at the
@@ -60,8 +67,9 @@
 //!   by compile-time path, so a shipped binary needs that tree beside the
 //!   crate: nothing copies it into the asset bundle.
 //! - The Logging tab's `Copy path` tile cannot reach a clipboard either, so it
-//!   is inert; the log path itself is the source's own non-desktop placeholder
-//!   and the viewer shows its "desktop build" line.
+//!   is inert; with no app-log bridge the path cell stays in the source's own
+//!   `logPath === null` state (`Resolving path…`) and the viewer shows its
+//!   "desktop build" line.
 //! - The Backups delete/restore confirmations can only open from a history row
 //!   and the slice lists none; their copy interpolates the snapshot id where
 //!   the source formats it as a locale timestamp (no date formatter here).
@@ -471,7 +479,7 @@ fn header(entity: WeakEntity<DragonFruit>) -> Div {
                         .justify_center()
                         .w(px(36.))
                         .h(px(36.))
-                        .rounded(px(8.)) // rounded-lg
+                        .rounded(px(ROUNDED_LG)) // `rounded-lg` — 14px here
                         .border_1()
                         .border_color(rgb(BORDER_SUBTLE))
                         .bg(linear_gradient(
@@ -576,6 +584,11 @@ fn rail_tab(tab: SettingsTab, active: bool, entity: WeakEntity<DragonFruit>) -> 
         .on_click(move |_, _, cx| {
             entity
                 .update(cx, |this, cx| {
+                    // `handleSelectTab` records the tab being left before it
+                    // changes (`previousTabRef`); the Experiments disclaimer's
+                    // "Take me back!" returns there.
+                    let current = this.settings_tab;
+                    edit_view(|draft| draft.prev_tab = current);
                     this.settings_tab = index;
                     cx.notify();
                 })
@@ -733,9 +746,11 @@ fn footer(entity: WeakEntity<DragonFruit>) -> Div {
                             .hover(mix(ACCENT, SURFACE_0, 0.28))
                             .icon("check", 16.0, ACCENT_CONTRAST),
                     )
-                    // The source overrides the primary fill with the accent mix.
+                    // `background: color-mix(in srgb, var(--accent),
+                    // var(--surface-0) 16%)` — 84% accent, so the button reads
+                    // as the accent fill; `borderColor: color-mix(accent, white 10%)`.
                     .border_color(rgb(mix(ACCENT, 0xffffff, 0.9)))
-                    .bg(rgb(mix(ACCENT, SURFACE_0, 0.16)))
+                    .bg(rgb(mix(ACCENT, SURFACE_0, 0.84)))
                     .text_color(rgb(ACCENT_CONTRAST))
                     .on_click(move |_, _, cx| close(&apply_entity, cx)),
                 ),

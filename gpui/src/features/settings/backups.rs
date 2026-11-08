@@ -20,7 +20,7 @@ pub(crate) fn backups_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>
     root = root.child(
         div()
             .relative()
-            .rounded(px(6.))
+            .rounded(px(ROUNDED_MD)) // `rounded-md` — 10px in this app
             .border_1()
             .border_color(rgb(BORDER_SUBTLE))
             .bg(rgb(SURFACE_1))
@@ -112,7 +112,7 @@ pub(crate) fn backups_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>
 
     // Backup Management
     let mut management = div()
-        .rounded(px(6.))
+        .rounded(px(ROUNDED_MD)) // `rounded-md` — 10px in this app
         .border_1()
         .border_color(rgb(BORDER_SUBTLE))
         .bg(rgb(SURFACE_1))

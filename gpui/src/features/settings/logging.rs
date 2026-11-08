@@ -11,8 +11,8 @@ pub(crate) fn logging_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>
     let live_entity = entity;
 
     // `resolveLogDirPath()` reads the Tauri app-log directory; without the
-    // bridge the source shows its own non-desktop placeholder.
-    let log_path = "<only available in desktop build>";
+    // bridge `logPath` stays null and the path cell keeps the source's
+    // "Resolving path…" state below.
 
     let header = |icon_slug: &'static str, title: &'static str, description: &'static str| {
         div()
@@ -58,7 +58,9 @@ pub(crate) fn logging_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>
             ))
             .child(
                 div()
-                    .rounded(px(8.))
+                    // `rounded-lg border flex items-stretch overflow-hidden`
+                    // on `--surface-2`.
+                    .rounded(px(ROUNDED_LG))
                     .border_1()
                     .border_color(rgb(BORDER_SUBTLE))
                     .bg(rgb(SURFACE_2))
@@ -71,12 +73,20 @@ pub(crate) fn logging_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>
                             .min_w(px(0.))
                             .px(px(12.))
                             .py(px(10.))
+                            .flex()
+                            .items_center()
+                            .gap(px(6.))
+                            // `logPath === null`: the source shows a spinner
+                            // and `Resolving path…` (`LoggingSettingsTab.tsx`),
+                            // which is the state a build without the app-log
+                            // bridge stays in.
+                            .child(spinner(12.))
                             .child(
                                 div()
                                     .text_size(px(12.))
-                                    .text_color(rgb(TEXT_STRONG))
+                                    .text_color(rgb(TEXT_MUTED))
                                     .truncate()
-                                    .child(log_path),
+                                    .child("Resolving path…"),
                             ),
                     )
                     .child(
@@ -116,17 +126,20 @@ pub(crate) fn logging_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>
             .flex()
             .items_center()
             .gap(px(12.))
-            .rounded(px(8.))
+            // `rounded-lg border px-3 py-2`; active is
+            // `color-mix(color, border-subtle 40%)` (60% colour) over
+            // `color-mix(color, surface-0 90%)` (10% colour).
+            .rounded(px(ROUNDED_LG))
             .border_1()
             .px(px(12.))
             .py(px(8.))
             .border_color(rgb(if active {
-                mix(color, BORDER_SUBTLE, 0.4)
+                mix(color, BORDER_SUBTLE, 0.6)
             } else {
                 BORDER_SUBTLE
             }))
             .bg(rgb(if active {
-                mix(color, SURFACE_0, 0.9)
+                mix(color, SURFACE_0, 0.1)
             } else {
                 SURFACE_2
             }))
@@ -192,7 +205,9 @@ pub(crate) fn logging_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>
         .top(px(26.))
         .right(px(0.))
         .min_w(px(100.))
-        .rounded(px(8.))
+        // `rounded-lg border shadow-lg overflow-hidden min-w-[100px]` on
+        // `--surface-2`.
+        .rounded(px(ROUNDED_LG))
         .border_1()
         .border_color(rgb(BORDER_SUBTLE))
         .bg(rgb(SURFACE_2))
@@ -211,7 +226,8 @@ pub(crate) fn logging_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>
                 .py(px(6.))
                 .text_size(px(12.))
                 .text_color(rgb(TEXT_STRONG))
-                .when(active, |this| this.bg(rgb(mix(color, SURFACE_0, 0.85))))
+                // `color-mix(color, surface-0 85%)` — 15% colour.
+                .when(active, |this| this.bg(rgb(mix(color, SURFACE_0, 0.15))))
                 .cursor_pointer()
                 .on_click(move |_, _, cx| {
                     edit_and_notify(&row_entity, cx, |draft| {
@@ -278,7 +294,7 @@ pub(crate) fn logging_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>
                 .flex()
                 .items_center()
                 .gap(px(6.))
-                .rounded(px(6.))
+                .rounded(px(ROUNDED_MD)) // `rounded-md` toolbar chrome
                 .border_1()
                 .border_color(rgb(BORDER_SUBTLE))
                 .px(px(8.))
@@ -313,10 +329,11 @@ pub(crate) fn logging_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>
                         .flex()
                         .items_center()
                         .gap(px(6.))
-                        .rounded(px(6.))
+                        .rounded(px(ROUNDED_MD)) // `rounded-md` toolbar chrome
                         .border_1()
                         .border_color(rgb(mix(filter_color, BORDER_SUBTLE, 0.5)))
-                        .bg(rgb(mix(filter_color, SURFACE_0, 0.88)))
+                        // `color-mix(filterColor, surface-0 88%)` — 12% colour.
+                        .bg(rgb(mix(filter_color, SURFACE_0, 0.12)))
                         .px(px(8.))
                         .py(px(4.))
                         .text_size(px(12.))
@@ -350,7 +367,7 @@ pub(crate) fn logging_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>
                 .flex()
                 .items_center()
                 .justify_center()
-                .rounded(px(6.))
+                .rounded(px(ROUNDED_MD)) // `rounded-md` toolbar chrome
                 .border_1()
                 .border_color(rgb(BORDER_SUBTLE))
                 .px(px(8.))
@@ -374,7 +391,7 @@ pub(crate) fn logging_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>
                 .flex()
                 .items_center()
                 .justify_center()
-                .rounded(px(6.))
+                .rounded(px(ROUNDED_MD)) // `rounded-md` toolbar chrome
                 .border_1()
                 .border_color(rgb(BORDER_SUBTLE))
                 .px(px(8.))
@@ -387,7 +404,7 @@ pub(crate) fn logging_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>
             .flex()
             .items_center()
             .justify_center()
-            .rounded(px(6.))
+            .rounded(px(ROUNDED_MD)) // `rounded-md` toolbar chrome
             .border_1()
             .border_color(rgb(BORDER_SUBTLE))
             .px(px(8.))
@@ -421,9 +438,11 @@ pub(crate) fn logging_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>
     // Info callout
     root = root.child(
         div()
-            .rounded(px(8.))
+            // `rounded-lg border px-3 py-2.5` with
+            // `color-mix(accent, border-subtle 60%)` → accent 40%.
+            .rounded(px(ROUNDED_LG))
             .border_1()
-            .border_color(rgb(mix(ACCENT, BORDER_SUBTLE, 0.6)))
+            .border_color(rgb(mix(ACCENT, BORDER_SUBTLE, 0.4)))
             .bg(rgb(mix(ACCENT, SURFACE_0, 0.06)))
             .px(px(12.))
             .py(px(10.))

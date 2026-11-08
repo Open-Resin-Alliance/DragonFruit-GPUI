@@ -457,8 +457,10 @@ fn plate_button(
     let tint = if locked { ACCENT } else { TEXT_MUTED };
     let icon_color = if locked { TEXT_STRONG } else { TEXT_MUTED };
 
+    // The bin's red hover is the source's `0.12` danger wash over the panel it
+    // already had — `surface0`, since the bin is never the locked plate's.
     let hover_background = if destructive {
-        rgb(mix(SURFACE_1, DANGER_COLOR, 0.88))
+        rgb(mix(SURFACE_0, DANGER_COLOR, 0.88))
     } else {
         rgb(mix(SURFACE_0, 0xffffff, 0.92))
     };

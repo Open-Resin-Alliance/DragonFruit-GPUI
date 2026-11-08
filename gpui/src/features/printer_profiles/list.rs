@@ -11,31 +11,34 @@
 //!
 //! # PORT DEVIATIONS
 //!
-//! 1. No drag-and-drop: the source reorders by dragging a card
-//!    (`onDragStart` / `onDrop`) and this GPUI build has no drag payload. The
-//!    header's `Move selected printer left/right` buttons are the reorder
-//!    controls, exactly as in the source; the drag handlers are omitted.
-//! 2. No double-click: `ClickEvent` carries no click count here, so the
-//!    source's double-click-to-edit is the `Edit` button in the action band.
-//! 3. Printer artwork is not part of the GPUI asset set (the picker's
+//! 1. The drag ghost is empty (`on_drag` with an `EmptyView`): the source
+//!    drags the browser's native card image. The drop semantics are the
+//!    source's — dropping on a card inserts before it, dropping on the grid's
+//!    empty space moves to the end (`moveDraggedPrinter(id, target | null)`).
+//! 2. `hover:` fills, `transition-all`, `cursor-grab`, the `dragging` opacity
+//!    and the card's `active:cursor-grabbing` are not expressible; the card
+//!    keeps `cursor-pointer`, the selected card keeps the accent fill and
+//!    border.
+//! 3. The card's `footer` slot — the missing-plugin delete tile, the fleet
+//!    count / `Set up network` tile and the `UPDATE` badge — is not ported:
+//!    the fleet view and the official-update diff have no port (see
+//!    `model.rs`'s deviations 2 and 4), and `missing_plugin` is never set.
+//! 4. Printer artwork is not part of the GPUI asset set (the picker's
 //!    deviation 4), so a card always draws the source's own fallback —
 //!    `Printer` for a generic machine, `ImagePlus` for the rest.
-//! 4. `Import` / `Export` (the printer bundle payload) and `Network Settings`
+//! 5. `Import` / `Export` (the printer bundle payload) and `Network Settings`
 //!    / `Manage Fleet` have no port: the bundle IO and the network panes are
 //!    not modelled here. `Edit` and `Remove` — the two the rail's own flow
 //!    needs — are kept.
-//! 5. `hover:` fills, `transition-all`, `cursor-grab` and the `dragging`
-//!    opacity are not expressible; the selected card keeps the accent fill and
-//!    border.
 
 use gpui::{
-    App, ClickEvent, Div, FontWeight, IntoElement, Stateful, WeakEntity, Window, div,
-    linear_color_stop, linear_gradient, prelude::*, px, rgb,
+    App, ClickEvent, Div, ElementId, EmptyView, FontWeight, IntoElement, SharedString, Stateful,
+    WeakEntity, Window, div, linear_color_stop, linear_gradient, prelude::*, px, rgb,
 };
 use gpui_core::icons::icon;
 use gpui_core::theme::*;
 use gpui_ui::ui::{
-    ButtonSize, ButtonSpec, ButtonVariant, button_with, button_with_content, fade_text,
+    ButtonSize, ButtonSpec, ButtonVariant, button_with, button_with_content, fade_text, tooltip,
 };
 
 use crate::DragonFruit;
@@ -46,6 +49,10 @@ const BLACK: u32 = 0x000000;
 
 /// `printerImageWellBackground` in the dark theme.
 const IMAGE_WELL: u32 = 0x1c2027;
+
+/// The payload of a printer-card drag (`printerDragId` in the source): the id
+/// of the profile being moved. The drop target supplies the anchor.
+struct PrinterDrag(String);
 
 /// Source `accentSecondaryActionStyle93`.
 fn accent_secondary_fill() -> (u32, u32, u32) {
@@ -60,14 +67,38 @@ fn notify(entity: &WeakEntity<DragonFruit>, cx: &mut App) {
     entity.update(cx, |_, cx| cx.notify()).ok();
 }
 
-/// `handlePickPrinter` on a card.
+/// `handlePickPrinter` on a card, plus the source's `onDoubleClick`
+/// (`handlePickPrinter` + `setIsEditingPrinter(true)`).
 fn select_handler(
     id: String,
     entity: WeakEntity<DragonFruit>,
 ) -> impl Fn(&ClickEvent, &mut Window, &mut App) + 'static {
-    move |_, _, cx| {
-        model::select(&id);
+    move |event, _, cx| {
+        let click_count = match event {
+            ClickEvent::Mouse(event) => event.down.click_count,
+            ClickEvent::Touch(event) => event.tap_count,
+            ClickEvent::Keyboard(_) => 0,
+        };
+        if click_count >= 2 {
+            model::open_editor(&id);
+        } else {
+            model::select(&id);
+        }
         notify(&entity, cx);
+    }
+}
+
+/// The card's drop target: insert the dragged profile before this one
+/// (`moveDraggedPrinter(printerDragId, printer.id)`).
+fn drop_before_handler(
+    before: String,
+    entity: WeakEntity<DragonFruit>,
+) -> impl Fn(&PrinterDrag, &mut Window, &mut App) + 'static {
+    move |drag, _, cx| {
+        if drag.0 != before {
+            model::move_profile(&drag.0, Some(before.as_str()));
+            notify(&entity, cx);
+        }
     }
 }
 
@@ -152,6 +183,14 @@ pub(super) fn printer_section(
             selected.is_some_and(|selected| selected.id == profile.id),
             entity.clone(),
         ));
+    }
+    // `onDrop` on the grid's empty space: `moveDraggedPrinter(id, null)`.
+    {
+        let drop_entity = entity.clone();
+        cards = cards.on_drop::<PrinterDrag>(move |drag, _, cx| {
+            model::move_profile(&drag.0, None);
+            notify(&drop_entity, cx);
+        });
     }
 
     let mut grid = div().flex().flex_col();
@@ -327,7 +366,23 @@ fn printer_card(
     // `bottomRightBadge`: the bit-depth chip, drawn only for a non-8-bit depth.
     if let Some(label) = profile.bit_depth_label() {
         let bits = profile.bit_depth_bits().unwrap_or(0);
-        let color = if bits == 3 { DANGER } else { ACCENT_SECONDARY };
+        // `mix(a, b, w)` weights `a`. The source mixes the *dark* colours into
+        // the chip colour: 3-bit is `#ef4444` with `#111827 56%` / `#0b1220
+        // 72%` and a `white 18%` border; everything else is accent-secondary
+        // with `52%` / `68%` and a `white 20%` border.
+        let (border, start, end) = if bits == 3 {
+            (
+                mix(DANGER, WHITE, 0.82),
+                mix(DANGER, 0x111827, 0.44),
+                mix(DANGER, 0x0b1220, 0.28),
+            )
+        } else {
+            (
+                mix(ACCENT_SECONDARY, WHITE, 0.80),
+                mix(ACCENT_SECONDARY, 0x111827, 0.48),
+                mix(ACCENT_SECONDARY, 0x0b1220, 0.32),
+            )
+        };
         art = art.child(
             div()
                 .absolute()
@@ -339,7 +394,7 @@ fn printer_card(
                 .h(px(18.0))
                 .rounded(px(ROUNDED_MD))
                 .border_1()
-                .border_color(rgb(mix(color, WHITE, 0.80)))
+                .border_color(rgb(border))
                 .px(px(6.0))
                 .text_size(px(9.0))
                 .font_weight(FontWeight::BOLD)
@@ -347,20 +402,72 @@ fn printer_card(
                 .text_color(rgb(0xf8fafc))
                 .bg(linear_gradient(
                     135.0,
-                    linear_color_stop(rgb(mix(color, 0x111827, 0.56)), 0.0),
-                    linear_color_stop(rgb(mix(color, 0x0b1220, 0.72)), 1.0),
+                    linear_color_stop(rgb(start), 0.0),
+                    linear_color_stop(rgb(end), 1.0),
                 ))
                 .child(label),
         );
     }
 
-    // `imageOverlay`: the source draws a wifi tile for a connected profile.
-    if profile
+    // `imageOverlay`: the source draws a wifi tile whenever the profile has a
+    // configured network target — green while connected, red while not.
+    let connected = profile
         .network_connection
         .as_ref()
-        .is_some_and(|connection| connection.connected)
-    {
-        art = art.child(
+        .is_some_and(|connection| connection.connected);
+    let has_network_target = profile
+        .network_support
+        .as_deref()
+        .is_some_and(|support| !support.trim().is_empty())
+        && (profile
+            .network_connection
+            .as_ref()
+            .is_some_and(|connection| !connection.ip_address.trim().is_empty())
+            || profile
+                .network
+                .as_ref()
+                .is_some_and(|network| !network.ip_address.trim().is_empty())
+            || profile
+                .active_network_device_id
+                .as_deref()
+                .is_some_and(|id| !id.trim().is_empty()));
+    let offline = has_network_target && !connected;
+    if connected || offline {
+        let (border, background, color, icon_name, title) = if connected {
+            (
+                mix(0x22c55e, WHITE, 0.88),
+                mix(0x22c55e, 0x0f172a, 0.60),
+                0xdcfce7,
+                "wifi",
+                format!(
+                    "Connected to {}",
+                    profile
+                        .network_connection
+                        .as_ref()
+                        .map(|connection| {
+                            if connection.host_name.trim().is_empty() {
+                                connection.ip_address.clone()
+                            } else {
+                                connection.host_name.clone()
+                            }
+                        })
+                        .unwrap_or_else(|| "network printer".to_owned())
+                ),
+            )
+        } else {
+            (
+                mix(BORDER_SUBTLE, 0xef4444, 0.82),
+                mix(0xef4444, 0x0f172a, 0.22),
+                0xfecaca,
+                "wifi-off",
+                "Printer not connected".to_owned(),
+            )
+        };
+        art = art.child(tooltip(
+            ElementId::Name(SharedString::from(format!(
+                "printer-network-{}",
+                profile.id
+            ))),
             div()
                 .absolute()
                 .top(px(4.0))
@@ -372,13 +479,19 @@ fn printer_card(
                 .h(px(28.0))
                 .rounded_full()
                 .border_1()
-                .border_color(rgb(mix(0x22c55e, WHITE, 0.88)))
-                .bg(rgb(mix(0x22c55e, 0x0f172a, 0.40)))
-                .child(icon("wifi", 14.0, 0xdcfce7)),
-        );
+                .border_color(rgb(border))
+                .bg(rgb(background))
+                .child(icon(icon_name, 14.0, color)),
+            div()
+                .w(px(240.0))
+                .text_size(px(11.0))
+                .child(title),
+        ));
     }
 
     let id = profile.id.clone();
+    let drag_id = profile.id.clone();
+    let drop_id = profile.id.clone();
     let subtitle = profile
         .manufacturer
         .clone()
@@ -405,6 +518,10 @@ fn printer_card(
         }))
         .p(px(8.0))
         .cursor_pointer()
+        // `draggable` + `onDragStart`: the payload is the profile id.
+        .on_drag(PrinterDrag(drag_id), |_, _, _, cx| cx.new(|_| EmptyView))
+        // `onDragOver`/`onDrop`: insert before the hovered card.
+        .on_drop::<PrinterDrag>(drop_before_handler(drop_id, entity.clone()))
         .child(art)
         .child(
             div()

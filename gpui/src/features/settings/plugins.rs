@@ -118,8 +118,11 @@ pub(crate) fn plugins_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>
     }
     root = root.child(header);
 
-    // Installed plugins
-    let mut installed = section(
+    // Installed plugins. `installedRows` is empty in this slice (no profile
+    // store), and the source renders **no** list body for an empty list — only
+    // the header and its `0 plugins in this profile.` subtitle
+    // (`PluginsSettingsTab.tsx:767-800`, gotcha 27).
+    let installed = section(
         "package-check",
         "Installed plugins",
         if installed_count == 1 {
@@ -127,21 +130,6 @@ pub(crate) fn plugins_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>
         } else {
             "0 plugins in this profile."
         },
-    );
-    installed = installed.child(
-        div()
-            .mt(px(8.))
-            .flex()
-            .flex_col()
-            .gap(px(6.))
-            .child(
-                div()
-                    .px(px(12.))
-                    .py(px(8.))
-                    .text_size(px(12.))
-                    .text_color(rgb(TEXT_MUTED))
-                    .child("No plugins installed in this profile."),
-            ),
     );
     root = root.child(installed);
 
@@ -204,10 +192,12 @@ pub(crate) fn plugins_overlay(state: &SettingsState, entity: WeakEntity<DragonFr
         body.child(
             div()
                 .mt(px(12.))
-                .rounded(px(6.))
+                // `rounded-md border px-3 py-2` with `color-mix(#d97706,
+                // border-subtle 40%)` / `color-mix(#d97706, surface-1 92%)`.
+                .rounded(px(ROUNDED_MD))
                 .border_1()
-                .border_color(rgb(mix(0xd97706, BORDER_SUBTLE, 0.4)))
-                .bg(rgb(mix(0xd97706, SURFACE_1, 0.92)))
+                .border_color(rgb(mix(0xd97706, BORDER_SUBTLE, 0.6)))
+                .bg(rgb(mix(0xd97706, SURFACE_1, 0.08)))
                 .px(px(12.))
                 .py(px(8.))
                 .flex()

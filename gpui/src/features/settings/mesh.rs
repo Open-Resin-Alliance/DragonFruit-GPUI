@@ -28,15 +28,17 @@ pub(crate) fn mesh_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>) -
         "Pick the shader type to configure here, and tune the mesh color. The camera dropdown chooses what the viewport renders.",
     );
 
+    // `grid grid-cols-2 gap-2` of `rounded-md border p-2` cards whose `Select`
+    // is `w-full !h-8` — the card is the width constraint, not a 144px control.
     let mut selectors = div().mt(px(12.)).grid().grid_cols(2).gap(px(8.)).child(
-        field_card()
+        selector_card()
             .child(field_label("Shader Type"))
             .child(select_field(
                 "settings-shader",
                 &SHADER_OPTIONS,
                 SHADER_VALUES[state.shader.min(SHADER_VALUES.len() - 1)],
                 None,
-                Some(CONTROL_WIDTH),
+                None,
                 true,
                 shader_entity.clone(),
                 move |value, cx| {
@@ -57,14 +59,14 @@ pub(crate) fn mesh_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>) -
             )),
     );
     selectors = selectors.child(
-        field_card()
+        selector_card()
             .child(field_label("Preview Model"))
             .child(select_field(
                 "settings-preview-model",
                 &PREVIEW_MODEL_OPTIONS,
                 PREVIEW_MODEL_VALUES[state.preview_model.min(PREVIEW_MODEL_VALUES.len() - 1)],
                 None,
-                Some(CONTROL_WIDTH),
+                None,
                 true,
                 model_entity.clone(),
                 move |value, cx| {
@@ -83,7 +85,8 @@ pub(crate) fn mesh_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>) -
         .flex()
         .items_center()
         .justify_center()
-        .rounded(px(6.))
+        // `rounded-md border overflow-hidden` — 10px in this app.
+        .rounded(px(ROUNDED_MD))
         .border_1()
         .border_color(rgb(BORDER_SUBTLE))
         .bg(rgb(mix(hex_color(&state.mesh_color), SURFACE_0, 0.35)))
@@ -97,6 +100,7 @@ pub(crate) fn mesh_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>) -
         );
 
     let active_index = state.active_color_index;
+    let color_entity = entity.clone();
     let active_color = if active_index == 0 {
         state.mesh_color.clone()
     } else {
@@ -113,7 +117,8 @@ pub(crate) fn mesh_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>) -
     };
 
     let mut color_card = div()
-        .rounded(px(6.))
+        // `rounded-md border p-2 flex flex-col gap-1.5`.
+        .rounded(px(ROUNDED_MD))
         .border_1()
         .border_color(rgb(BORDER_SUBTLE))
         .bg(rgb(SURFACE_0))
@@ -135,20 +140,30 @@ pub(crate) fn mesh_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>) -
                         .child(color_label),
                 )
                 .child(
-                    div()
-                        .flex_1()
-                        .min_w(px(0.))
-                        .h(px(28.))
-                        .px(px(8.))
-                        .flex()
-                        .items_center()
-                        .rounded(px(6.))
-                        .border_1()
-                        .border_color(rgb(BORDER_SUBTLE))
-                        .bg(rgb(SURFACE_0))
-                        .text_size(px(12.))
-                        .text_color(rgb(TEXT_STRONG))
-                        .child(active_color.clone()),
+                    // `Input type="text" className="flex-1 !h-7 min-w-0"`
+                    // placeholder `#a3a3a3` bound to `activeHexColor` →
+                    // `onActiveHexChange` (`MeshSettingsTab.tsx:276-290`): index
+                    // 0 is the mesh colour, every other index is one heatmap
+                    // stop, and the write happens on every keystroke.
+                    div().flex_1().min_w(px(0.)).child(text_input(
+                        format!("settings-mesh-color-{active_index}"),
+                        active_color.clone(),
+                        "#a3a3a3",
+                        false,
+                        28.0,
+                        move |next, _, cx| {
+                            let next = next.to_owned();
+                            edit_and_notify(&color_entity, cx, |draft| {
+                                if active_index == 0 {
+                                    draft.mesh_color = next;
+                                } else if let Some(slot) =
+                                    draft.heatmap_colors.get_mut(active_index - 1)
+                                {
+                                    *slot = next;
+                                }
+                            });
+                        },
+                    )),
                 ),
         )
         // The picker's saturation/value area: the colour under a white wash.
@@ -317,6 +332,13 @@ pub(crate) fn mesh_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>) -
                         .hover(|style| style.bg(rgb(SURFACE_2)))
                         .child(icon("rotate-ccw", 12., TEXT_STRONG))
                         .on_click(move |_, _, cx| {
+                            // `handleResetColors` restores the *selected theme
+                            // profile's* `meshSelectionColor` / `meshHoverColor`
+                            // (`MeshSettingsTab.tsx:181-184`), not
+                            // `DEFAULT_THEME_CUSTOM_COLORS`. PORT DEVIATION: the
+                            // port has no per-preset colour tables (only the four
+                            // built-in preset ids), so the store's defaults are
+                            // the only reset target it can name.
                             edit_and_notify(&selection_entity, cx, |draft| {
                                 let accent =
                                     gpui_store::ThemeColors::default().mesh_selection_color;
@@ -363,13 +385,15 @@ pub(crate) fn mesh_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>) -
                 .flex()
                 .flex_col()
                 .gap(px(8.))
-                .child(slider_field(
+                // `space-y-2` rows inside the Tint Intensity card — no inner
+                // border (`MeshSettingsTab.tsx:570-588`).
+                .child(slider_group(
                     "Hover",
                     format!("{:.2}", state.hover_tint_strength),
                     state.hover_tint_strength,
                     0.0,
                     1.0))
-                .child(slider_field(
+                .child(slider_group(
                     "Selected",
                     format!("{:.2}", state.selected_tint_strength),
                     state.selected_tint_strength,
@@ -403,7 +427,19 @@ pub(crate) fn mesh_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>) -
         )
     };
 
-    let preview_card = field_card()
+    // `absolute inset-0 rounded-lg border p-2 flex flex-col gap-2` on
+    // `--surface-0` (`MeshSettingsTab.tsx:596-600`). The source positions it
+    // absolutely so it never stretches the left column; here the two are grid
+    // siblings, so the row height is the taller of the pair.
+    let preview_card = div()
+        .rounded(px(ROUNDED_LG))
+        .border_1()
+        .border_color(rgb(BORDER_SUBTLE))
+        .bg(rgb(SURFACE_0))
+        .p(px(8.))
+        .flex()
+        .flex_col()
+        .gap(px(8.))
         .child(
             div()
                 .flex()

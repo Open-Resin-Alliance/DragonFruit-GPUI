@@ -31,7 +31,7 @@ use gpui::{
 };
 
 use gpui_ui::panel_fields::*;
-use gpui_ui::ui::{ButtonSize, ButtonSpec, ButtonVariant, button_with, section_header, sub_card_with};
+use gpui_ui::ui::{ButtonSize, ButtonSpec, ButtonVariant, button_with, section_header, sub_card_tinted};
 use gpui_core::theme::*;
 
 /// `MeshSmoothingFalloff`.
@@ -238,7 +238,7 @@ pub fn smoothing_body(state: &SmoothingState, actions: &SmoothingActions) -> imp
     body = body.child(
         // `brushCardStyle`: `color-mix(#4f8cff, border-subtle 78%)` on
         // `color-mix(#4f8cff, surface-1 94%)`.
-        sub_card_with(Some((MOVE_TINT, 0.06)), 8.0)
+        sub_card_tinted(MOVE_TINT, 0.06, 0.22)
             .gap(px(0.0))
             .child(section_header("Brush"))
             .child(
@@ -386,7 +386,7 @@ pub fn smoothing_body(state: &SmoothingState, actions: &SmoothingActions) -> imp
     body = body.child(
         // `highlightCardStyle`: `color-mix(#8f6cff, border-subtle 80%)` on
         // `color-mix(#8f6cff, surface-1 95%)`.
-        sub_card_with(Some((ROTATE_TINT, 0.05)), 8.0)
+        sub_card_tinted(ROTATE_TINT, 0.05, 0.20)
             .gap(px(0.0))
             .child(section_header("Highlight"))
             .child(

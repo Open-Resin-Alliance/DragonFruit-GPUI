@@ -2,11 +2,33 @@ use super::*;
 
 // ── Experiments (`ExperimentsSettingsTab.tsx`) ───────────────────────────
 
+/// `onExit` — leave the tab the user came from, or General when that was
+/// Experiments itself (`SettingsModal.tsx:1558-1562`), and close the gate for
+/// this visit. `Take me back!` deliberately does **not** acknowledge the
+/// disclaimer; only `I understand` sets `disclaimerSeenThisLaunch`.
+fn leave_disclaimer(entity: &WeakEntity<DragonFruit>, cx: &mut App) {
+    let previous = state().lock().map(|draft| draft.prev_tab).unwrap_or(0);
+    let target = if previous == SettingsTab::Experiments.index() {
+        SettingsTab::General.index()
+    } else {
+        previous
+    };
+    edit_and_notify(entity, cx, |draft| {
+        draft.experiments.show_disclaimer = false;
+    });
+    entity
+        .update(cx, |this, cx| {
+            this.settings_tab = target;
+            cx.notify();
+        })
+        .ok();
+}
+
 pub(crate) fn experiments_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>) -> Div {
     let mut root = div().flex().flex_col().gap(px(12.));
     root = root.child(
         div()
-            .rounded(px(6.))
+            .rounded(px(ROUNDED_MD)) // `rounded-md` — 10px in this app
             .border_1()
             .border_color(rgb(BORDER_SUBTLE))
             .bg(rgb(mix(SURFACE_1, SURFACE_0, 0.94)))
@@ -61,7 +83,7 @@ pub(crate) fn experiments_tab(state: &SettingsState, entity: WeakEntity<DragonFr
                 .items_center()
                 .justify_between()
                 .gap(px(12.))
-                .rounded(px(6.))
+                .rounded(px(ROUNDED_MD)) // `rounded-md` — 10px in this app
                 .border_1()
                 .border_color(rgb(BORDER_SUBTLE))
                 .bg(rgb(SURFACE_1))
@@ -103,7 +125,7 @@ pub(crate) fn experiments_tab(state: &SettingsState, entity: WeakEntity<DragonFr
 
     root.child(
         div()
-            .rounded(px(6.))
+            .rounded(px(ROUNDED_MD)) // `rounded-md` — 10px in this app
             .border_1()
             .border_color(rgb(BORDER_SUBTLE))
             .bg(rgb(SURFACE_1))
@@ -121,6 +143,7 @@ pub(crate) fn experiments_overlay(state: &SettingsState, entity: WeakEntity<Drag
         return None;
     }
     let exit_entity = entity.clone();
+    let backdrop_entity = entity.clone();
     let ack_entity = entity;
 
     Some(
@@ -134,6 +157,12 @@ pub(crate) fn experiments_overlay(state: &SettingsState, entity: WeakEntity<Drag
             .justify_center()
             .px(px(12.))
             .bg(rgba(0x0000008c))
+            // The source's backdrop `onMouseDown` exits only when the event
+            // lands on the backdrop itself (`ExperimentsSettingsTab.tsx:26-31`);
+            // the panel below stops the event.
+            .on_mouse_down(MouseButton::Left, move |_, _, cx| {
+                leave_disclaimer(&backdrop_entity, cx);
+            })
             .child(
                 div()
                     .w(px(512.)) // max-w-lg
@@ -144,6 +173,7 @@ pub(crate) fn experiments_overlay(state: &SettingsState, entity: WeakEntity<Drag
                     .border_1()
                     .border_color(rgb(BORDER_SUBTLE))
                     .bg(rgb(SURFACE_0))
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .child(
                         div()
                             .flex()
@@ -224,11 +254,10 @@ pub(crate) fn experiments_overlay(state: &SettingsState, entity: WeakEntity<Drag
                                                 .font_size(14.0),
                                         )
                                         .on_click(move |_, _, cx| {
-                                            // "Take me back" keeps the gate for the
-                                            // next entry, so it can reappear.
-                                            edit_and_notify(&exit_entity, cx, |draft| {
-                                                draft.experiments.show_disclaimer = false;
-                                            });
+                                            // `setShowDisclaimer(false); onExit()` —
+                                            // the gate stays armed for the next
+                                            // entry, and the modal leaves the tab.
+                                            leave_disclaimer(&exit_entity, cx);
                                         }),
                                     )
                                     .child(

@@ -104,7 +104,7 @@ pub(crate) fn multi_plate_tab(state: &SettingsState, entity: WeakEntity<DragonFr
         div()
             .flex()
             .flex_col()
-            .rounded(px(8.)) // rounded-lg
+            .rounded(px(ROUNDED_LG)) // `rounded-lg` — 14px in this app
             .border_1()
             .border_color(rgb(BORDER_SUBTLE))
             .bg(rgb(SURFACE_1))

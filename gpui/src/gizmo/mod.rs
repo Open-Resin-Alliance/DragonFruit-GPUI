@@ -58,8 +58,8 @@
 //!   it, so the ring always reads as one circle with one bright quarter.
 //! * the `0.26` is an encoded-space alpha (three blends on its sRGB canvas),
 //!   and this pass blends in linear space, so it has to be converted; parity is
-//!   `0.11`, and the value in use is half that — fainter than parity at the
-//!   user's request.
+//!   `0.11`, and the value in use is a quarter of that (`0.028`) — twice
+//!   halved at the user's request, fainter than parity.
 //!
 //! `GIZMO_SIZES.ringMinorRadius` (0.12) and `scaleHexagonDepth` (0.3) are
 //! declared in the source but reached by no draw call — the ring's tube is a

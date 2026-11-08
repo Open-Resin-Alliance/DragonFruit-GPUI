@@ -216,7 +216,8 @@ pub(crate) fn cleanup_button(
         .id(id)
         .w_full()
         .p(px(10.))
-        .rounded(px(6.))
+        // `w-full rounded-md border p-2.5` — 10px in this app.
+        .rounded(px(ROUNDED_MD))
         .border_1()
         .border_color(rgb(BORDER_SUBTLE))
         .bg(rgb(SURFACE_0))

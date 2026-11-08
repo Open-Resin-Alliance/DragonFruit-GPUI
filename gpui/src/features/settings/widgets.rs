@@ -213,9 +213,12 @@ pub(crate) fn checkbox(checked: bool, enabled: bool) -> Div {
         .rounded(px(4.))
         .border_1();
     if checked {
+        // `.ui-checkbox:checked` (`globals.css:526-530`): `color-mix(in srgb,
+        // var(--accent), white 12%)` border over `color-mix(in srgb,
+        // var(--accent), var(--surface-0) 18%)` fill, i.e. accent 88% / 82%.
         box_ = box_
             .border_color(rgb(mix(ACCENT, WHITE, 0.88)))
-            .bg(rgb(mix(ACCENT, SURFACE_0, 0.18)))
+            .bg(rgb(mix(ACCENT, SURFACE_0, 0.82)))
             .child(icon("check", 10., ACCENT_CONTRAST));
     } else {
         box_ = box_
@@ -230,9 +233,11 @@ pub(crate) fn checkbox(checked: bool, enabled: bool) -> Div {
 
 /// `rounded-md border px-3 py-2 text-xs` message strip.
 pub(crate) fn message_strip(kind: Option<bool>, text: &str) -> Div {
+    // `color-mix(in srgb, #ef4444 | #22c55e, var(--border-subtle) 40%)`: the
+    // status colour is the 60% share.
     let (border, color) = match kind {
-        Some(true) => (mix(0xef4444, BORDER_SUBTLE, 0.4), 0xfca5a5),
-        _ => (mix(0x22c55e, BORDER_SUBTLE, 0.4), 0x86efac),
+        Some(true) => (mix(0xef4444, BORDER_SUBTLE, 0.6), 0xfca5a5),
+        _ => (mix(0x22c55e, BORDER_SUBTLE, 0.6), 0x86efac),
     };
     div()
         .rounded(px(ROUNDED_MD))
@@ -388,6 +393,20 @@ pub(crate) fn inner_card() -> Div {
         .flex_col()
 }
 
+/// `rounded-md border p-2` on `--surface-0` — the select cards in the Mesh tab
+/// and the Profile forms (`MeshSettingsTab.tsx:213`, `:233`; the sibling
+/// `field_card` is the `px-2.5 py-1.5` shape).
+pub(crate) fn selector_card() -> Div {
+    div()
+        .rounded(px(ROUNDED_MD))
+        .border_1()
+        .border_color(rgb(BORDER_SUBTLE))
+        .bg(rgb(SURFACE_0))
+        .p(px(8.))
+        .flex()
+        .flex_col()
+}
+
 /// `rounded-md border px-2.5 py-1.5` on `--surface-0`.
 pub(crate) fn field_card() -> Div {
     div()
@@ -410,13 +429,17 @@ pub(crate) fn field_label(label: &'static str) -> Div {
         .child(label)
 }
 
+/// `mb-1 block text-xs font-semibold uppercase tracking-wide` in
+/// `--text-muted` — the label class the UI & Theme cards use
+/// (`UISettingsTab.tsx:296`, `:308`); the source upper-cases through CSS, GPUI
+/// has no `text-transform`, so the text is upper-cased here.
 pub(crate) fn upper_label(label: &'static str) -> Div {
     div()
         .mb(px(4.))
         .text_size(px(12.))
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(rgb(TEXT_MUTED))
-        .child(label)
+        .child(label.to_uppercase())
 }
 
 pub(crate) fn divider_label(icon_slug: &'static str, label: &'static str) -> Div {
@@ -458,11 +481,14 @@ pub(crate) fn segmented(
     for (index, label) in options.iter().enumerate() {
         let is_active = index == active;
         let handler = on_select.clone();
+        // `color-mix(in srgb, var(--segmented-tone), var(--text-strong) 25%)`
+        // (`globals.css:435`): 75% tone + 25% text-strong, so the active label
+        // reads as the tone rather than as near-white text.
         let (background, border, text) = if is_active {
             (
-                mix(ACCENT, SURFACE_0, 0.24),
-                mix(ACCENT, 0xffffff, 0.9),
-                mix(ACCENT, TEXT_STRONG, 0.25),
+                mix(ACCENT, SURFACE_0, 0.24),   // `surface-0 76%`
+                mix(ACCENT, 0xffffff, 0.9),     // `white 10%`
+                mix(ACCENT, TEXT_STRONG, 0.75), // `text-strong 25%`
             )
         } else {
             (SURFACE_1, BORDER_SUBTLE, TEXT_MUTED)
@@ -482,6 +508,9 @@ pub(crate) fn segmented(
             .font_weight(FontWeight::SEMIBOLD)
             .text_color(rgb(text))
             .cursor_pointer()
+            // `.ui-segmented-option:hover:not(:disabled) { background: var(--surface-2) }`
+            // — it out-specifies the active rule, so the hover applies to both.
+            .hover(|style| style.bg(rgb(SURFACE_2)))
             .on_click(move |_, _, cx| handler(index, cx))
             .child(*label);
         option = if full_width {
@@ -512,29 +541,47 @@ pub(crate) fn number_control(
     let on_change: Rc<dyn Fn(f32, &mut App)> = Rc::new(on_change);
     let decrease = on_change.clone();
     let increase = on_change;
+
+    // `disabled:!bg-[color-mix(in_srgb,var(--surface-1),black_8%)]` — the source
+    // disables the decrement at `<= min` and the increment at `>= max` instead
+    // of silently clamping a click.
+    let stepper = |suffix: &str,
+                   slug: &'static str,
+                   disabled: bool,
+                   delta: f32,
+                   callback: Rc<dyn Fn(f32, &mut App)>| {
+        let mut button = div()
+            .id(format!("{id}-{suffix}"))
+            .w(px(32.))
+            .h(px(32.))
+            .flex_shrink_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(6.))
+            .border_1()
+            .border_color(rgb(BORDER_SUBTLE))
+            .bg(rgb(SURFACE_0))
+            .child(icon(slug, 14., TEXT_MUTED));
+        if disabled {
+            button = button
+                .bg(rgb(mix(SURFACE_1, 0x000000, 0.92)))
+                .opacity(0.5);
+        } else {
+            button = button
+                .cursor_pointer()
+                .hover(|style| style.bg(rgb(mix(SURFACE_0, 0xffffff, 0.96))))
+                .on_click(move |_, _, cx| callback((value + delta).clamp(min, max), cx));
+        }
+        button
+    };
+
     div()
         .w(px(width))
         .flex()
         .items_center()
         .gap(px(4.))
-        .child(
-            div()
-                .id(format!("{id}-minus"))
-                .w(px(32.))
-                .h(px(32.))
-                .flex_shrink_0()
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded(px(6.))
-                .border_1()
-                .border_color(rgb(BORDER_SUBTLE))
-                .bg(rgb(SURFACE_0))
-                .cursor_pointer()
-                .hover(|style| style.bg(rgb(mix(SURFACE_0, 0xffffff, 0.96))))
-                .child(icon("minus", 14., TEXT_MUTED))
-                .on_click(move |_, _, cx| decrease((value - step).max(min), cx)),
-        )
+        .child(stepper("minus", "minus", value <= min, -step, decrease))
         .child(
             div().flex_1().min_w(px(0.)).child(number_on_blur(
                 id,
@@ -551,24 +598,7 @@ pub(crate) fn number_control(
                 },
             )),
         )
-        .child(
-            div()
-                .id(format!("{id}-plus"))
-                .w(px(32.))
-                .h(px(32.))
-                .flex_shrink_0()
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded(px(6.))
-                .border_1()
-                .border_color(rgb(BORDER_SUBTLE))
-                .bg(rgb(SURFACE_0))
-                .cursor_pointer()
-                .hover(|style| style.bg(rgb(mix(SURFACE_0, 0xffffff, 0.96))))
-                .child(icon("plus", 14., TEXT_MUTED))
-                .on_click(move |_, _, cx| increase((value + step).min(max), cx)),
-        )
+        .child(stepper("plus", "plus", value >= max, step, increase))
 }
 
 pub(crate) fn format_number(value: f32) -> String {
@@ -629,28 +659,45 @@ pub(crate) fn slider_field(
     min: f32,
     max: f32,
 ) -> Div {
-    field_card().child(
-        div()
-            .flex()
-            .items_center()
-            .justify_between()
-            .mb(px(6.))
-            .child(
-                div()
-                    .text_size(px(12.))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(rgb(TEXT_MUTED))
-                    .child(label),
-            )
-            .child(
-                div()
-                    .text_size(px(12.))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(rgb(TEXT_STRONG))
-                    .child(value_text.into()),
-            ),
-    )
-    .child(slider(value, min, max))
+    field_card().child(slider_group(label, value_text, value, min, max))
+}
+
+/// The same label/value line and track **without** the card: the source's
+/// `space-y-0.5` slider groups inside an already-bordered panel
+/// (`CameraSettingsTab.tsx:352-398`, `SpaceMouseSettingsTab.tsx:203-284`).
+/// Wrapping those in [`slider_field`] drew a border the source never has.
+pub(crate) fn slider_group(
+    label: &'static str,
+    value_text: impl Into<SharedString>,
+    value: f32,
+    min: f32,
+    max: f32,
+) -> Div {
+    div()
+        .flex()
+        .flex_col()
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .mb(px(6.))
+                .child(
+                    div()
+                        .text_size(px(12.))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(rgb(TEXT_MUTED))
+                        .child(label),
+                )
+                .child(
+                    div()
+                        .text_size(px(12.))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(rgb(TEXT_STRONG))
+                        .child(value_text.into()),
+                ),
+        )
+        .child(slider(value, min, max))
 }
 
 

@@ -123,10 +123,12 @@ pub const RING_FRONT_ARC: f32 = std::f32::consts::FRAC_PI_2;
 /// (encoded 0.2) — gives `a = 0.11`, which reproduces the source's encoded
 /// result exactly on that backdrop (0.407 vs 0.408).
 ///
-/// The value in use is **half that, `0.055`: deliberately fainter than parity at
-/// the user's request** — they compared the running app against the TS widget,
-/// found the converted arc still too present, and asked for it halved. Do not
-/// "correct" this back to 0.11; it is an eye-tuned value, not a derived one.
+/// The value in use is **a quarter of that, `0.028`**: twice halved at the
+/// user's request — they compared the running app against the TS widget, found
+/// the converted arc still too present, asked for it halved to `0.055`, and at
+/// that strength asked for it halved again so it reads as a hint of the ring's
+/// far side rather than a drawn arc. Do not "correct" this back to 0.11 (or to
+/// 0.055); it is an eye-tuned value, not a derived one.
 pub const RING_BACK_ALPHA: f32 = 0.028;
 
 /// Every handle material in the source is `transparent` with its own opacity.

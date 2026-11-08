@@ -41,7 +41,12 @@
 //!    viewport clamp and upward flip need a measure pass; the bar sits at the
 //!    top of the window, so every menu opens downwards.
 //! 10. `title` / `aria-*` attributes — no native tooltip. `ui::tooltip` would
-//!     need a wrapper element, which changes the bar's flex geometry.
+//!     need a wrapper element, which changes the bar's flex geometry, and the
+//!     bar's own `title` texts are guidance rather than labels (the workflow
+//!     steps' unlock hints, the monitor's `Open printer monitor`, the printer
+//!     badge's profile/device summary), so they are not drawn at all. This is
+//!     a gap this file can still close — `ui::mouse_tooltip` follows the
+//!     pointer and needs no wrapper — it is not a platform limit.
 //! 11. `useOutsideDismiss` / `useEscapeToClose` — the bar only toggles its own
 //!     menus; global dismissal belongs to the parent.
 //! 12. `hideWorkflowControls` (first-run onboarding) — the GPUI app has no
@@ -88,6 +93,15 @@
 //! 22. The re-slice warning (`warnBeforeProfileSettingsOpen` +
 //!     `StructuredDialogModal`) has no counterpart: the port has no printer
 //!     profiles to switch, so nothing can invalidate a slice.
+//! 23. `backdropFilter: blur(6px) saturate(112%)` on the view-type menu and
+//!     `backdrop-blur-sm` on the context-menu surfaces — GPUI has no backdrop
+//!     filter (deviation 1), so those popovers paint their translucent fill
+//!     over an unblurred scene.
+//! 24. The bar's two side groups carry `pointer-events-none` alongside
+//!     `opacity-45` while `topbarActionsDisabled`. GPUI has no inherited
+//!     pointer-events, so each control disables itself and swallows its press
+//!     instead; the group only dims. The effect matches (nothing in a disabled
+//!     group responds) without a hit-testing change on the group.
 
 use std::path::PathBuf;
 
@@ -205,14 +219,17 @@ impl MonitorButton {
     }
 
     /// `monitorButtonTone` overridden by the `ui-topbar-monitor-*` animation's
-    /// first keyframe (see deviation 8).
+    /// first keyframe (see deviation 8). The paused/active class is applied
+    /// whether or not the printer is offline, and an animated `color` beats the
+    /// inline `monitorButtonTone` (`globals.css:297-305`), so paused wins over
+    /// offline, and active over the plain `--text-strong` tone.
     fn tone(&self) -> u32 {
-        if self.offline {
-            0xf87171
-        } else if self.paused {
+        if self.paused {
             0xfacc15
         } else if self.active {
             0x22c55e
+        } else if self.offline {
+            0xf87171
         } else {
             TEXT_STRONG
         }
@@ -349,13 +366,15 @@ pub fn app_bar(state: AppBarState, entity: WeakEntity<DragonFruit>) -> impl Into
 
     // `inline-flex h-10 w-10 items-center justify-center rounded-md
     // transition-colors`, `color-mix(accent, transparent 80%)` when open.
+    // `rounded-md` is `var(--radius-md)` = 10px in this app (`globals.css:42`),
+    // not the utility's default 6px.
     let app_menu_button = ui! {
         div(
             id = "app-menu-button",
             on_mouse_down = |_, _, cx| cx.stop_propagation(),
 
             w_40, h_40, flex, items_center, justify_center,
-            rounded_6,
+            rounded(px(ROUNDED_MD)),
             when(show_app_menu, bg = rgba(0xec2a7733)),
             when(!actions_disabled, cursor_pointer),
             on_click = move |_, _, cx| {
@@ -378,6 +397,7 @@ pub fn app_bar(state: AppBarState, entity: WeakEntity<DragonFruit>) -> impl Into
 
     let printer_entity = entity.clone();
     let has_fleet_units = printer.has_fleet_units();
+    let fleet_label_order = printer.uses_fleet_label_order();
     let printer_chevron = if show_printer_menu {
         "chevron-up"
     } else {
@@ -390,68 +410,110 @@ pub fn app_bar(state: AppBarState, entity: WeakEntity<DragonFruit>) -> impl Into
             .into_any_element(),
         None => icon("printer", 16., TEXT_MUTED).into_any_element(),
     };
-    let printer_label_top = printer.label_top().to_owned();
+    // `topbarPrinterLabelTop`: `Printer` in the single-printer branch, and the
+    // source renders it with `uppercase` (`TopBar.tsx:776-782`). The fleet
+    // branch shows the profile name with a `truncate` instead.
+    let printer_label_top = if fleet_label_order {
+        printer.label_top().to_owned()
+    } else {
+        printer.label_top().to_uppercase()
+    };
     let printer_label_bottom = printer.label_bottom().to_owned();
-    let fleet_label_order = printer.uses_fleet_label_order();
 
     // `group inline-flex h-10 max-w-[300px] items-center gap-2 rounded-md px-2`.
-    let printer_button = ui! {
-        div(
-            id = "printer-menu-button",
-            on_mouse_down = |_, _, cx| cx.stop_propagation(),
+    // `rounded-md` is 10px here, and the `h-8 w-8` thumbnail tile is
+    // `rounded-sm` (6px, `globals.css:41`); `hideBadges` drops the tile.
+    let mut printer_button = div()
+        .id("printer-menu-button")
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .h(px(40.))
+        .max_w(px(300.))
+        .flex()
+        .items_center()
+        .gap(px(8.))
+        .px(px(8.))
+        .rounded(px(ROUNDED_MD));
 
-            h_40, max_w_300, flex, items_center, gap_8, px_8,
-            rounded_6,
-            when(!actions_disabled, cursor_pointer),
-            on_click = move |_, _, cx| {
-                if actions_disabled {
-                    return;
-                }
-                // `hasTopbarFleetUnits` decides between the fleet quick menu and
-                // the profile flow. `requestOpenProfileSettings('printer')` opens
-                // the Printer & Material Profiles modal; the bare picker is only
-                // its Add flow.
-                if !has_fleet_units {
-                    crate::features::printer_profiles::begin();
-                }
-                printer_entity
-                    .update(cx, |this, cx| {
-                        if has_fleet_units {
-                            this.show_printer_menu = !this.show_printer_menu;
-                            this.show_app_menu = false;
-                            this.show_view_menu = false;
-                        } else {
-                            this.show_printer_menu = false;
-                            this.show_app_menu = false;
-                            this.show_view_menu = false;
-                            this.show_printer_profiles = true;
-                        }
-                        cx.notify();
-                    })
-                    .ok();
-            },
-        ) {
+    if !actions_disabled {
+        printer_button = printer_button.cursor_pointer();
+    }
+
+    if !hide_badges {
+        printer_button = printer_button.child(
             // `h-8 w-8 rounded-sm`, `color-mix(surface-1, transparent 6%)`.
-            div(
-                w_32, h_32, flex, items_center, justify_center,
-                overflow_hidden, flex_shrink_0, rounded_4, bg = rgba(0x1a1b21f0),
-            ) {
-                { printer_thumbnail }
+            div()
+                .w(px(32.))
+                .h(px(32.))
+                .flex()
+                .items_center()
+                .justify_center()
+                .overflow_hidden()
+                .flex_shrink_0()
+                .rounded(px(ROUNDED_SM))
+                .bg(rgba(0x1a1b21f0))
+                .child(printer_thumbnail),
+        );
+    }
+
+    let printer_button = printer_button
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .items_start()
+                .min_w(px(0.))
+                .gap(px(2.))
+                .line_height(relative(1.0))
+                .child(
+                    div()
+                        .text_size(px(11.))
+                        .text_color(rgb(TEXT_MUTED))
+                        .when(fleet_label_order, |el| el.truncate())
+                        .child(printer_label_top),
+                )
+                .child(
+                    div()
+                        .text_size(px(12.))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .truncate()
+                        .text_color(rgb(TEXT_STRONG))
+                        .child(printer_label_bottom),
+                ),
+        )
+        // `ChevronDown className="h-3.5 w-3.5 ml-auto shrink-0"`.
+        .child(
+            div()
+                .ml_auto()
+                .flex_shrink_0()
+                .child(icon(printer_chevron, 14., mix(TEXT_MUTED, WHITE, 0.92))),
+        )
+        .on_click(move |_, _, cx| {
+            if actions_disabled {
+                return;
             }
-            div(flex, flex_col, items_start, min_w_0, gap_2, line_height = relative(1.0)) {
-                div(
-                    text_11, text_color = rgb(TEXT_MUTED),
-                    when(fleet_label_order, truncate),
-                ) {
-                    text(printer_label_top)
-                }
-                div(text_12, font_semibold, truncate, text_color = rgb(TEXT_STRONG)) {
-                    text(printer_label_bottom)
-                }
+            // `hasTopbarFleetUnits` decides between the fleet quick menu and
+            // the profile flow. `requestOpenProfileSettings('printer')` opens
+            // the Printer & Material Profiles modal; the bare picker is only
+            // its Add flow.
+            if !has_fleet_units {
+                crate::features::printer_profiles::begin();
             }
-            { icon(printer_chevron, 14., mix(TEXT_MUTED, WHITE, 0.92)) }
-        }
-    };
+            printer_entity
+                .update(cx, |this, cx| {
+                    if has_fleet_units {
+                        this.show_printer_menu = !this.show_printer_menu;
+                        this.show_app_menu = false;
+                        this.show_view_menu = false;
+                    } else {
+                        this.show_printer_menu = false;
+                        this.show_app_menu = false;
+                        this.show_view_menu = false;
+                        this.show_printer_profiles = true;
+                    }
+                    cx.notify();
+                })
+                .ok();
+        });
 
     // `showMonitorButton && <button class="group inline-flex h-10 items-center
     // gap-1.5 rounded-md px-2">`.
@@ -462,7 +524,8 @@ pub fn app_bar(state: AppBarState, entity: WeakEntity<DragonFruit>) -> impl Into
         ui! {
             div(
                 id = "monitor-button",
-                h_40, flex, items_center, gap_6, px_8, rounded_6,
+                on_mouse_down = |_, _, cx| cx.stop_propagation(),
+                h_40, flex, items_center, gap_6, px_8, rounded(px(ROUNDED_MD)),
                 when(!actions_disabled, cursor_pointer),
                 on_click = move |_, _, cx| {
                     if actions_disabled {
@@ -790,13 +853,15 @@ fn step_button(
     // `TopBar.tsx` makes a *locked* step inert too: `disabled = locked ||
     // topbarActionsDisabled` guards the click. Dimming alone left Support/Export
     // clickable with an empty scene.
+    //
+    // The press is swallowed either way: `button` is in the source's
+    // `interactiveSelector` regardless of its `disabled` attribute, so a
+    // locked step never drags the window.
+    step = step.on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
     if dimmed {
         step = step.cursor_not_allowed();
     } else {
-        step = step
-            .cursor_pointer()
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .on_click(move |_, _, cx| {
+        step = step.cursor_pointer().on_click(move |_, _, cx| {
             entity
                 .update(cx, |this, cx| {
                     this.mode = mode;
@@ -882,6 +947,20 @@ fn toolbar_button(
         ToolbarTone::Secondary => (SURFACE_1, BORDER_SUBTLE, TEXT_STRONG, SURFACE_2),
     };
 
+    // `button:disabled, .ui-button:disabled` (`globals.css`, quoted in
+    // `docs/internal/specs/controls.md` under "Cursor + disabled"): the button
+    // does *not* fade — `opacity: 1` — it swaps to the disabled surface, border
+    // and text recipes instead.
+    let (background, border, foreground) = if disabled {
+        (
+            mix(SURFACE_1, BLACK, 0.92),
+            mix(BORDER_SUBTLE, BLACK, 0.90),
+            mix(TEXT_MUTED, SURFACE_2, 0.82),
+        )
+    } else {
+        (background, border, foreground)
+    };
+
     let mut button = div()
         .id(id)
         .h(px(36.0))
@@ -896,15 +975,18 @@ fn toolbar_button(
         .text_size(px(FONT_MD))
         .font_weight(FontWeight::SEMIBOLD)
         .line_height(px(FONT_MD))
+        // `button` is in the source's `interactiveSelector`
+        // (`TopBar.tsx:379-394`), disabled or not, so a press on it never
+        // starts a window drag.
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
         .child(icon(icon_name, 16.0, foreground));
 
     if disabled {
-        button = button.opacity(0.55).cursor_not_allowed();
+        button = button.cursor_not_allowed();
     } else {
         button = button
             .cursor_pointer()
             .hover(move |style| style.bg(rgb(hover)))
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(move |_, _, cx| on_click(cx));
     }
 
@@ -1073,13 +1155,13 @@ fn view_type_dropdown(
         );
     }
 
+    // `button` is in the source's `interactiveSelector` whether or not it is
+    // disabled, so the press never starts a window drag.
+    trigger = trigger.on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
     if disabled {
         trigger = trigger.opacity(0.55).cursor_not_allowed();
     } else {
-        trigger = trigger
-            .cursor_pointer()
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .on_click(move |_, _, cx| {
+        trigger = trigger.cursor_pointer().on_click(move |_, _, cx| {
             toggle_entity
                 .update(cx, |this, cx| {
                     this.show_view_menu = !this.show_view_menu;
@@ -1480,10 +1562,15 @@ fn printer_menu(
             if actions_disabled {
                 return;
             }
+            // `handleOpenPrinterManagerFromQuickMenu`: close, then
+            // `requestOpenProfileSettings('printer')` — the Printer & Material
+            // Profiles modal, the same surface the badge opens when there is no
+            // fleet. The app Settings modal is a different screen.
+            crate::features::printer_profiles::begin();
             manager_entity
                 .update(cx, |this, cx| {
                     this.show_printer_menu = false;
-                    this.show_settings = true;
+                    this.show_printer_profiles = true;
                     cx.notify();
                 })
                 .ok();

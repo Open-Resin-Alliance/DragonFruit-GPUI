@@ -37,7 +37,16 @@ pub(crate) fn ui_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>) -> 
                                 .text_size(px(12.))
                                 .line_height(relative(1.2))
                                 .text_color(rgb(TEXT_MUTED))
-                                .child("Preview is live. Apply saves it."),
+                                .flex()
+                                .flex_wrap()
+                                .child("Preview is live. ")
+                                .child(
+                                    div()
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .text_color(rgb(TEXT_MUTED))
+                                        .child("Apply"),
+                                )
+                                .child(" saves it."),
                         ),
                 ),
         )
@@ -48,7 +57,10 @@ pub(crate) fn ui_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>) -> 
                 .gap(px(8.))
                 .child(
                     div()
-                        .rounded(px(8.)) // rounded-lg
+                        // `rounded-lg border p-2.5` on `--surface-2`; the
+                        // dropdown fills the card (`!h-8 text-xs`), there is no
+                        // fixed control width here.
+                        .rounded(px(ROUNDED_LG))
                         .border_1()
                         .border_color(rgb(BORDER_SUBTLE))
                         .bg(rgb(SURFACE_2))
@@ -59,7 +71,7 @@ pub(crate) fn ui_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>) -> 
                             &THEME_PRESET_OPTIONS,
                             THEME_PRESET_VALUES[state.theme_preset.min(THEME_PRESET_VALUES.len() - 1)],
                             None,
-                            Some(CONTROL_WIDTH),
+                            None,
                             true,
                             preset_entity.clone(),
                             move |value, cx| {
@@ -75,7 +87,7 @@ pub(crate) fn ui_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>) -> 
                 )
                 .child(
                     div()
-                        .rounded(px(8.))
+                        .rounded(px(ROUNDED_LG))
                         .border_1()
                         .border_color(rgb(BORDER_SUBTLE))
                         .bg(rgb(SURFACE_2))
@@ -88,7 +100,7 @@ pub(crate) fn ui_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>) -> 
                             &SCHEME_OPTIONS,
                             SCHEME_VALUES[state.theme_preference.min(SCHEME_VALUES.len() - 1)],
                             None,
-                            Some(CONTROL_WIDTH),
+                            None,
                             false,
                             scheme_entity.clone(),
                             move |value, cx| {
@@ -145,6 +157,15 @@ pub(crate) fn ui_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>) -> 
                                     .font_size(12.0),
                             )
                             .on_click(move |_, _, cx| {
+                                // `onResetThemeColors` restores the *selected
+                                // theme profile's* colours (`UISettingsTab.tsx:339`
+                                // → `handleResetThemeColors`). PORT DEVIATION: the
+                                // port carries the four built-in preset ids but no
+                                // per-preset colour tables, so `Reset` can only
+                                // name `DEFAULT_THEME_CUSTOM_COLORS` (the store's
+                                // own defaults). It also cannot tell whether there
+                                // is anything to reset, so the source's
+                                // `isThemeResetDirty` disabled state is not shown.
                                 edit_and_notify(&reset_entity, cx, |draft| {
                                     // `DEFAULT_THEME_CUSTOM_COLORS`, the store's
                                     // own defaults.
@@ -329,7 +350,8 @@ pub(crate) fn theme_sub_tab(
         .flex()
         .items_center()
         .justify_center()
-        .rounded(px(6.))
+        // `rounded-md` (10px) on the sub-tab pills.
+        .rounded(px(ROUNDED_MD))
         .border_1()
         .border_color(rgb(if active {
             mix(ACCENT_SECONDARY, BORDER_SUBTLE, 0.58)
@@ -369,8 +391,12 @@ pub(crate) fn color_row(
     let label = field.label;
     let description = field.description;
     let row_entity = entity;
+    // `rounded-md border px-2 py-1.5` (10px). PORT DEVIATION: the source puts
+    // `row.description` in the row's `title` tooltip and shows only the label;
+    // GPUI has no hover tooltip here, so the description is printed as a
+    // `text-[11px]` line under the row instead of being dropped.
     div()
-        .rounded(px(6.))
+        .rounded(px(ROUNDED_MD))
         .border_1()
         .border_color(rgb(BORDER_SUBTLE))
         // color-mix(in srgb, surface-0, transparent 8%) over surface-1

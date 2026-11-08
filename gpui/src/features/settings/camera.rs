@@ -2,6 +2,16 @@ use super::*;
 
 // ── Camera ───────────────────────────────────────────────────────────────
 
+/// `fmt.quantity(value, 2, 'times')` — `2.00x`, the read-out the acceleration
+/// sliders use (`CameraSettingsTab.tsx:390`; msgid `{value}x` in
+/// `src/utils/unitFormatting.ts:43`).
+fn times(value: f32) -> String {
+    let catalog = gpui_locale::current_catalog();
+    gpui_locale::UnitFormat::with_catalog(catalog)
+        .quantity(value as f64, 2, gpui_locale::Unit::Times)
+        .to_string()
+}
+
 pub(crate) fn camera_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>) -> Div {
     let mut root = div().flex().flex_col().gap(px(12.));
 
@@ -75,9 +85,10 @@ pub(crate) fn camera_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>)
                 ),
             ));
         if state.projection == Projection::Perspective {
+            // `{perspectiveFov}°` — the stored value, not a re-rounded one.
             block = block.child(slider_field(
                 "Field of view",
-                format!("{}°", state.fov.round() as i32),
+                format!("{}°", format_number(state.fov)),
                 state.fov,
                 FOV_MIN,
                 FOV_MAX));
@@ -86,6 +97,10 @@ pub(crate) fn camera_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>)
     }
 
     if state.camera_scope == CameraScope::Workspace {
+        // `activeWorkspace` is local React state that resets to `prepare` on
+        // remount (CameraSettingsTab.tsx:104). Here it lives in the draft, so it
+        // survives a tab switch inside one open modal and is never persisted;
+        // `workspace_tab` is not written by `to_settings`.
         let tab_entity = entity.clone();
         let default_entity = entity.clone();
         let active = state.workspace_tab.min(WORKSPACES.len() - 1);
@@ -220,8 +235,15 @@ pub(crate) fn camera_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>)
 
     if state.trackpad_action != 0 {
         let alternate = if state.trackpad_action == 1 { "orbit" } else { "pan" };
-        trackpad = trackpad
-            .child(setting_row(
+        // Both rows live in the same `space-y-1.5` stack as the mode selector
+        // (`CameraSettingsTab.tsx:275-402`), so the 6px gap continues below it.
+        trackpad = trackpad.child(
+            div()
+                .mt(px(6.))
+                .flex()
+                .flex_col()
+                .gap(px(6.))
+                .child(setting_row(
                 "Alternate gesture modifier",
                 Some(format!("Hold this key to temporarily switch two-finger drag to {alternate}.").into()),
                 SettingDensity::Compact,
@@ -262,26 +284,29 @@ pub(crate) fn camera_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>)
                             .grid()
                             .grid_cols(2)
                             .gap(px(8.))
-                            .child(slider_field(
+                            // `space-y-0.5` groups inside the panel, not cards: the
+                            // panel is already the bordered box.
+                            .child(slider_group(
                                 "Pan acceleration",
-                                format!("{:.2}×", state.pan_acceleration),
+                                times(state.pan_acceleration),
                                 state.pan_acceleration,
                                 0.4,
                                 4.0))
-                            .child(slider_field(
+                            .child(slider_group(
                                 "Orbit acceleration",
-                                format!("{:.2}×", state.orbit_acceleration),
+                                times(state.orbit_acceleration),
                                 state.orbit_acceleration,
                                 0.4,
                                 4.0))
-                            .child(slider_field(
+                            .child(slider_group(
                                 "Zoom acceleration",
-                                format!("{:.2}×", state.zoom_acceleration),
+                                times(state.zoom_acceleration),
                                 state.zoom_acceleration,
                                 0.4,
                                 4.0)),
                     ),
-            );
+                ),
+        );
     }
 
     root.child(trackpad)

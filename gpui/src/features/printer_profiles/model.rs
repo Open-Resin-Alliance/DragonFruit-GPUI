@@ -704,6 +704,10 @@ struct Store {
     next_material: usize,
     /// The counter behind `printer-custom-<n>` for custom copies.
     next_custom: usize,
+    /// The picker's active profile the selection was last synced from
+    /// (`lastSyncedActivePrinterRef`): the modal follows the store when the
+    /// active printer changes elsewhere, not on every read.
+    synced_active: Option<String>,
 }
 
 impl Store {
@@ -719,6 +723,7 @@ impl Store {
             manual_dimensions: Vec::new(),
             next_material: 1,
             next_custom: 1,
+            synced_active: None,
         }
     }
 
@@ -776,9 +781,18 @@ impl Store {
         // The modal's selection follows the store's active printer
         // (`handlePickPrinter` writes both), except when the active profile is
         // this store's own custom copy, which the picker does not know.
+        //
+        // `lastSyncedActivePrinterRef` (`ProfileSettingsModal.tsx:1216-1230`):
+        // only adopt a *change* of the store's active printer. Adopting the
+        // value on every read pulled the selection straight back to the
+        // picker's last official printer, so a custom copy picked here could
+        // never stay selected.
         if let Some(active) = printer_picker::active_profile_id() {
-            if self.profile_index(&active).is_some() {
-                self.selected = Some(active);
+            if self.synced_active.as_deref() != Some(active.as_str()) {
+                self.synced_active = Some(active.clone());
+                if self.profile_index(&active).is_some() {
+                    self.selected = Some(active);
+                }
             }
         }
         if self
@@ -1094,19 +1108,28 @@ pub fn remove_profile(id: &str) {
     }
 }
 
-/// `removePrinterProfile` (`profileStore.ts:2457`): drop the profile, its own
-/// materials, any tank assignment that named it, and fall back to the first
-/// remaining profile when it was the selected one.
+/// `removePrinterProfile` (`profileStore.ts:2457-2478`): drop the profile and
+/// the materials it owns, strike it from every other material's
+/// `compatiblePrinterProfileIds`, and fall back to the first remaining profile
+/// when it was the selected one.
 fn remove_profile_in(store: &mut Store, id: &str) {
     store.profiles.retain(|profile| profile.id != id);
     store
         .materials
         .retain(|material| material.printer_profile_id != id);
-    for profile in &mut store.profiles {
-        for tank in &mut profile.tank_materials {
-            if tank.as_str() == id {
-                tank.clear();
-            }
+    // The source's share cleanup: a material shared *with* the removed printer
+    // loses that id (`compatiblePrinterProfileIds` filtered, `undefined` when
+    // empty). Tank assignments hold material ids, not printer ids, so they are
+    // untouched here — `remove_material` owns that side.
+    for material in &mut store.materials {
+        if material
+            .compatible_printer_profile_ids
+            .iter()
+            .any(|printer_id| printer_id == id)
+        {
+            material
+                .compatible_printer_profile_ids
+                .retain(|printer_id| printer_id != id);
         }
     }
     if store.selected.as_deref() == Some(id) {
@@ -1258,8 +1281,13 @@ pub fn add_material(printer_id: &str) -> String {
     })
 }
 
-/// A copy of a material for the same printer (`duplicate` in the material
-/// editor).
+/// A copy of a material for the same printer (`duplicateSelectedMaterial`,
+/// `ProfileSettingsModal.tsx:3547-3576`).
+///
+/// PORT DEVIATION: the copy keeps the source material's `color`. The source's
+/// field list omits `color`, so its duplicate silently loses the swatch; that
+/// reads as an oversight rather than a rule, and the colour is part of the
+/// material's identity (gotcha 13 in the spec).
 pub fn duplicate_material(id: &str) -> String {
     edit(|store| {
         let Some(source) = store
@@ -1273,7 +1301,13 @@ pub fn duplicate_material(id: &str) -> String {
         let duplicate_id = store.next_material_id();
         let mut duplicate = source;
         duplicate.id = duplicate_id.clone();
-        duplicate.name = format!("{} Copy", duplicate.name);
+        // `source.name.includes('Custom') ? source.name : `${source.name} Custom``
+        // — case-sensitive, anywhere in the string.
+        duplicate.name = if duplicate.name.contains("Custom") {
+            duplicate.name.clone()
+        } else {
+            format!("{} Custom", duplicate.name)
+        };
         duplicate.official_template_id = None;
         duplicate.official_template_version = None;
         duplicate.locked = false;

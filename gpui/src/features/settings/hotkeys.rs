@@ -88,7 +88,8 @@ pub(crate) fn hotkey_row(
         .items_center()
         .justify_center()
         .gap(px(4.))
-        .rounded(px(6.))
+        // `rounded-md` — 10px in this app.
+        .rounded(px(ROUNDED_MD))
         .px(px(4.))
         .py(px(2.))
         .cursor_pointer()
@@ -147,7 +148,8 @@ pub(crate) fn hotkey_row(
         .items_center()
         .justify_between()
         .gap(px(8.))
-        .rounded(px(6.))
+        // `flex w-full … rounded-md border px-2 py-1.5`.
+        .rounded(px(ROUNDED_MD))
         .border_1()
         .border_color(rgb(border))
         .bg(rgb(background))
@@ -221,7 +223,7 @@ pub(crate) fn hotkey_section(
         .flex()
         .flex_col()
         .h_full()
-        .rounded(px(8.)) // rounded-lg
+        .rounded(px(ROUNDED_LG)) // `rounded-lg border p-2.5` — 14px here
         .border_1()
         .border_color(rgb(BORDER_SUBTLE))
         .bg(rgb(SURFACE_1))
@@ -259,7 +261,8 @@ pub(crate) fn hotkey_section(
                         .flex()
                         .items_center()
                         .justify_center()
-                        .rounded(px(6.))
+                        // `IconButton className="!h-7 !w-7 !p-0 … rounded-md"`.
+                        .rounded(px(ROUNDED_MD))
                         .cursor_pointer()
                         .hover(|style| style.bg(rgb(SURFACE_2)))
                         .on_click(move |_, _, cx| {
@@ -362,7 +365,8 @@ pub(crate) fn hotkeys_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>
 /// The `Recording Shortcut` overlay.
 pub(crate) fn hotkeys_overlay(state: &SettingsState, entity: WeakEntity<DragonFruit>) -> Option<Div> {
     state.hotkeys.recording?;
-    let cancel_entity = entity;
+    let cancel_entity = entity.clone();
+    let backdrop_entity = entity;
     Some(
         div()
             .absolute()
@@ -374,6 +378,15 @@ pub(crate) fn hotkeys_overlay(state: &SettingsState, entity: WeakEntity<DragonFr
             .justify_center()
             .px(px(16.))
             .bg(rgba(0x0000008c)) // bg-black/55
+            // The panel's own copy promises "or click outside to cancel"
+            // (`HotkeysSettingsTab.tsx:270-284`): the backdrop mousedown cancels
+            // the recording, and the panel stops the event so a click inside it
+            // does not.
+            .on_mouse_down(MouseButton::Left, move |_, _, cx| {
+                edit_and_notify(&backdrop_entity, cx, |draft| {
+                    draft.hotkeys.recording = None;
+                });
+            })
             .child(
                 div()
                     .w(px(448.)) // max-w-md
@@ -382,6 +395,7 @@ pub(crate) fn hotkeys_overlay(state: &SettingsState, entity: WeakEntity<DragonFr
                     .border_color(rgb(BORDER_STRONG))
                     .bg(rgb(SURFACE_0))
                     .p(px(20.))
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .child(
                         div()
                             .text_size(px(16.))

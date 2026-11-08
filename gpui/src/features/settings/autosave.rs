@@ -148,7 +148,7 @@ pub(crate) fn autosave_tab(state: &SettingsState, entity: WeakEntity<DragonFruit
     // Crash Recovery — the source's `IconChip tone="warning"` header.
     root = root.child(
         div()
-            .rounded(px(6.))
+            .rounded(px(ROUNDED_MD)) // `rounded-md` — 10px in this app
             .border_1()
             .border_color(rgb(BORDER_SUBTLE))
             .bg(rgb(SURFACE_1))
@@ -210,7 +210,7 @@ pub(crate) fn autosave_tab(state: &SettingsState, entity: WeakEntity<DragonFruit
     // "desktop build" state renders and the actions stay disabled.
     root = root.child(
         div()
-            .rounded(px(6.))
+            .rounded(px(ROUNDED_MD)) // `rounded-md` — 10px in this app
             .border_1()
             .border_color(rgb(BORDER_SUBTLE))
             .bg(rgb(SURFACE_1))

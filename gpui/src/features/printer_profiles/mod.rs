@@ -321,6 +321,13 @@ fn delete_confirm(name: String, entity: WeakEntity<DragonFruit>) -> impl IntoEle
                 )
                 .on_click(move |_, _, cx| {
                     model::confirm_remove();
+                    // `handleConfirmDelete` (`:3448-3468`): removing the last
+                    // printer profile closes the modal, so the first-run
+                    // "Welcome" onboarding can appear instead of an empty
+                    // modal.
+                    if model::profiles().is_empty() {
+                        close(&confirm_entity, cx);
+                    }
                     notify(&confirm_entity, cx);
                 }),
             ),

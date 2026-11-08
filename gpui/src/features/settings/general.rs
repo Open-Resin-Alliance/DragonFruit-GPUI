@@ -197,9 +197,17 @@ pub(crate) fn general_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>
                     usize::from(state.floating_persistence),
                     false,
                     move |index, cx| {
-                        edit_and_notify(&persistence_entity, cx, |draft| {
-                            draft.floating_persistence = index == 1;
-                        });
+                        edit(|draft| draft.floating_persistence = index == 1);
+                        // `setFloatingLayoutPersistenceEnabled` — the panel
+                        // layout owns the flag that gates writing
+                        // `floating-panel-layout.json`, so the switch has to
+                        // reach it as well as the saved setting.
+                        persistence_entity
+                            .update(cx, |this, cx| {
+                                this.layout.set_persistence_enabled(index == 1);
+                                cx.notify();
+                            })
+                            .ok();
                     },
                 ),
             )
@@ -224,11 +232,16 @@ pub(crate) fn general_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>
                         .icon("rotate-ccw", 16.0, TEXT_STRONG),
                 )
                 .on_click(move |_, _, cx| {
-                    // The saved panel positions live outside this draft; the
-                    // only layout preference it owns is the persistence flag,
-                    // so Reset returns that to its default.
-                    edit(|draft| draft.floating_persistence = true);
-                    reset_entity.update(cx, |_, cx| cx.notify()).ok();
+                    // `clearSavedFloatingLayout()` (`SettingsModal.tsx:928-960`
+                    // → `floatingLayoutPreferences.ts`): forget every stored
+                    // placement and delete the saved document. It is immediate
+                    // and does not touch the persistence flag.
+                    reset_entity
+                        .update(cx, |this, cx| {
+                            this.layout.reset();
+                            cx.notify();
+                        })
+                        .ok();
                 }),
             )
             .mt(px(8.)),

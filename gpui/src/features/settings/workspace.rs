@@ -117,7 +117,8 @@ pub(crate) fn workspace_tab(state: &SettingsState, entity: WeakEntity<DragonFrui
             ))
             .child(
                 div()
-                    .rounded(px(6.))
+                    // `rounded-md border px-2 py-1.5` (10px: `--radius-md`).
+                    .rounded(px(ROUNDED_MD))
                     .border_1()
                     .border_color(rgb(BORDER_SUBTLE))
                     .bg(rgb(SURFACE_1))

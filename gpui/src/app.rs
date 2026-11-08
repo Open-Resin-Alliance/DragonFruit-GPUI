@@ -1942,7 +1942,7 @@ impl Render for DragonFruit {
                                     )),
                                     6 => Some((
                                         "prepare-split",
-                                        "Organic Cut",
+                                        "Split",
                                         panels::list::PanelKind::OrganicCut,
                                     )),
                                     7 => Some((
@@ -1963,6 +1963,22 @@ impl Render for DragonFruit {
                                             .dock(panels::list::PanelDock::Right)
                                             .content(body),
                                     );
+                                }
+                            }
+                            // `PreparePanelStack.tsx:280`: the orientation panel
+                            // rides beside the Transform card on the same
+                            // `scene.geom && transformMode === 'transform'` gate,
+                            // plus the `auto-rotation` experiment.
+                            if self.active_tool == 1 {
+                                if let Some(def) =
+                                    crate::widgets::orientation_panel::orientation_panel_def(
+                                        self.mesh
+                                            .as_ref()
+                                            .map(|mesh| mesh.name.clone().into()),
+                                        entity.clone(),
+                                    )
+                                {
+                                    defs.push(def);
                                 }
                             }
                         }
