@@ -471,6 +471,7 @@ fn scale_cube(
         half,
         CUBE_EDGE_WIDTH * scale,
         tint(multiply(color, CUBE_EDGE_DIM), alpha),
+        view.camera.eye(),
     );
 }
 
@@ -726,8 +727,15 @@ fn box_solid(out: &mut Vec<Vertex>, center: Vec3, half: f32, color: Color) {
 
 /// `EdgesGeometry` on a box: the twelve edges as square-section prisms `width`
 /// across, so a `LineSegments` becomes triangles.
-fn edge_box(out: &mut Vec<Vertex>, center: Vec3, half: f32, width: f32, color: Color) {
+/// The cube's outline, with the edges that face away from the camera dropped.
+///
+/// The source draws `EdgesGeometry` in a depth-tested line pass, so hidden
+/// edges are occluded by the cube itself; this pass is depth-always, so the
+/// same read is produced by testing each edge's two adjacent face normals
+/// against the view direction and skipping an edge only when both face away.
+fn edge_box(out: &mut Vec<Vertex>, center: Vec3, half: f32, width: f32, color: Color, eye: Vec3) {
     let t = width * 0.5;
+    let to_eye = (eye - center).normalize_or_zero();
     for axis in 0..3 {
         let along = match axis {
             0 => Vec3::X,
@@ -737,6 +745,12 @@ fn edge_box(out: &mut Vec<Vertex>, center: Vec3, half: f32, width: f32, color: C
         let (u, v) = frame(along);
         for su in [-1.0f32, 1.0] {
             for sv in [-1.0f32, 1.0] {
+                // This edge sits where the `u * su` and `v * sv` faces meet; it
+                // is hidden only when both of those faces point away.
+                let visible = (u * su).dot(to_eye) > 0.0 || (v * sv).dot(to_eye) > 0.0;
+                if !visible {
+                    continue;
+                }
                 let offset = (u * su + v * sv) * (half - t);
                 let a = center + offset - along * half;
                 let b = center + offset + along * half;
