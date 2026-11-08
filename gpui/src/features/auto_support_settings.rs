@@ -2198,17 +2198,24 @@ fn footer_save_button(
         el.on_click(move |_, _, cx| {
                 edit(|state| {
                     // `commitAutoSupportSettings`: the draft becomes the live
-                    // block, and the active preset is written with it when the
-                    // two differ (a built-in is refused, hence Save is disabled).
+                    // block, and the active preset is written with it only when
+                    // the two differ — the star has to clear, but a save that
+                    // changed nothing must not look like an edit either. A
+                    // built-in is refused (Save is disabled for one).
                     let draft = state.draft;
                     state.live = draft;
-                    if let Some(active) = state.active.clone() {
-                        if let Some(preset) = state
-                            .presets
-                            .iter_mut()
-                            .find(|preset| preset.id == active && !preset.built_in)
-                        {
-                            preset.settings = draft;
+                    let drifted = state
+                        .active_preset()
+                        .is_some_and(|preset| !preset.built_in && policy_differs(&preset.settings, &draft));
+                    if drifted {
+                        if let Some(active) = state.active.clone() {
+                            if let Some(preset) = state
+                                .presets
+                                .iter_mut()
+                                .find(|preset| preset.id == active)
+                            {
+                                preset.settings = draft;
+                            }
                         }
                     }
                     state.saved = true;
