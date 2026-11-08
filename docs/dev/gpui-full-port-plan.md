@@ -31,7 +31,7 @@ Each wave ends with a single `cargo check`, build and `--smoke` run, a docs chec
 when docs moved, and one commit. Agents never run cargo themselves; that keeps a
 wave's tree verifiable as a whole instead of piecemeal.
 
-### W0 — foundations
+### W0 — foundations *(done)*
 
 | Crate / change | Purpose |
 |---|---|
@@ -41,12 +41,12 @@ wave's tree verifiable as a whole instead of piecemeal.
 | `widgets/menu.rs` | flyouts, so the editor context menu can have `Repair ▸`, `Supports ▸`, `Geometry ▸` like `ContextMenu.tsx` |
 | UI audit | a ranked list of already-ported UI that is wrong, which W3 executes |
 
-### W1 — data
+### W1 — data *(done)*
 
 VOXL through the load path (models, meshes, supports); `SUPP` into the instanced
 support batches; the settings model in the store; a per-panel punch list.
 
-### W2 — interaction
+### W2 — interaction *(in progress)*
 
 The transform gizmo (`src/components/gizmo`: screen-space handles, move/rotate/
 scale), the viewport's editor context menu (right-click distinguished from
@@ -74,6 +74,23 @@ Port in value order — placement (`autoSupport`, 10k lines), bracing (2.8k),
 bezier shafts (2.2k), export geometry — each gated on **fixture parity**: the TS
 generator emits a mesh plus the support records it produced, and the Rust port
 must reproduce them within tolerance.
+
+## Shipped so far
+
+- **W0**: `gpui-voxl` reads a real scene (v2, 6 chunks, mesh, supports);
+  `gpui-store` persists settings/session/presets atomically with debounce and a
+  newer-schema guard; `gpui-locale` ports the unit formatter (verified against
+  `Intl.NumberFormat`) with an English-literal msgid macro and a PO extractor;
+  `widgets/menu.rs` gained flyouts.
+- **W1**: VOXL through `load_path` (MESH payloads are binary STL, so they use the
+  same refine/AO path as `.stl`); `SUPP` decoded into instanced support batches
+  drawn one call per batch; the settings modal hydrates from the store and
+  snapshots back; the session restores camera, tool, layout and last file; the
+  support rail's tiles now mount their panels, including hollowing.
+
+Known gaps after W1: `--smoke` cannot verify persistence because it calls
+`std::process::exit`, which skips `Drop`; a VOXL model's X/Y rotation is dropped
+(the viewport carries a Z angle only); support picking needs per-instance ids.
 
 ## Decisions
 
