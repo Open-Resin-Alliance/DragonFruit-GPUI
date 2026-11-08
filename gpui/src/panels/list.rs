@@ -158,9 +158,7 @@ const TOOL_RAIL_WIDTH: f32 = 66.0;
 /// The source's `rightInsetPx` while the layer-slider column is shown.
 const LAYER_SLIDER_INSET: f32 = 48.0;
 /// `top-[var(--topbar-height)]` on the stack root.
-/// The source anchors the panel stack at `calc(var(--topbar-height) + 6px)`, so
-/// the cards start 6px below the bar rather than flush against it.
-const STACK_TOP: f32 = TOPBAR_HEIGHT + 6.0;
+const STACK_TOP: f32 = TOPBAR_HEIGHT;
 /// `bottom-0` on the stack root.
 const STACK_BOTTOM: f32 = 0.0;
 /// The dock edge handle is 6px wide in the source.
@@ -264,7 +262,14 @@ fn panel_card(
         None
     };
 
-    let header = card_header_with(title, leading, header_right)
+    // `CardHeader className={collapsible ? undefined : 'py-4'}`: the column's
+    // card has 16px instead of the header's usual 10px, which is the gap above
+    // the + button the bar layout does not show.
+    let mut header = card_header_with(title, leading, header_right);
+    if !collapsible {
+        header = header.py(px(16.0));
+    }
+    header = header
     .on_mouse_down(
         MouseButton::Left,
         move |event: &MouseDownEvent, _: &mut Window, cx: &mut App| {
