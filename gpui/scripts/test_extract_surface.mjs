@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { extractFromSource } from './extract-surface.mjs';
+import { extractFromSource, isSurfaceSourcePath } from './extract-surface.mjs';
 import { checkCoverage, areaTotals, oldestAbsent } from './check-coverage.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -221,4 +221,86 @@ test('area totals and oldest-absent ordering are derived from the ledger', () =>
 
   const oldest = oldestAbsent(ledger, 3).map((row) => row.id);
   assert.deepEqual(oldest, ['a/four', 'a/two', 'b/one']);
+});
+
+// A feature directory holds whole panels that the component tree only mounts
+// (`<OrganicCutPanel />` in PreparePanelStack, `<UpdatesSettingsTab />` in
+// SettingsModal), so walking `src/components` alone captured the mounts and
+// dropped every control inside the bodies.
+test('feature files are in scope and app files other than page.tsx are not', () => {
+  assert.equal(isSurfaceSourcePath('src/features/organicCut/OrganicCutPanel.tsx'), true);
+  assert.equal(isSurfaceSourcePath('src/features/slicing/components/SlicingPanel.tsx'), true);
+  assert.equal(isSurfaceSourcePath('src/features/updater/UpdatesSettingsTab.tsx'), true);
+  assert.equal(isSurfaceSourcePath('src/components/settings/PerformanceSettingsTab.tsx'), true);
+  assert.equal(isSurfaceSourcePath('src/app/page.tsx'), true);
+
+  assert.equal(isSurfaceSourcePath('src/app/layout.tsx'), false, 'only page.tsx is in scope under src/app');
+  assert.equal(isSurfaceSourcePath('src/supports/Settings/SupportSidebar.tsx'), false, 'src/supports is out of scope');
+  assert.equal(isSurfaceSourcePath('src/features/organicCut/types.ts'), false, 'only .tsx is parsed');
+  assert.equal(isSurfaceSourcePath('src/features/organicCut/OrganicCutPanel.test.tsx'), false);
+  assert.equal(isSurfaceSourcePath('src/features/organicCut/OrganicCutPanel.dom-test.tsx'), false);
+  assert.equal(isSurfaceSourcePath('src/features/organicCut/OrganicCutPanel.stories.tsx'), false);
+  assert.equal(isSurfaceSourcePath('src/features/organicCut/__tests__/OrganicCutPanel.dom-test.tsx'), false);
+});
+
+// The four gaps were file-discovery, not traversal: each wrapper shape below
+// already reaches its controls. The fixture pins that so a future traversal
+// change cannot silently start dropping them.
+const WRAPPER_FIXTURE = `
+export default function DefaultExport() {
+  return (
+    <div>
+      <button onClick={go}>Default Go</button>
+    </div>
+  );
+}
+
+export function TypedReturn(): JSX.Element {
+  return (
+    <div>
+      <button onClick={go}>Typed Go</button>
+    </div>
+  );
+}
+
+export const Memoized = memo(
+  forwardRef((props: Props, ref: Ref<HTMLElement>) => (
+    <div>
+      <button onClick={go}>Memo Go</button>
+    </div>
+  )),
+);
+
+export function ConditionalMount({ open }: { open: boolean }) {
+  const body = open ? <SettingsTab title="Conditional Tab" /> : null;
+  return <div>{body}</div>;
+}
+`;
+
+test('default exports, typed returns, memo/forwardRef wrappers and conditional mounts keep their controls', () => {
+  const { rows } = extractFromSource(WRAPPER_FIXTURE, 'src/components/fixtures/Wrappers.tsx');
+  const ids = rows.map((row) => row.id).sort();
+  assert.deepEqual(ids, ['fixtures/conditional-tab', 'fixtures/default-go', 'fixtures/memo-go', 'fixtures/typed-go']);
+
+  const tab = byId(rows, 'fixtures/conditional-tab');
+  assert.equal(tab.kind, 'tab');
+  assert.ok(tab.gates.includes('when:open'), `gates: ${tab.gates.join(', ')}`);
+});
+
+test('a feature panel is named for its feature, not for its leaf directory', () => {
+  const source = `
+export function SlicingPanel() {
+  return (
+    <div>
+      <button onClick={sliceAll}>Slice All</button>
+    </div>
+  );
+}
+`;
+  const { rows } = extractFromSource(source, 'src/features/slicing/components/SlicingPanel.tsx');
+  assert.deepEqual(
+    rows.map((row) => row.id),
+    ['slicing/slice-all'],
+  );
+  assert.equal(rows[0].source, 'src/features/slicing/components/SlicingPanel.tsx:5');
 });

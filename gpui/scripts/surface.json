@@ -2,6 +2,7 @@
   "generatedBy": "gpui/scripts/extract-surface.mjs",
   "roots": [
     "src/components/**/*.tsx",
+    "src/features/**/*.tsx",
     "src/app/page.tsx"
   ],
   "skipped": [
@@ -18,7 +19,25 @@
     "src/components/scene/__tests__/ (directory)",
     "src/components/scene/camera/__tests__/ (directory)",
     "src/components/settings/materialAaSupportAdjustments.test.tsx",
-    "src/components/ui/__tests__/ (directory)"
+    "src/components/ui/__tests__/ (directory)",
+    "src/features/experiments/__tests__/ (directory)",
+    "src/features/export/logic/__tests__/ (directory)",
+    "src/features/hole-punching/__tests__/ (directory)",
+    "src/features/hollowing/__tests__/ (directory)",
+    "src/features/import-export/__tests__/ (directory)",
+    "src/features/mesh-modifiers/__tests__/ (directory)",
+    "src/features/mirror/__tests__/ (directory)",
+    "src/features/organicCut/__tests__/ (directory)",
+    "src/features/plugins/__tests__/ (directory)",
+    "src/features/printing/__tests__/ (directory)",
+    "src/features/profiles/__tests__/ (directory)",
+    "src/features/scene/__tests__/ (directory)",
+    "src/features/scene/arrange/__tests__/ (directory)",
+    "src/features/scene/plates/__tests__/ (directory)",
+    "src/features/scene/voxl/__tests__/ (directory)",
+    "src/features/slicing/__tests__/ (directory)",
+    "src/features/slicing/formats/__tests__/ (directory)",
+    "src/features/slicing/tauri/__tests__/ (directory)"
   ],
   "collisions": [
     {
@@ -3596,11 +3615,331 @@
       "second": "src/components/ui/scrollableNumberField.tsx:228",
       "label": "stepBy",
       "kind": "button"
+    },
+    {
+      "id": "export/pick-a-model-to-export",
+      "resolved": "export/pick-a-model-to-export--exportpanel",
+      "first": "src/features/export/components/ExportPanel.tsx:579",
+      "second": "src/features/export/components/ExportPanel.tsx:650",
+      "label": "Pick a model to export.",
+      "kind": "container"
+    },
+    {
+      "id": "export/setoptions",
+      "resolved": "export/setoptions--exportpanel",
+      "first": "src/features/export/components/ExportPanel.tsx:659",
+      "second": "src/features/export/components/ExportPanel.tsx:677",
+      "label": "setOptions",
+      "kind": "button"
+    },
+    {
+      "id": "export/setoptions",
+      "resolved": "export/setoptions--exportpanel-2",
+      "first": "src/features/export/components/ExportPanel.tsx:659",
+      "second": "src/features/export/components/ExportPanel.tsx:722",
+      "label": "setOptions",
+      "kind": "toggle"
+    },
+    {
+      "id": "export/setoptions",
+      "resolved": "export/setoptions--exportpanel-3",
+      "first": "src/features/export/components/ExportPanel.tsx:659",
+      "second": "src/features/export/components/ExportPanel.tsx:729",
+      "label": "setOptions",
+      "kind": "toggle"
+    },
+    {
+      "id": "export/setoptions",
+      "resolved": "export/setoptions--exportpanel-4",
+      "first": "src/features/export/components/ExportPanel.tsx:659",
+      "second": "src/features/export/components/ExportPanel.tsx:736",
+      "label": "setOptions",
+      "kind": "toggle"
+    },
+    {
+      "id": "hollowing/voxel-size",
+      "resolved": "hollowing/voxel-size--hollowingpanel",
+      "first": "src/features/hollowing/HollowingPanel.tsx:173",
+      "second": "src/features/hollowing/HollowingPanel.tsx:175",
+      "label": "Voxel Size",
+      "kind": "component"
+    },
+    {
+      "id": "hollowing/solid-areas",
+      "resolved": "hollowing/solid-areas--hollowingpanel",
+      "first": "src/features/hollowing/HollowingPanel.tsx:136",
+      "second": "src/features/hollowing/HollowingPanel.tsx:349",
+      "label": "Solid Areas",
+      "kind": "button"
+    },
+    {
+      "id": "mesh-smoothing/updatemeshsmoothingsettings",
+      "resolved": "mesh-smoothing/updatemeshsmoothingsettings--meshsmoothingsettingspanel",
+      "first": "src/features/mesh-smoothing/MeshSmoothingSettingsPanel.tsx:104",
+      "second": "src/features/mesh-smoothing/MeshSmoothingSettingsPanel.tsx:114",
+      "label": "updateMeshSmoothingSettings",
+      "kind": "input"
+    },
+    {
+      "id": "mesh-smoothing/updatemeshsmoothingsettings",
+      "resolved": "mesh-smoothing/updatemeshsmoothingsettings--meshsmoothingsettingspanel-2",
+      "first": "src/features/mesh-smoothing/MeshSmoothingSettingsPanel.tsx:104",
+      "second": "src/features/mesh-smoothing/MeshSmoothingSettingsPanel.tsx:125",
+      "label": "updateMeshSmoothingSettings",
+      "kind": "input"
+    },
+    {
+      "id": "mesh-smoothing/updatemeshsmoothingsettings",
+      "resolved": "mesh-smoothing/updatemeshsmoothingsettings--meshsmoothingsettingspanel-3",
+      "first": "src/features/mesh-smoothing/MeshSmoothingSettingsPanel.tsx:104",
+      "second": "src/features/mesh-smoothing/MeshSmoothingSettingsPanel.tsx:137",
+      "label": "updateMeshSmoothingSettings",
+      "kind": "button"
+    },
+    {
+      "id": "mesh-smoothing/updatemeshsmoothingsettings",
+      "resolved": "mesh-smoothing/updatemeshsmoothingsettings--meshsmoothingsettingspanel-4",
+      "first": "src/features/mesh-smoothing/MeshSmoothingSettingsPanel.tsx:104",
+      "second": "src/features/mesh-smoothing/MeshSmoothingSettingsPanel.tsx:189",
+      "label": "updateMeshSmoothingSettings",
+      "kind": "component"
+    },
+    {
+      "id": "mirror/no-render",
+      "resolved": "mirror/no-render--mirrorarrow",
+      "first": "src/features/mirror/MirrorTool.tsx:11",
+      "second": "src/features/mirror/components/MirrorArrow.tsx:166",
+      "label": "(no render)",
+      "kind": "empty-state"
+    },
+    {
+      "id": "organicCut/set",
+      "resolved": "organicCut/set--organiccutcolorssection",
+      "first": "src/features/organicCut/OrganicCutColorsSection.tsx:77",
+      "second": "src/features/organicCut/OrganicCutColorsSection.tsx:82",
+      "label": "set",
+      "kind": "input"
+    },
+    {
+      "id": "organicCut/no-render",
+      "resolved": "organicCut/no-render--organiccuttenongizmomount",
+      "first": "src/features/organicCut/CutLeakPins.tsx:153",
+      "second": "src/features/organicCut/OrganicCutMounts.tsx:99",
+      "label": "(no render)",
+      "kind": "empty-state"
+    },
+    {
+      "id": "organicCut/no-render",
+      "resolved": "organicCut/no-render--organiccutpanel",
+      "first": "src/features/organicCut/CutLeakPins.tsx:153",
+      "second": "src/features/organicCut/OrganicCutPanel.tsx:618",
+      "label": "(no render)",
+      "kind": "empty-state"
+    },
+    {
+      "id": "organicCut/surface",
+      "resolved": "organicCut/surface--organiccutpanel",
+      "first": "src/features/organicCut/OrganicCutPanel.tsx:662",
+      "second": "src/features/organicCut/OrganicCutPanel.tsx:830",
+      "label": "+",
+      "kind": "button"
+    },
+    {
+      "id": "organicCut/no-render",
+      "resolved": "organicCut/no-render--organiccuttenongizmo",
+      "first": "src/features/organicCut/CutLeakPins.tsx:153",
+      "second": "src/features/organicCut/OrganicCutTenonGizmo.tsx:500",
+      "label": "(no render)",
+      "kind": "empty-state"
+    },
+    {
+      "id": "organicCut/no-render",
+      "resolved": "organicCut/no-render--organiccuttool",
+      "first": "src/features/organicCut/CutLeakPins.tsx:153",
+      "second": "src/features/organicCut/OrganicCutTool.tsx:899",
+      "label": "(no render)",
+      "kind": "empty-state"
+    },
+    {
+      "id": "placeOnFace/no-render",
+      "resolved": "placeOnFace/no-render--placeonfaceoverlay",
+      "first": "src/features/placeOnFace/PlaceOnFaceTool.tsx:164",
+      "second": "src/features/placeOnFace/components/PlaceOnFaceOverlay.tsx:21",
+      "label": "(no render)",
+      "kind": "empty-state"
+    },
+    {
+      "id": "placeOnFace/no-render",
+      "resolved": "placeOnFace/no-render--planepolygon",
+      "first": "src/features/placeOnFace/PlaceOnFaceTool.tsx:164",
+      "second": "src/features/placeOnFace/components/PlaceOnFaceOverlay.tsx:88",
+      "label": "(no render)",
+      "kind": "empty-state"
+    },
+    {
+      "id": "printing/sendactionhandler",
+      "resolved": "printing/sendactionhandler--printingpanel",
+      "first": "src/features/printing/components/PrintingPanel.tsx:221",
+      "second": "src/features/printing/components/PrintingPanel.tsx:263",
+      "label": "sendActionHandler",
+      "kind": "button"
+    },
+    {
+      "id": "slicing/edit-selected-curve",
+      "resolved": "slicing/edit-selected-curve--lutcurveselector",
+      "first": "src/features/slicing/components/LutCurveEditor.tsx:634",
+      "second": "src/features/slicing/components/LutCurveEditor.tsx:649",
+      "label": "Edit selected curve",
+      "kind": "button"
+    },
+    {
+      "id": "slicing/cancel",
+      "resolved": "slicing/cancel--lutcurveeditormodal",
+      "first": "src/features/slicing/components/LutCurveEditor.tsx:1495",
+      "second": "src/features/slicing/components/LutCurveEditor.tsx:1638",
+      "label": "Cancel",
+      "kind": "button"
+    },
+    {
+      "id": "slicing/cancel",
+      "resolved": "slicing/cancel--lutcurveeditormodal-2",
+      "first": "src/features/slicing/components/LutCurveEditor.tsx:1495",
+      "second": "src/features/slicing/components/LutCurveEditor.tsx:1732",
+      "label": "Cancel",
+      "kind": "button"
+    },
+    {
+      "id": "slicing/no-render",
+      "resolved": "slicing/no-render--slicemetricsdebugmodal",
+      "first": "src/features/slicing/components/LutCurveEditor.tsx:1156",
+      "second": "src/features/slicing/components/SliceMetricsDebugModal.tsx:108",
+      "label": "(no render)",
+      "kind": "empty-state"
+    },
+    {
+      "id": "slicing/surface",
+      "resolved": "slicing/surface--slicingpanel",
+      "first": "src/features/slicing/components/SlicingPanel.tsx:2401",
+      "second": "src/features/slicing/components/SlicingPanel.tsx:2405",
+      "label": "—",
+      "kind": "container"
+    },
+    {
+      "id": "slicing/the-selected-machine-does-not-support-aa-at-this",
+      "resolved": "slicing/the-selected-machine-does-not-support-aa-at-this--slicingpanel",
+      "first": "src/features/slicing/components/SlicingPanel.tsx:2464",
+      "second": "src/features/slicing/components/SlicingPanel.tsx:2661",
+      "label": "The selected Machine does not support AA at this time.",
+      "kind": "container"
+    },
+    {
+      "id": "slicing/material-anti-aliasing-settings",
+      "resolved": "slicing/material-anti-aliasing-settings--slicingpanel",
+      "first": "src/features/slicing/components/SlicingPanel.tsx:2802",
+      "second": "src/features/slicing/components/SlicingPanel.tsx:2814",
+      "label": "Material Anti-Aliasing Settings",
+      "kind": "container"
+    },
+    {
+      "id": "slicing/cancel",
+      "resolved": "slicing/cancel--slicingpanel",
+      "first": "src/features/slicing/components/LutCurveEditor.tsx:1495",
+      "second": "src/features/slicing/components/SlicingPanel.tsx:2845",
+      "label": "Cancel",
+      "kind": "button"
+    },
+    {
+      "id": "slicing/session-anti-aliasing-override",
+      "resolved": "slicing/session-anti-aliasing-override--slicingpanel",
+      "first": "src/features/slicing/components/SlicingPanel.tsx:2874",
+      "second": "src/features/slicing/components/SlicingPanel.tsx:2886",
+      "label": "Session Anti-Aliasing Override",
+      "kind": "container"
+    },
+    {
+      "id": "slicing/cancel",
+      "resolved": "slicing/cancel--slicingpanel-2",
+      "first": "src/features/slicing/components/LutCurveEditor.tsx:1495",
+      "second": "src/features/slicing/components/SlicingPanel.tsx:2935",
+      "label": "Cancel",
+      "kind": "button"
+    },
+    {
+      "id": "slicing/surface",
+      "resolved": "slicing/surface--slicingpanel-2",
+      "first": "src/features/slicing/components/SlicingPanel.tsx:2401",
+      "second": "src/features/slicing/components/SlicingPanel.tsx:3047",
+      "label": "%",
+      "kind": "container"
+    },
+    {
+      "id": "slicing/cancel",
+      "resolved": "slicing/cancel--slicingpanel-3",
+      "first": "src/features/slicing/components/LutCurveEditor.tsx:1495",
+      "second": "src/features/slicing/components/SlicingPanel.tsx:3111",
+      "label": "Cancel",
+      "kind": "button"
+    },
+    {
+      "id": "slicing/cancel",
+      "resolved": "slicing/cancel--slicingpanel-4",
+      "first": "src/features/slicing/components/LutCurveEditor.tsx:1495",
+      "second": "src/features/slicing/components/SlicingPanel.tsx:3150",
+      "label": "Cancel",
+      "kind": "button"
+    },
+    {
+      "id": "support-blockers/no-render",
+      "resolved": "support-blockers/no-render--supportblockeroverlay",
+      "first": "src/features/support-blockers/SupportBlockerCursor.tsx:54",
+      "second": "src/features/support-blockers/SupportBlockerOverlay.tsx:77",
+      "label": "(no render)",
+      "kind": "empty-state"
+    },
+    {
+      "id": "updater/check-for-updates",
+      "resolved": "updater/check-for-updates--availablestate",
+      "first": "src/features/updater/UpdateCheckerSection.tsx:75",
+      "second": "src/features/updater/UpdateCheckerSection.tsx:215",
+      "label": "Check for Updates",
+      "kind": "button"
+    },
+    {
+      "id": "updater/install",
+      "resolved": "updater/install--availablestate",
+      "first": "src/features/updater/UpdateCheckerSection.tsx:84",
+      "second": "src/features/updater/UpdateCheckerSection.tsx:240",
+      "label": "Install",
+      "kind": "button"
+    },
+    {
+      "id": "updater/release-channel-settings",
+      "resolved": "updater/release-channel-settings--updatessettingstab",
+      "first": "src/features/updater/UpdatesSettingsTab.tsx:66",
+      "second": "src/features/updater/UpdatesSettingsTab.tsx:82",
+      "label": "Release channel settings",
+      "kind": "modal"
+    },
+    {
+      "id": "updater/cancel",
+      "resolved": "updater/cancel--updatessettingstab",
+      "first": "src/features/updater/UpdateCheckerSection.tsx:261",
+      "second": "src/features/updater/UpdatesSettingsTab.tsx:93",
+      "label": "Cancel",
+      "kind": "button"
+    },
+    {
+      "id": "updater/development-previews",
+      "resolved": "updater/development-previews--updatessettingstab",
+      "first": "src/features/updater/UpdatesSettingsTab.tsx:144",
+      "second": "src/features/updater/UpdatesSettingsTab.tsx:165",
+      "label": "Development Previews",
+      "kind": "container"
     }
   ],
   "diagnostics": [],
   "counts": {
-    "total": 1865,
+    "total": 2130,
     "byArea": {
       "SceneCanvas": 37,
       "app": 30,
@@ -3608,33 +3947,44 @@
       "autoSupport": 39,
       "controls": 248,
       "debug": 16,
+      "export": 21,
       "gizmo": 1,
+      "hole-punching": 14,
+      "hollowing": 26,
       "layout": 64,
+      "mesh-smoothing": 13,
       "meshSettings": 4,
+      "mirror": 3,
       "modals": 281,
+      "organicCut": 39,
       "organisms": 14,
       "panels": 104,
+      "placeOnFace": 5,
       "printers": 19,
+      "printing": 15,
       "rotate": 1,
       "scene": 50,
       "selection": 1,
       "settings": 924,
-      "ui": 27
+      "slicing": 109,
+      "support-blockers": 2,
+      "ui": 27,
+      "updater": 18
     },
     "byKind": {
-      "button": 577,
-      "component": 146,
-      "container": 590,
-      "empty-state": 48,
-      "input": 256,
+      "button": 687,
+      "component": 182,
+      "container": 662,
+      "empty-state": 63,
+      "input": 265,
       "link": 1,
-      "modal": 111,
+      "modal": 124,
       "notification": 11,
       "panel": 20,
-      "popover": 65,
-      "select": 16,
-      "tab": 20,
-      "toggle": 4
+      "popover": 68,
+      "select": 18,
+      "tab": 22,
+      "toggle": 7
     }
   },
   "rows": [
@@ -7245,6 +7595,209 @@
       "gates": []
     },
     {
+      "id": "export/export-format",
+      "source": "src/features/export/components/ExportPanel.tsx:656",
+      "kind": "container",
+      "label": "Export format",
+      "action": "conditional:isExpanded && !(exportScope === 'active_model' && !activeModel)",
+      "gates": [
+        "when:isExpanded && !(exportScope === 'active_model' && !activeModel)"
+      ]
+    },
+    {
+      "id": "export/export-layout",
+      "source": "src/features/export/components/ExportPanel.tsx:696",
+      "kind": "container",
+      "label": "Export layout",
+      "action": "conditional:isExpanded && !(exportScope === 'active_model' && !activeModel)",
+      "gates": [
+        "when:isExpanded && !(exportScope === 'active_model' && !activeModel)"
+      ]
+    },
+    {
+      "id": "export/export-plates",
+      "source": "src/features/export/components/ExportPanel.tsx:621",
+      "kind": "container",
+      "label": "Export plates",
+      "action": "conditional:isExpanded && (plateGroups?.length ?? 0) > 1",
+      "gates": [
+        "when:isExpanded && (plateGroups?.length ?? 0) > 1"
+      ]
+    },
+    {
+      "id": "export/export-scope",
+      "source": "src/features/export/components/ExportPanel.tsx:581",
+      "kind": "container",
+      "label": "Export scope",
+      "action": "conditional:isExpanded",
+      "gates": [
+        "when:isExpanded"
+      ]
+    },
+    {
+      "id": "export/exporting",
+      "source": "src/features/export/components/ExportPanel.tsx:746",
+      "kind": "button",
+      "label": "Exporting…",
+      "action": "onClick:handleExport",
+      "gates": [
+        "when:isExpanded && !(exportScope === 'active_model' && !activeModel)",
+        "disabled:isAnyExportInProgress || (options.includeModel && scopeModels.length …"
+      ]
+    },
+    {
+      "id": "export/include-model-mesh",
+      "source": "src/features/export/components/ExportPanel.tsx:721",
+      "kind": "component",
+      "label": "Include Model Mesh",
+      "action": "conditional:isExpanded && !(exportScope === 'active_model' && !activeModel) && op…",
+      "gates": [
+        "when:isExpanded && !(exportScope === 'active_model' && !activeModel) && options.format !== 'voxl'"
+      ]
+    },
+    {
+      "id": "export/include-raft",
+      "source": "src/features/export/components/ExportPanel.tsx:735",
+      "kind": "component",
+      "label": "Include Raft",
+      "action": "conditional:isExpanded && !(exportScope === 'active_model' && !activeModel) && op…",
+      "gates": [
+        "when:isExpanded && !(exportScope === 'active_model' && !activeModel) && options.format !== 'voxl'"
+      ]
+    },
+    {
+      "id": "export/include-supports",
+      "source": "src/features/export/components/ExportPanel.tsx:728",
+      "kind": "component",
+      "label": "Include Supports",
+      "action": "conditional:isExpanded && !(exportScope === 'active_model' && !activeModel) && op…",
+      "gates": [
+        "when:isExpanded && !(exportScope === 'active_model' && !activeModel) && options.format !== 'voxl'"
+      ]
+    },
+    {
+      "id": "export/model-to-export",
+      "source": "src/features/export/components/ExportPanel.tsx:599",
+      "kind": "select",
+      "label": "Model to export",
+      "action": "onChange:onActiveModelChange",
+      "gates": [
+        "when:isExpanded && exportScope === 'active_model'"
+      ]
+    },
+    {
+      "id": "export/no-meshes-loaded-yet-import-a-model-first-then-h",
+      "source": "src/features/export/components/ExportPanel.tsx:537",
+      "kind": "container",
+      "label": "No meshes loaded yet. Import a model first, then hop back to Export.",
+      "action": "conditional:models.length === 0 && isExpanded",
+      "gates": [
+        "when:models.length === 0 && isExpanded"
+      ]
+    },
+    {
+      "id": "export/pick-a-model-to-export",
+      "source": "src/features/export/components/ExportPanel.tsx:579",
+      "kind": "container",
+      "label": "Pick a model to export.",
+      "action": "conditional:isExpanded",
+      "gates": [
+        "when:isExpanded"
+      ]
+    },
+    {
+      "id": "export/pick-a-model-to-export--exportpanel",
+      "source": "src/features/export/components/ExportPanel.tsx:650",
+      "kind": "container",
+      "label": "Pick a model to export.",
+      "action": "conditional:isExpanded && exportScope === 'active_model' && !activeModel",
+      "gates": [
+        "when:isExpanded && exportScope === 'active_model' && !activeModel"
+      ]
+    },
+    {
+      "id": "export/setexportlayout",
+      "source": "src/features/export/components/ExportPanel.tsx:704",
+      "kind": "button",
+      "label": "setExportLayout",
+      "action": "onClick:setExportLayout",
+      "gates": []
+    },
+    {
+      "id": "export/setexportscope",
+      "source": "src/features/export/components/ExportPanel.tsx:583",
+      "kind": "button",
+      "label": "setExportScope",
+      "action": "onClick:setExportScope",
+      "gates": []
+    },
+    {
+      "id": "export/setoptions",
+      "source": "src/features/export/components/ExportPanel.tsx:659",
+      "kind": "button",
+      "label": "setOptions",
+      "action": "onClick:setOptions",
+      "gates": []
+    },
+    {
+      "id": "export/setoptions--exportpanel",
+      "source": "src/features/export/components/ExportPanel.tsx:677",
+      "kind": "button",
+      "label": "setOptions",
+      "action": "onClick:setOptions",
+      "gates": []
+    },
+    {
+      "id": "export/setoptions--exportpanel-2",
+      "source": "src/features/export/components/ExportPanel.tsx:722",
+      "kind": "toggle",
+      "label": "setOptions",
+      "action": "onChange:setOptions",
+      "gates": [
+        "when:isExpanded && !(exportScope === 'active_model' && !activeModel) && options.format !== 'voxl'"
+      ]
+    },
+    {
+      "id": "export/setoptions--exportpanel-3",
+      "source": "src/features/export/components/ExportPanel.tsx:729",
+      "kind": "toggle",
+      "label": "setOptions",
+      "action": "onChange:setOptions",
+      "gates": [
+        "when:isExpanded && !(exportScope === 'active_model' && !activeModel) && options.format !== 'voxl'"
+      ]
+    },
+    {
+      "id": "export/setoptions--exportpanel-4",
+      "source": "src/features/export/components/ExportPanel.tsx:736",
+      "kind": "toggle",
+      "label": "setOptions",
+      "action": "onChange:setOptions",
+      "gates": [
+        "when:isExpanded && !(exportScope === 'active_model' && !activeModel) && options.format !== 'voxl'"
+      ]
+    },
+    {
+      "id": "export/setplatescope",
+      "source": "src/features/export/components/ExportPanel.tsx:629",
+      "kind": "button",
+      "label": "setPlateScope",
+      "action": "onClick:setPlateScope",
+      "gates": [
+        "disabled:isPlateScopeInert"
+      ]
+    },
+    {
+      "id": "export/stl-encoding",
+      "source": "src/features/export/components/ExportPanel.tsx:674",
+      "kind": "container",
+      "label": "STL encoding",
+      "action": "conditional:isExpanded && !(exportScope === 'active_model' && !activeModel) && op…",
+      "gates": [
+        "when:isExpanded && !(exportScope === 'active_model' && !activeModel) && options.format === 'stl'"
+      ]
+    },
+    {
       "id": "gizmo/no-render",
       "source": "src/components/gizmo/TransformGizmo.tsx:496",
       "kind": "empty-state",
@@ -7253,6 +7806,429 @@
       "gates": [
         "when:!visible",
         "early-return:!visible"
+      ]
+    },
+    {
+      "id": "hole-punching/applying-apply",
+      "source": "src/features/hole-punching/HolePunchPanel.tsx:244",
+      "kind": "button",
+      "label": "Applying… / Apply",
+      "action": "onClick:onApply",
+      "gates": [
+        "when:expanded",
+        "disabled:disabled || isApplying || !canApply"
+      ]
+    },
+    {
+      "id": "hole-punching/auto",
+      "source": "src/features/hole-punching/HolePunchPanel.tsx:116",
+      "kind": "button",
+      "label": "Auto",
+      "action": "onClick:setState",
+      "gates": [
+        "when:expanded",
+        "disabled:disabled || isApplying || !canUseAutoDepth"
+      ]
+    },
+    {
+      "id": "hole-punching/depth-mode",
+      "source": "src/features/hole-punching/HolePunchPanel.tsx:114",
+      "kind": "container",
+      "label": "Depth Mode",
+      "action": "conditional:expanded",
+      "gates": [
+        "when:expanded"
+      ]
+    },
+    {
+      "id": "hole-punching/event-stoppropagation",
+      "source": "src/features/hole-punching/HolePunchPreviewCylinder.tsx:208",
+      "kind": "component",
+      "label": "event.stopPropagation",
+      "action": "onClick:event.stopPropagation",
+      "gates": [
+        "when:onClick || onHoverStart || onHoverEnd || onPointerDown || onPointerMove || onPointerUp || onPointer…"
+      ]
+    },
+    {
+      "id": "hole-punching/hole-diameter",
+      "source": "src/features/hole-punching/HolePunchPanel.tsx:158",
+      "kind": "container",
+      "label": "Hole Diameter",
+      "action": "conditional:expanded",
+      "gates": [
+        "when:expanded"
+      ]
+    },
+    {
+      "id": "hole-punching/hole-diameter-x-in-millimeters",
+      "source": "src/features/hole-punching/HolePunchPanel.tsx:202",
+      "kind": "component",
+      "label": "Hole diameter X in millimeters",
+      "action": "onChange:clampFloat",
+      "gates": [
+        "when:expanded",
+        "disabled:disabled || isApplying"
+      ]
+    },
+    {
+      "id": "hole-punching/hole-diameter-y-in-millimeters",
+      "source": "src/features/hole-punching/HolePunchPanel.tsx:221",
+      "kind": "component",
+      "label": "Hole diameter Y in millimeters",
+      "action": "onChange:setState",
+      "gates": [
+        "when:expanded",
+        "disabled:disabled || isApplying || linked"
+      ]
+    },
+    {
+      "id": "hole-punching/hole-punch-depth-in-millimeters",
+      "source": "src/features/hole-punching/HolePunchPanel.tsx:143",
+      "kind": "component",
+      "label": "Hole punch depth in millimeters",
+      "action": "onChange:setState",
+      "gates": [
+        "when:expanded && state.depthMode === 'manual'",
+        "disabled:disabled || isApplying"
+      ]
+    },
+    {
+      "id": "hole-punching/interior-view-mode",
+      "source": "src/features/hole-punching/HolePunchPanel.tsx:105",
+      "kind": "container",
+      "label": "Interior View Mode",
+      "action": "conditional:expanded && canUseAutoDepth && interiorViewAvailable",
+      "gates": [
+        "when:expanded && canUseAutoDepth && interiorViewAvailable"
+      ]
+    },
+    {
+      "id": "hole-punching/manual",
+      "source": "src/features/hole-punching/HolePunchPanel.tsx:127",
+      "kind": "button",
+      "label": "Manual",
+      "action": "onClick:setState",
+      "gates": [
+        "when:expanded",
+        "disabled:disabled || isApplying"
+      ]
+    },
+    {
+      "id": "hole-punching/press-x-for-exterior-view-interior-view",
+      "source": "src/features/hole-punching/HolePunchPanel.tsx:106",
+      "kind": "container",
+      "label": "Press X for Exterior View / Interior View",
+      "action": "conditional:expanded && canUseAutoDepth && interiorViewAvailable",
+      "gates": [
+        "when:expanded && canUseAutoDepth && interiorViewAvailable"
+      ]
+    },
+    {
+      "id": "hole-punching/punch-depth",
+      "source": "src/features/hole-punching/HolePunchPanel.tsx:141",
+      "kind": "container",
+      "label": "Punch Depth",
+      "action": "conditional:expanded && state.depthMode === 'manual'",
+      "gates": [
+        "when:expanded && state.depthMode === 'manual'"
+      ]
+    },
+    {
+      "id": "hole-punching/reset",
+      "source": "src/features/hole-punching/HolePunchPanel.tsx:235",
+      "kind": "button",
+      "label": "Reset",
+      "action": "onClick:onReset",
+      "gates": [
+        "when:expanded",
+        "disabled:disabled || isApplying || !canReset"
+      ]
+    },
+    {
+      "id": "hole-punching/unlink-x-and-y-link-x-and-y",
+      "source": "src/features/hole-punching/HolePunchPanel.tsx:160",
+      "kind": "button",
+      "label": "Unlink X and Y / Link X and Y",
+      "action": "onClick:setLinked",
+      "gates": [
+        "when:expanded",
+        "disabled:disabled || isApplying"
+      ]
+    },
+    {
+      "id": "hollowing/applying-solid-areas-done",
+      "source": "src/features/hollowing/HollowingPanel.tsx:304",
+      "kind": "button",
+      "label": "Applying Solid Areas / Done",
+      "action": "onClick:onDoneEdit",
+      "gates": [
+        "when:expanded && isEditMode",
+        "disabled:isApplying || isPreviewing || isApplyingBlockers"
+      ]
+    },
+    {
+      "id": "hollowing/applying-updating-apply",
+      "source": "src/features/hollowing/HollowingPanel.tsx:359",
+      "kind": "button",
+      "label": "Applying… / Updating / Apply",
+      "action": "onClick:onApply",
+      "gates": [
+        "when:expanded && !(isEditMode) && !(isHollowingApplied)",
+        "disabled:isApplying || isPreviewing || !canApply"
+      ]
+    },
+    {
+      "id": "hollowing/cavity",
+      "source": "src/features/hollowing/HollowingPanel.tsx:147",
+      "kind": "button",
+      "label": "Cavity",
+      "action": "onClick:setState",
+      "gates": [
+        "when:expanded && !(isEditMode)",
+        "disabled:isApplying"
+      ]
+    },
+    {
+      "id": "hollowing/clear",
+      "source": "src/features/hollowing/HollowingPanel.tsx:294",
+      "kind": "button",
+      "label": "Clear",
+      "action": "onClick:onClearEdit",
+      "gates": [
+        "when:expanded && isEditMode",
+        "disabled:isApplying || isPreviewing"
+      ]
+    },
+    {
+      "id": "hollowing/click-or-lasso-to-keep-voxels-solid-alt-lasso-to",
+      "source": "src/features/hollowing/HollowingPanel.tsx:137",
+      "kind": "container",
+      "label": "Click or lasso to keep voxels solid, Alt+Lasso to release. Clear",
+      "action": "conditional:expanded && isEditMode",
+      "gates": [
+        "when:expanded && isEditMode"
+      ]
+    },
+    {
+      "id": "hollowing/infill",
+      "source": "src/features/hollowing/HollowingPanel.tsx:158",
+      "kind": "button",
+      "label": "Infill",
+      "action": "onClick:setState",
+      "gates": [
+        "when:expanded && !(isEditMode)",
+        "disabled:isApplying"
+      ]
+    },
+    {
+      "id": "hollowing/infill-diameter",
+      "source": "src/features/hollowing/HollowingPanel.tsx:250",
+      "kind": "container",
+      "label": "Infill Diameter",
+      "action": "conditional:expanded && state.mode === 'infill'",
+      "gates": [
+        "when:expanded && state.mode === 'infill'"
+      ]
+    },
+    {
+      "id": "hollowing/infill-diameter-in-millimeters",
+      "source": "src/features/hollowing/HollowingPanel.tsx:252",
+      "kind": "component",
+      "label": "Infill diameter in millimeters",
+      "action": "onChange:setState",
+      "gates": [
+        "when:expanded && state.mode === 'infill'",
+        "disabled:isApplying"
+      ]
+    },
+    {
+      "id": "hollowing/infill-type",
+      "source": "src/features/hollowing/HollowingPanel.tsx:206",
+      "kind": "container",
+      "label": "Infill Type",
+      "action": "conditional:expanded && state.mode === 'infill'",
+      "gates": [
+        "when:expanded && state.mode === 'infill'"
+      ]
+    },
+    {
+      "id": "hollowing/lattice",
+      "source": "src/features/hollowing/HollowingPanel.tsx:208",
+      "kind": "button",
+      "label": "Lattice",
+      "action": "onClick:setState",
+      "gates": [
+        "when:expanded && state.mode === 'infill'",
+        "disabled:isApplying"
+      ]
+    },
+    {
+      "id": "hollowing/mode",
+      "source": "src/features/hollowing/HollowingPanel.tsx:145",
+      "kind": "container",
+      "label": "Mode",
+      "action": "conditional:expanded && !(isEditMode)",
+      "gates": [
+        "when:expanded && !(isEditMode)"
+      ]
+    },
+    {
+      "id": "hollowing/open-face",
+      "source": "src/features/hollowing/HollowingPanel.tsx:268",
+      "kind": "container",
+      "label": "Open Face",
+      "action": "conditional:expanded && state.mode === 'shell_open_face'",
+      "gates": [
+        "when:expanded && state.mode === 'shell_open_face'"
+      ]
+    },
+    {
+      "id": "hollowing/pillar",
+      "source": "src/features/hollowing/HollowingPanel.tsx:219",
+      "kind": "button",
+      "label": "Pillar",
+      "action": "onClick:setState",
+      "gates": [
+        "when:expanded && state.mode === 'infill'",
+        "disabled:isApplying"
+      ]
+    },
+    {
+      "id": "hollowing/pillar-spacing-infill-density",
+      "source": "src/features/hollowing/HollowingPanel.tsx:233",
+      "kind": "container",
+      "label": "Pillar Spacing / Infill Density",
+      "action": "conditional:expanded && state.mode === 'infill'",
+      "gates": [
+        "when:expanded && state.mode === 'infill'"
+      ]
+    },
+    {
+      "id": "hollowing/pillar-spacing-percent-infill-density-percent",
+      "source": "src/features/hollowing/HollowingPanel.tsx:237",
+      "kind": "component",
+      "label": "Pillar spacing percent / Infill density percent",
+      "action": "onChange:setState",
+      "gates": [
+        "when:expanded && state.mode === 'infill'",
+        "disabled:isApplying"
+      ]
+    },
+    {
+      "id": "hollowing/remove-hollowing",
+      "source": "src/features/hollowing/HollowingPanel.tsx:336",
+      "kind": "button",
+      "label": "Remove Hollowing",
+      "action": "onClick:onReset",
+      "gates": [
+        "when:expanded && !(isEditMode) && isHollowingApplied",
+        "disabled:isApplying || isPreviewing"
+      ]
+    },
+    {
+      "id": "hollowing/remove-hollowing-solid-areas",
+      "source": "src/features/hollowing/HollowingPanel.tsx:321",
+      "kind": "container",
+      "label": "Remove Hollowing / Solid Areas",
+      "action": "conditional:expanded && !(isEditMode)",
+      "gates": [
+        "when:expanded && !(isEditMode)"
+      ]
+    },
+    {
+      "id": "hollowing/reset",
+      "source": "src/features/hollowing/HollowingPanel.tsx:325",
+      "kind": "button",
+      "label": "Reset",
+      "action": "onClick:onResetSettings",
+      "gates": [
+        "when:expanded && !(isEditMode) && isHollowingApplied && canApply",
+        "disabled:isApplying || isPreviewing"
+      ]
+    },
+    {
+      "id": "hollowing/setstate",
+      "source": "src/features/hollowing/HollowingPanel.tsx:270",
+      "kind": "select",
+      "label": "setState",
+      "action": "onChange:setState",
+      "gates": [
+        "when:expanded && state.mode === 'shell_open_face'",
+        "disabled:isApplying"
+      ]
+    },
+    {
+      "id": "hollowing/shell-thickness",
+      "source": "src/features/hollowing/HollowingPanel.tsx:188",
+      "kind": "container",
+      "label": "Shell Thickness",
+      "action": "conditional:expanded",
+      "gates": [
+        "when:expanded"
+      ]
+    },
+    {
+      "id": "hollowing/shell-thickness-in-millimeters",
+      "source": "src/features/hollowing/HollowingPanel.tsx:190",
+      "kind": "component",
+      "label": "Shell thickness in millimeters",
+      "action": "onChange:setState",
+      "gates": [
+        "when:expanded",
+        "disabled:isApplying"
+      ]
+    },
+    {
+      "id": "hollowing/solid-areas",
+      "source": "src/features/hollowing/HollowingPanel.tsx:136",
+      "kind": "container",
+      "label": "Solid Areas",
+      "action": "conditional:expanded && isEditMode",
+      "gates": [
+        "when:expanded && isEditMode"
+      ]
+    },
+    {
+      "id": "hollowing/solid-areas--hollowingpanel",
+      "source": "src/features/hollowing/HollowingPanel.tsx:349",
+      "kind": "button",
+      "label": "Solid Areas",
+      "action": "onClick:onStartEdit",
+      "gates": [
+        "when:expanded && !(isEditMode) && !(isHollowingApplied)",
+        "disabled:isApplying || isPreviewing || !canEdit"
+      ]
+    },
+    {
+      "id": "hollowing/solid-areas-mode",
+      "source": "src/features/hollowing/HollowingPanel.tsx:127",
+      "kind": "container",
+      "label": "Solid Areas / Mode",
+      "action": "conditional:expanded",
+      "gates": [
+        "when:expanded"
+      ]
+    },
+    {
+      "id": "hollowing/voxel-size",
+      "source": "src/features/hollowing/HollowingPanel.tsx:173",
+      "kind": "container",
+      "label": "Voxel Size",
+      "action": "conditional:expanded",
+      "gates": [
+        "when:expanded"
+      ]
+    },
+    {
+      "id": "hollowing/voxel-size--hollowingpanel",
+      "source": "src/features/hollowing/HollowingPanel.tsx:175",
+      "kind": "component",
+      "label": "Voxel Size",
+      "action": "onChange:setState",
+      "gates": [
+        "when:expanded",
+        "disabled:isApplying"
       ]
     },
     {
@@ -7881,6 +8857,135 @@
       ]
     },
     {
+      "id": "mesh-smoothing/269eff",
+      "source": "src/features/mesh-smoothing/MeshSmoothingSettingsPanel.tsx:175",
+      "kind": "input",
+      "label": "#269EFF",
+      "action": "onChange:updateMeshSmoothingSettings",
+      "gates": [
+        "when:expanded"
+      ]
+    },
+    {
+      "id": "mesh-smoothing/brush",
+      "source": "src/features/mesh-smoothing/MeshSmoothingSettingsPanel.tsx:101",
+      "kind": "component",
+      "label": "Brush",
+      "action": "conditional:expanded",
+      "gates": [
+        "when:expanded"
+      ]
+    },
+    {
+      "id": "mesh-smoothing/highlight",
+      "source": "src/features/mesh-smoothing/MeshSmoothingSettingsPanel.tsx:165",
+      "kind": "component",
+      "label": "Highlight",
+      "action": "conditional:expanded",
+      "gates": [
+        "when:expanded"
+      ]
+    },
+    {
+      "id": "mesh-smoothing/iterations",
+      "source": "src/features/mesh-smoothing/MeshSmoothingSettingsPanel.tsx:124",
+      "kind": "container",
+      "label": "Iterations",
+      "action": "conditional:expanded",
+      "gates": [
+        "when:expanded"
+      ]
+    },
+    {
+      "id": "mesh-smoothing/mm",
+      "source": "src/features/mesh-smoothing/MeshSmoothingSettingsPanel.tsx:103",
+      "kind": "container",
+      "label": "mm",
+      "action": "conditional:expanded",
+      "gates": [
+        "when:expanded"
+      ]
+    },
+    {
+      "id": "mesh-smoothing/no-render",
+      "source": "src/features/mesh-smoothing/MeshSmoothingBrushCursor.tsx:156",
+      "kind": "empty-state",
+      "label": "(no render)",
+      "action": "early-return:!hover",
+      "gates": [
+        "when:!hover",
+        "early-return:!hover"
+      ]
+    },
+    {
+      "id": "mesh-smoothing/restore-defaults",
+      "source": "src/features/mesh-smoothing/MeshSmoothingSettingsPanel.tsx:199",
+      "kind": "button",
+      "label": "Restore defaults",
+      "action": "onClick:setMeshSmoothingSettings",
+      "gates": [
+        "when:expanded"
+      ]
+    },
+    {
+      "id": "mesh-smoothing/strength",
+      "source": "src/features/mesh-smoothing/MeshSmoothingSettingsPanel.tsx:113",
+      "kind": "container",
+      "label": "Strength",
+      "action": "conditional:expanded",
+      "gates": [
+        "when:expanded"
+      ]
+    },
+    {
+      "id": "mesh-smoothing/updatemeshsmoothingsettings",
+      "source": "src/features/mesh-smoothing/MeshSmoothingSettingsPanel.tsx:104",
+      "kind": "input",
+      "label": "updateMeshSmoothingSettings",
+      "action": "onChange:updateMeshSmoothingSettings",
+      "gates": [
+        "when:expanded"
+      ]
+    },
+    {
+      "id": "mesh-smoothing/updatemeshsmoothingsettings--meshsmoothingsettingspanel",
+      "source": "src/features/mesh-smoothing/MeshSmoothingSettingsPanel.tsx:114",
+      "kind": "input",
+      "label": "updateMeshSmoothingSettings",
+      "action": "onChange:updateMeshSmoothingSettings",
+      "gates": [
+        "when:expanded"
+      ]
+    },
+    {
+      "id": "mesh-smoothing/updatemeshsmoothingsettings--meshsmoothingsettingspanel-2",
+      "source": "src/features/mesh-smoothing/MeshSmoothingSettingsPanel.tsx:125",
+      "kind": "input",
+      "label": "updateMeshSmoothingSettings",
+      "action": "onChange:updateMeshSmoothingSettings",
+      "gates": [
+        "when:expanded"
+      ]
+    },
+    {
+      "id": "mesh-smoothing/updatemeshsmoothingsettings--meshsmoothingsettingspanel-3",
+      "source": "src/features/mesh-smoothing/MeshSmoothingSettingsPanel.tsx:137",
+      "kind": "button",
+      "label": "updateMeshSmoothingSettings",
+      "action": "onClick:updateMeshSmoothingSettings",
+      "gates": []
+    },
+    {
+      "id": "mesh-smoothing/updatemeshsmoothingsettings--meshsmoothingsettingspanel-4",
+      "source": "src/features/mesh-smoothing/MeshSmoothingSettingsPanel.tsx:189",
+      "kind": "component",
+      "label": "updateMeshSmoothingSettings",
+      "action": "onChange:updateMeshSmoothingSettings",
+      "gates": [
+        "when:expanded"
+      ]
+    },
+    {
       "id": "meshSettings/event-stoppropagation",
       "source": "src/components/settings/meshSettings/MeshShaderPreviewCanvas.tsx:145",
       "kind": "component",
@@ -7918,6 +9023,36 @@
       "action": "onClick:event.stopPropagation",
       "gates": [
         "when:!(shaderType === 'opaque_wire_mesh')"
+      ]
+    },
+    {
+      "id": "mirror/handlemirrorclick",
+      "source": "src/features/mirror/components/MirrorHandles.tsx:112",
+      "kind": "component",
+      "label": "handleMirrorClick",
+      "action": "onClick:handleMirrorClick",
+      "gates": []
+    },
+    {
+      "id": "mirror/no-render",
+      "source": "src/features/mirror/MirrorTool.tsx:11",
+      "kind": "empty-state",
+      "label": "(no render)",
+      "action": "early-return:!activeModelId",
+      "gates": [
+        "when:!activeModelId",
+        "early-return:!activeModelId"
+      ]
+    },
+    {
+      "id": "mirror/no-render--mirrorarrow",
+      "source": "src/features/mirror/components/MirrorArrow.tsx:166",
+      "kind": "empty-state",
+      "label": "(no render)",
+      "action": "early-return:isHidden",
+      "gates": [
+        "when:isHidden",
+        "early-return:isHidden"
       ]
     },
     {
@@ -10621,6 +11756,415 @@
       ]
     },
     {
+      "id": "organicCut/center",
+      "source": "src/features/organicCut/OrganicCutPanel.tsx:624",
+      "kind": "button",
+      "label": "Center",
+      "action": "onClick:setState",
+      "gates": [
+        "disabled:disabled || isApplying"
+      ]
+    },
+    {
+      "id": "organicCut/clear-all",
+      "source": "src/features/organicCut/OrganicCutPanel.tsx:881",
+      "kind": "button",
+      "label": "Clear All",
+      "action": "onClick:onClearLoop",
+      "gates": [
+        "when:expanded",
+        "disabled:disabled || isApplying || !loopSummaries.some((s) => s.pointCount > 0)"
+      ]
+    },
+    {
+      "id": "organicCut/contour",
+      "source": "src/features/organicCut/OrganicCutPanel.tsx:448",
+      "kind": "button",
+      "label": "Contour",
+      "action": "onClick:setState",
+      "gates": [
+        "when:expanded",
+        "disabled:disabled || isApplying"
+      ]
+    },
+    {
+      "id": "organicCut/cut-mesh-resolution-multiplier-applied-at-cut",
+      "source": "src/features/organicCut/OrganicCutPanel.tsx:524",
+      "kind": "component",
+      "label": "Cut mesh resolution multiplier (applied at cut)",
+      "action": "onChange:setState",
+      "gates": [
+        "when:expanded && isContour",
+        "disabled:disabled || isApplying"
+      ]
+    },
+    {
+      "id": "organicCut/cut-mode",
+      "source": "src/features/organicCut/OrganicCutPanel.tsx:446",
+      "kind": "container",
+      "label": "Cut Mode",
+      "action": "conditional:expanded",
+      "gates": [
+        "when:expanded"
+      ]
+    },
+    {
+      "id": "organicCut/cut-surface-smoothing-strength",
+      "source": "src/features/organicCut/OrganicCutPanel.tsx:511",
+      "kind": "component",
+      "label": "Cut surface smoothing strength",
+      "action": "onChange:setState",
+      "gates": [
+        "when:expanded && isContour",
+        "disabled:disabled || isApplying"
+      ]
+    },
+    {
+      "id": "organicCut/cutting-cut",
+      "source": "src/features/organicCut/OrganicCutPanel.tsx:891",
+      "kind": "button",
+      "label": "Cutting... / Cut",
+      "action": "onClick:onApply",
+      "gates": [
+        "when:expanded",
+        "disabled:disabled || isApplying || !canApply || tenonBlocksCut"
+      ]
+    },
+    {
+      "id": "organicCut/dome",
+      "source": "src/features/organicCut/OrganicCutPanel.tsx:585",
+      "kind": "button",
+      "label": "Dome",
+      "action": "onClick:setState",
+      "gates": [
+        "when:expanded",
+        "disabled:disabled || isApplying || !canApply"
+      ]
+    },
+    {
+      "id": "organicCut/flat",
+      "source": "src/features/organicCut/OrganicCutPanel.tsx:459",
+      "kind": "button",
+      "label": "Flat",
+      "action": "onClick:setState",
+      "gates": [
+        "when:expanded",
+        "disabled:disabled || isApplying"
+      ]
+    },
+    {
+      "id": "organicCut/flip-tenon",
+      "source": "src/features/organicCut/OrganicCutPanel.tsx:731",
+      "kind": "button",
+      "label": "Flip Tenon",
+      "action": "onClick:setState",
+      "gates": [
+        "when:expanded && state.generateTenon",
+        "disabled:disabled || isApplying"
+      ]
+    },
+    {
+      "id": "organicCut/frustum",
+      "source": "src/features/organicCut/OrganicCutPanel.tsx:559",
+      "kind": "button",
+      "label": "Frustum",
+      "action": "onClick:setState",
+      "gates": [
+        "when:expanded",
+        "disabled:disabled || isApplying || !canApply"
+      ]
+    },
+    {
+      "id": "organicCut/handlelineclick",
+      "source": "src/features/organicCut/OrganicCutTool.tsx:926",
+      "kind": "component",
+      "label": "handleLineClick",
+      "action": "onClick:handleLineClick",
+      "gates": [
+        "when:seamTubes && onLineHoverChange"
+      ]
+    },
+    {
+      "id": "organicCut/how-to-use-split",
+      "source": "src/features/organicCut/OrganicCutPanel.tsx:397",
+      "kind": "button",
+      "label": "How to use Split",
+      "action": "renders:button",
+      "gates": []
+    },
+    {
+      "id": "organicCut/joint-clearance-in-millimeters",
+      "source": "src/features/organicCut/OrganicCutPanel.tsx:495",
+      "kind": "component",
+      "label": "Joint clearance in millimeters",
+      "action": "onChange:setState",
+      "gates": [
+        "when:expanded",
+        "disabled:disabled || isApplying"
+      ]
+    },
+    {
+      "id": "organicCut/loops",
+      "source": "src/features/organicCut/OrganicCutPanel.tsx:790",
+      "kind": "container",
+      "label": "Loops (",
+      "action": "conditional:expanded && isContour",
+      "gates": [
+        "when:expanded && isContour"
+      ]
+    },
+    {
+      "id": "organicCut/no-render",
+      "source": "src/features/organicCut/CutLeakPins.tsx:153",
+      "kind": "empty-state",
+      "label": "(no render)",
+      "action": "early-return:points.length === 0",
+      "gates": [
+        "when:points.length === 0",
+        "early-return:points.length === 0"
+      ]
+    },
+    {
+      "id": "organicCut/no-render--organiccutpanel",
+      "source": "src/features/organicCut/OrganicCutPanel.tsx:618",
+      "kind": "empty-state",
+      "label": "(no render)",
+      "action": "early-return:!state.tenonAnchor",
+      "gates": [
+        "when:!state.tenonAnchor",
+        "early-return:!state.tenonAnchor"
+      ]
+    },
+    {
+      "id": "organicCut/no-render--organiccuttenongizmo",
+      "source": "src/features/organicCut/OrganicCutTenonGizmo.tsx:500",
+      "kind": "empty-state",
+      "label": "(no render)",
+      "action": "early-return:!worldTenonGizmo",
+      "gates": [
+        "when:!worldTenonGizmo",
+        "early-return:!worldTenonGizmo"
+      ]
+    },
+    {
+      "id": "organicCut/no-render--organiccuttenongizmomount",
+      "source": "src/features/organicCut/OrganicCutMounts.tsx:99",
+      "kind": "empty-state",
+      "label": "(no render)",
+      "action": "early-return:!session.tenonGizmoVisible || !session.tenonFrame",
+      "gates": [
+        "when:!session.tenonGizmoVisible || !session.tenonFrame",
+        "early-return:!session.tenonGizmoVisible || !session.tenonFrame"
+      ]
+    },
+    {
+      "id": "organicCut/no-render--organiccuttool",
+      "source": "src/features/organicCut/OrganicCutTool.tsx:899",
+      "kind": "empty-state",
+      "label": "(no render)",
+      "action": "early-return:!activeModelId || !activeModel || !transform",
+      "gates": [
+        "when:!activeModelId || !activeModel || !transform",
+        "early-return:!activeModelId || !activeModel || !transform"
+      ]
+    },
+    {
+      "id": "organicCut/no-tenon",
+      "source": "src/features/organicCut/OrganicCutPanel.tsx:548",
+      "kind": "button",
+      "label": "No Tenon",
+      "action": "onClick:setState",
+      "gates": [
+        "when:expanded",
+        "disabled:disabled || isApplying"
+      ]
+    },
+    {
+      "id": "organicCut/onclick",
+      "source": "src/features/organicCut/OrganicCutPanel.tsx:168",
+      "kind": "button",
+      "label": "onClick",
+      "action": "onClick:onClick",
+      "gates": [
+        "disabled:disabled"
+      ]
+    },
+    {
+      "id": "organicCut/onselectloop",
+      "source": "src/features/organicCut/OrganicCutPanel.tsx:810",
+      "kind": "button",
+      "label": "onSelectLoop",
+      "action": "onClick:onSelectLoop",
+      "gates": [
+        "disabled:disabled || isApplying"
+      ]
+    },
+    {
+      "id": "organicCut/remove-the-loop-you-re-editing-a-cut-needs-at-le",
+      "source": "src/features/organicCut/OrganicCutPanel.tsx:794",
+      "kind": "button",
+      "label": "Remove the loop you're editing. / A cut needs at least one loop.",
+      "action": "onClick:onRemoveLoop",
+      "gates": [
+        "when:expanded && isContour",
+        "disabled:disabled || isApplying || !canRemoveLoop"
+      ]
+    },
+    {
+      "id": "organicCut/reset",
+      "source": "src/features/organicCut/OrganicCutPanel.tsx:746",
+      "kind": "button",
+      "label": "Reset",
+      "action": "onClick:setState",
+      "gates": [
+        "when:expanded && state.generateTenon",
+        "disabled:disabled || isApplying || !tenonSettingsDirty"
+      ]
+    },
+    {
+      "id": "organicCut/reset-cut-settings-to-defaults",
+      "source": "src/features/organicCut/OrganicCutPanel.tsx:429",
+      "kind": "button",
+      "label": "Reset cut settings to defaults",
+      "action": "onClick:setState",
+      "gates": [
+        "when:expanded",
+        "disabled:disabled || isApplying || !cutSettingsDirty"
+      ]
+    },
+    {
+      "id": "organicCut/seam-line-smoothing-strength",
+      "source": "src/features/organicCut/OrganicCutPanel.tsx:483",
+      "kind": "component",
+      "label": "Seam line smoothing strength",
+      "action": "onChange:setState",
+      "gates": [
+        "when:expanded && isContour",
+        "disabled:disabled || isApplying"
+      ]
+    },
+    {
+      "id": "organicCut/set",
+      "source": "src/features/organicCut/OrganicCutColorsSection.tsx:77",
+      "kind": "input",
+      "label": "set",
+      "action": "onChange:set",
+      "gates": []
+    },
+    {
+      "id": "organicCut/set--organiccutcolorssection",
+      "source": "src/features/organicCut/OrganicCutColorsSection.tsx:82",
+      "kind": "input",
+      "label": "set",
+      "action": "onChange:set",
+      "gates": []
+    },
+    {
+      "id": "organicCut/snap-to-edges",
+      "source": "src/features/organicCut/OrganicCutPanel.tsx:847",
+      "kind": "button",
+      "label": "Snap to Edges",
+      "action": "onClick:onSnapToEdges",
+      "gates": [
+        "when:expanded",
+        "disabled:disabled || isApplying || !canSnapToEdges"
+      ]
+    },
+    {
+      "id": "organicCut/surface",
+      "source": "src/features/organicCut/OrganicCutPanel.tsx:662",
+      "kind": "container",
+      "label": "·",
+      "action": "conditional:expanded && state.generateTenon && state.tenonShape === 'dome'",
+      "gates": [
+        "when:expanded && state.generateTenon && state.tenonShape === 'dome'"
+      ]
+    },
+    {
+      "id": "organicCut/surface--organiccutpanel",
+      "source": "src/features/organicCut/OrganicCutPanel.tsx:830",
+      "kind": "button",
+      "label": "+",
+      "action": "onClick:onAddLoop",
+      "gates": [
+        "when:expanded && isContour",
+        "disabled:disabled || isApplying || !canAddLoop"
+      ]
+    },
+    {
+      "id": "organicCut/tenon-depth-in-millimeters",
+      "source": "src/features/organicCut/OrganicCutPanel.tsx:682",
+      "kind": "component",
+      "label": "Tenon depth in millimeters",
+      "action": "onChange:setDomeDim",
+      "gates": [
+        "when:expanded && state.generateTenon",
+        "disabled:disabled || isApplying"
+      ]
+    },
+    {
+      "id": "organicCut/tenon-edge-fillet-radius-in-millimeters-0-sharp",
+      "source": "src/features/organicCut/OrganicCutPanel.tsx:699",
+      "kind": "component",
+      "label": "Tenon edge fillet radius in millimeters (0 = sharp)",
+      "action": "onChange:setState",
+      "gates": [
+        "when:expanded && state.generateTenon && state.tenonShape === 'frustum'",
+        "disabled:disabled || isApplying"
+      ]
+    },
+    {
+      "id": "organicCut/tenon-to-mortise-fit-tolerance-in-millimeters-0",
+      "source": "src/features/organicCut/OrganicCutPanel.tsx:712",
+      "kind": "component",
+      "label": "Tenon to mortise fit tolerance in millimeters (0 = press fit)",
+      "action": "onChange:setState",
+      "gates": [
+        "when:expanded && state.generateTenon",
+        "disabled:disabled || isApplying"
+      ]
+    },
+    {
+      "id": "organicCut/tenon-width-in-millimeters",
+      "source": "src/features/organicCut/OrganicCutPanel.tsx:641",
+      "kind": "component",
+      "label": "Tenon width in millimeters",
+      "action": "onChange:setDomeDim",
+      "gates": [
+        "when:expanded && state.generateTenon",
+        "disabled:disabled || isApplying"
+      ]
+    },
+    {
+      "id": "organicCut/toggle-cut-preview",
+      "source": "src/features/organicCut/OrganicCutPanel.tsx:415",
+      "kind": "button",
+      "label": "Toggle cut preview",
+      "action": "onClick:setState",
+      "gates": [
+        "when:expanded",
+        "disabled:disabled || isApplying"
+      ]
+    },
+    {
+      "id": "organicCut/toggle-linked-width-and-depth",
+      "source": "src/features/organicCut/OrganicCutPanel.tsx:665",
+      "kind": "button",
+      "label": "Toggle linked width and depth",
+      "action": "onClick:setState",
+      "gates": [
+        "when:expanded && state.generateTenon && state.tenonShape === 'dome'"
+      ]
+    },
+    {
+      "id": "organicCut/waypoint-cut-seam",
+      "source": "src/features/organicCut/OrganicCutMounts.tsx:133",
+      "kind": "popover",
+      "label": "Waypoint / Cut Seam",
+      "action": "onClose:onClose",
+      "gates": []
+    },
+    {
       "id": "organisms/dismiss",
       "source": "src/components/organisms/SystemNotificationStack.tsx:278",
       "kind": "button",
@@ -11792,6 +13336,55 @@
       ]
     },
     {
+      "id": "placeOnFace/e-stoppropagation",
+      "source": "src/features/placeOnFace/components/PlaceOnFaceOverlay.tsx:29",
+      "kind": "component",
+      "label": "e.stopPropagation",
+      "action": "onClick:e.stopPropagation",
+      "gates": []
+    },
+    {
+      "id": "placeOnFace/no-render",
+      "source": "src/features/placeOnFace/PlaceOnFaceTool.tsx:164",
+      "kind": "empty-state",
+      "label": "(no render)",
+      "action": "early-return:!activeModelId || !activeModel || !transform",
+      "gates": [
+        "when:!activeModelId || !activeModel || !transform",
+        "early-return:!activeModelId || !activeModel || !transform"
+      ]
+    },
+    {
+      "id": "placeOnFace/no-render--placeonfaceoverlay",
+      "source": "src/features/placeOnFace/components/PlaceOnFaceOverlay.tsx:21",
+      "kind": "empty-state",
+      "label": "(no render)",
+      "action": "early-return:!active || planes.length === 0",
+      "gates": [
+        "when:!active || planes.length === 0",
+        "early-return:!active || planes.length === 0"
+      ]
+    },
+    {
+      "id": "placeOnFace/no-render--planepolygon",
+      "source": "src/features/placeOnFace/components/PlaceOnFaceOverlay.tsx:88",
+      "kind": "empty-state",
+      "label": "(no render)",
+      "action": "early-return:!geom",
+      "gates": [
+        "when:!geom",
+        "early-return:!geom"
+      ]
+    },
+    {
+      "id": "placeOnFace/onclick",
+      "source": "src/features/placeOnFace/components/PlaceOnFaceOverlay.tsx:91",
+      "kind": "component",
+      "label": "onClick",
+      "action": "onClick:onClick",
+      "gates": []
+    },
+    {
       "id": "printers/192-168-1-100",
       "source": "src/components/printers/SetupMethodChooser.tsx:122",
       "kind": "input",
@@ -11967,6 +13560,163 @@
       "action": "conditional:!(!networkAdapter && variants.length === 0) && !(mode === 'choose') &…",
       "gates": [
         "when:!(!networkAdapter && variants.length === 0) && !(mode === 'choose') && showNetworkMode && detectedV…"
+      ]
+    },
+    {
+      "id": "printing/choose-upload-target-printer",
+      "source": "src/features/printing/components/PrintingPanel.tsx:234",
+      "kind": "button",
+      "label": "Choose upload target printer",
+      "action": "onClick:onOpenSendTargetPicker",
+      "gates": [
+        "when:isExpanded && sliceIntent !== 'upload' && sliceIntent !== 'print' && showSendTargetPicker && onOpen…",
+        "disabled:!canSendToPrinter || sendBusy"
+      ]
+    },
+    {
+      "id": "printing/estimated-print-time",
+      "source": "src/features/printing/components/PrintingPanel.tsx:124",
+      "kind": "container",
+      "label": "Estimated print time",
+      "action": "conditional:isExpanded",
+      "gates": [
+        "when:isExpanded"
+      ]
+    },
+    {
+      "id": "printing/estimated-volume",
+      "source": "src/features/printing/components/PrintingPanel.tsx:127",
+      "kind": "container",
+      "label": "Estimated volume",
+      "action": "conditional:isExpanded",
+      "gates": [
+        "when:isExpanded"
+      ]
+    },
+    {
+      "id": "printing/export-as-file",
+      "source": "src/features/printing/components/PrintingPanel.tsx:144",
+      "kind": "button",
+      "label": "Export as file",
+      "action": "onClick:onDownload",
+      "gates": [
+        "when:isExpanded && sliceIntent !== 'file'",
+        "disabled:!canDownload"
+      ]
+    },
+    {
+      "id": "printing/generated-file",
+      "source": "src/features/printing/components/PrintingPanel.tsx:132",
+      "kind": "container",
+      "label": "Generated file",
+      "action": "conditional:isExpanded",
+      "gates": [
+        "when:isExpanded"
+      ]
+    },
+    {
+      "id": "printing/open-saved-file-location",
+      "source": "src/features/printing/components/PrintingPanel.tsx:178",
+      "kind": "button",
+      "label": "Open saved file location",
+      "action": "onClick:handleRevealSavedPath",
+      "gates": [
+        "when:isExpanded && sliceIntent === 'file'",
+        "disabled:!isDesktopRuntime || !savedPathForReveal || revealingSavedPath"
+      ]
+    },
+    {
+      "id": "printing/printer",
+      "source": "src/features/printing/components/PrintingPanel.tsx:118",
+      "kind": "container",
+      "label": "Printer",
+      "action": "conditional:isExpanded",
+      "gates": [
+        "when:isExpanded"
+      ]
+    },
+    {
+      "id": "printing/resin",
+      "source": "src/features/printing/components/PrintingPanel.tsx:121",
+      "kind": "container",
+      "label": "Resin",
+      "action": "conditional:isExpanded",
+      "gates": [
+        "when:isExpanded"
+      ]
+    },
+    {
+      "id": "printing/saved-to",
+      "source": "src/features/printing/components/PrintingPanel.tsx:164",
+      "kind": "container",
+      "label": "Saved to",
+      "action": "conditional:isExpanded && sliceIntent === 'file'",
+      "gates": [
+        "when:isExpanded && sliceIntent === 'file'"
+      ]
+    },
+    {
+      "id": "printing/send-generated-print-file-to-connected-printer-r",
+      "source": "src/features/printing/components/PrintingPanel.tsx:248",
+      "kind": "button",
+      "label": "Send generated print file to connected printer / Requires connected printer with supported upload capability and a generated print file",
+      "action": "onClick:onSendToPrinter",
+      "gates": [
+        "when:isExpanded && sliceIntent !== 'upload' && sliceIntent !== 'print' && !(showSendTargetPicker && onOp…",
+        "disabled:!canSendToPrinter || sendBusy"
+      ]
+    },
+    {
+      "id": "printing/send-generated-print-file-to-selected-printer-re",
+      "source": "src/features/printing/components/PrintingPanel.tsx:206",
+      "kind": "button",
+      "label": "Send generated print file to selected printer / Requires connected printer with supported upload capability and a generated print file",
+      "action": "onClick:onSendToPrinter",
+      "gates": [
+        "when:isExpanded && sliceIntent !== 'upload' && sliceIntent !== 'print' && showSendTargetPicker && onOpen…",
+        "disabled:!canSendToPrinter || sendBusy"
+      ]
+    },
+    {
+      "id": "printing/send-to-uvtools",
+      "source": "src/features/printing/components/PrintingPanel.tsx:282",
+      "kind": "button",
+      "label": "Send to UVTools",
+      "action": "onClick:onSendToUvTools",
+      "gates": [
+        "when:isExpanded && canSendToUvTools && onSendToUvTools && savedFilePath"
+      ]
+    },
+    {
+      "id": "printing/sendactionhandler",
+      "source": "src/features/printing/components/PrintingPanel.tsx:221",
+      "kind": "button",
+      "label": "sendActionHandler",
+      "action": "onClick:sendActionHandler",
+      "gates": [
+        "when:isExpanded && sliceIntent !== 'upload' && sliceIntent !== 'print' && showSendTargetPicker && onOpen…",
+        "disabled:!sendActionHandler"
+      ]
+    },
+    {
+      "id": "printing/sendactionhandler--printingpanel",
+      "source": "src/features/printing/components/PrintingPanel.tsx:263",
+      "kind": "button",
+      "label": "sendActionHandler",
+      "action": "onClick:sendActionHandler",
+      "gates": [
+        "when:isExpanded && sliceIntent !== 'upload' && sliceIntent !== 'print' && !(showSendTargetPicker && onOp…",
+        "disabled:!sendActionHandler"
+      ]
+    },
+    {
+      "id": "printing/surface",
+      "source": "src/features/printing/components/PrintingPanel.tsx:136",
+      "kind": "container",
+      "label": "•",
+      "action": "conditional:isExpanded",
+      "gates": [
+        "when:isExpanded"
       ]
     },
     {
@@ -21330,6 +23080,1052 @@
       ]
     },
     {
+      "id": "slicing/0-100",
+      "source": "src/features/slicing/components/LutCurveEditor.tsx:1223",
+      "kind": "button",
+      "label": "0-100%",
+      "action": "onClick:setAlphaUnitMode",
+      "gates": []
+    },
+    {
+      "id": "slicing/0-255",
+      "source": "src/features/slicing/components/LutCurveEditor.tsx:1243",
+      "kind": "button",
+      "label": "0-255",
+      "action": "onClick:setAlphaUnitMode",
+      "gates": []
+    },
+    {
+      "id": "slicing/alpha",
+      "source": "src/features/slicing/components/LutCurveEditor.tsx:1387",
+      "kind": "container",
+      "label": "Alpha",
+      "action": "conditional:selectedPoint !== null",
+      "gates": [
+        "when:selectedPoint !== null"
+      ]
+    },
+    {
+      "id": "slicing/anti-aliasing",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:2467",
+      "kind": "component",
+      "label": "Anti-Aliasing",
+      "action": "conditional:isExpanded && antiAliasingAvailable",
+      "gates": [
+        "when:isExpanded && antiAliasingAvailable"
+      ]
+    },
+    {
+      "id": "slicing/apply-for-session",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:2943",
+      "kind": "button",
+      "label": "Apply for Session",
+      "action": "onClick:writeSessionAaOverrideDraft",
+      "gates": [
+        "when:isSessionAaOverrideOpen && editingSessionAaOverrideDraft && typeof document !== 'undefined'"
+      ]
+    },
+    {
+      "id": "slicing/background-pipeline",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:2995",
+      "kind": "container",
+      "label": "Background Pipeline",
+      "action": "conditional:showSlicingModal && typeof document !== 'undefined'",
+      "gates": [
+        "when:showSlicingModal && typeof document !== 'undefined'"
+      ]
+    },
+    {
+      "id": "slicing/cancel",
+      "source": "src/features/slicing/components/LutCurveEditor.tsx:1495",
+      "kind": "button",
+      "label": "Cancel",
+      "action": "onClick:handleCancelCreate",
+      "gates": []
+    },
+    {
+      "id": "slicing/cancel--lutcurveeditormodal",
+      "source": "src/features/slicing/components/LutCurveEditor.tsx:1638",
+      "kind": "button",
+      "label": "Cancel",
+      "action": "onClick:handleCancelRename",
+      "gates": []
+    },
+    {
+      "id": "slicing/cancel--lutcurveeditormodal-2",
+      "source": "src/features/slicing/components/LutCurveEditor.tsx:1732",
+      "kind": "button",
+      "label": "Cancel",
+      "action": "onClick:handleCancelDelete",
+      "gates": []
+    },
+    {
+      "id": "slicing/cancel--slicingpanel",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:2845",
+      "kind": "button",
+      "label": "Cancel",
+      "action": "onClick:setIsMaterialAaEditorOpen",
+      "gates": [
+        "when:isMaterialAaEditorOpen && materialAaEditorDraft && activeMaterialProfile && typeof document !== 'un…"
+      ]
+    },
+    {
+      "id": "slicing/cancel--slicingpanel-2",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:2935",
+      "kind": "button",
+      "label": "Cancel",
+      "action": "onClick:setIsSessionAaOverrideOpen",
+      "gates": [
+        "when:isSessionAaOverrideOpen && editingSessionAaOverrideDraft && typeof document !== 'undefined'"
+      ]
+    },
+    {
+      "id": "slicing/cancel--slicingpanel-3",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:3111",
+      "kind": "button",
+      "label": "Cancel",
+      "action": "onClick:settleOutOfBoundsSliceConfirmation",
+      "gates": []
+    },
+    {
+      "id": "slicing/cancel--slicingpanel-4",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:3150",
+      "kind": "button",
+      "label": "Cancel",
+      "action": "onClick:settleOverwriteConfirmation",
+      "gates": []
+    },
+    {
+      "id": "slicing/cancel-slicing-finishing",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:3072",
+      "kind": "button",
+      "label": "Cancel Slicing / Finishing…",
+      "action": "onClick:handleCancelSlicing",
+      "gates": [
+        "when:showSlicingModal && typeof document !== 'undefined' && slicingModalStage === 'running'",
+        "disabled:!canCancelSlicing"
+      ]
+    },
+    {
+      "id": "slicing/choose-slice-action",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:2734",
+      "kind": "button",
+      "label": "Choose slice action",
+      "action": "onClick:sliceIntentAnchorRef.current?.getBoundingClientRect",
+      "gates": [
+        "when:hasMenuOptions && !isShiftHeld && effectiveSlicePlateScope === 'current_plate'",
+        "disabled:isDisabled"
+      ]
+    },
+    {
+      "id": "slicing/clear-override",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:2918",
+      "kind": "button",
+      "label": "Clear Override",
+      "action": "onClick:clearSessionAaOverrideDraft",
+      "gates": [
+        "when:isSessionAaOverrideOpen && editingSessionAaOverrideDraft && typeof document !== 'undefined'"
+      ]
+    },
+    {
+      "id": "slicing/clear-session-override",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:2638",
+      "kind": "button",
+      "label": "Clear Session Override",
+      "action": "onClick:clearSessionAaOverrideDraft",
+      "gates": [
+        "when:isExpanded && antiAliasingAvailable && aaQualityMode === 'expert' && sessionAaOverrideDraft"
+      ]
+    },
+    {
+      "id": "slicing/close",
+      "source": "src/features/slicing/components/LutCurveEditor.tsx:1265",
+      "kind": "button",
+      "label": "Close",
+      "action": "onClick:requestClose",
+      "gates": []
+    },
+    {
+      "id": "slicing/close-material-anti-aliasing-settings",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:2822",
+      "kind": "button",
+      "label": "Close material anti-aliasing settings",
+      "action": "onClick:setIsMaterialAaEditorOpen",
+      "gates": [
+        "when:isMaterialAaEditorOpen && materialAaEditorDraft && activeMaterialProfile && typeof document !== 'un…"
+      ]
+    },
+    {
+      "id": "slicing/close-plate",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:3082",
+      "kind": "button",
+      "label": "Close Plate",
+      "action": "onClick:handleCloseSlicingModal",
+      "gates": [
+        "when:showSlicingModal && typeof document !== 'undefined' && slicingModalStage !== 'running'"
+      ]
+    },
+    {
+      "id": "slicing/close-session-anti-aliasing-override",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:2894",
+      "kind": "button",
+      "label": "Close session anti-aliasing override",
+      "action": "onClick:setIsSessionAaOverrideOpen",
+      "gates": [
+        "when:isSessionAaOverrideOpen && editingSessionAaOverrideDraft && typeof document !== 'undefined'"
+      ]
+    },
+    {
+      "id": "slicing/close-slice-metrics",
+      "source": "src/features/slicing/components/SliceMetricsDebugModal.tsx:217",
+      "kind": "button",
+      "label": "Close slice metrics",
+      "action": "onClick:onClose",
+      "gates": []
+    },
+    {
+      "id": "slicing/confirm-delete-lut-curve",
+      "source": "src/features/slicing/components/LutCurveEditor.tsx:1718",
+      "kind": "modal",
+      "label": "Confirm delete LUT curve",
+      "action": "onClose:handleCancelDelete",
+      "gates": []
+    },
+    {
+      "id": "slicing/copied-copy-failed-copy",
+      "source": "src/features/slicing/components/SliceMetricsDebugModal.tsx:199",
+      "kind": "button",
+      "label": "Copied! / Copy failed / Copy",
+      "action": "onClick:handleCopyMetrics",
+      "gates": []
+    },
+    {
+      "id": "slicing/create",
+      "source": "src/features/slicing/components/LutCurveEditor.tsx:1502",
+      "kind": "button",
+      "label": "Create",
+      "action": "onClick:handleConfirmCreate",
+      "gates": []
+    },
+    {
+      "id": "slicing/create-new-lut-curve-profile",
+      "source": "src/features/slicing/components/LutCurveEditor.tsx:1481",
+      "kind": "modal",
+      "label": "Create new LUT curve profile",
+      "action": "onClose:handleCancelCreate",
+      "gates": []
+    },
+    {
+      "id": "slicing/curve-name",
+      "source": "src/features/slicing/components/LutCurveEditor.tsx:1662",
+      "kind": "input",
+      "label": "Curve name",
+      "action": "onChange:setDraftRenameName",
+      "gates": []
+    },
+    {
+      "id": "slicing/custom-maximum-alpha",
+      "source": "src/features/slicing/components/LutCurveEditor.tsx:1597",
+      "kind": "component",
+      "label": "Custom maximum alpha",
+      "action": "onChange:setDraftCreateCustomMax",
+      "gates": [
+        "when:draftCreatePreset === 'custom'"
+      ]
+    },
+    {
+      "id": "slicing/custom-minimum-alpha",
+      "source": "src/features/slicing/components/LutCurveEditor.tsx:1577",
+      "kind": "component",
+      "label": "Custom minimum alpha",
+      "action": "onChange:setDraftCreateCustomMin",
+      "gates": [
+        "when:draftCreatePreset === 'custom'"
+      ]
+    },
+    {
+      "id": "slicing/delete",
+      "source": "src/features/slicing/components/LutCurveEditor.tsx:1739",
+      "kind": "button",
+      "label": "Delete",
+      "action": "onClick:handleConfirmDelete",
+      "gates": []
+    },
+    {
+      "id": "slicing/delete-curve",
+      "source": "src/features/slicing/components/LutCurveEditor.tsx:1440",
+      "kind": "button",
+      "label": "Delete Curve",
+      "action": "onClick:setShowDeleteConfirm",
+      "gates": [
+        "when:editingCurve && onDelete"
+      ]
+    },
+    {
+      "id": "slicing/discard-unsaved-lut-curve-changes",
+      "source": "src/features/slicing/components/LutCurveEditor.tsx:1680",
+      "kind": "modal",
+      "label": "Discard unsaved LUT curve changes",
+      "action": "onClose:handleCancelDiscardClose",
+      "gates": []
+    },
+    {
+      "id": "slicing/e-stoppropagation",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:479",
+      "kind": "component",
+      "label": "e.stopPropagation",
+      "action": "onClick:e.stopPropagation",
+      "gates": []
+    },
+    {
+      "id": "slicing/edit-lut-curve-new-lut-curve",
+      "source": "src/features/slicing/components/LutCurveEditor.tsx:1178",
+      "kind": "modal",
+      "label": "Edit LUT Curve / New LUT Curve",
+      "action": "renders:modal",
+      "gates": []
+    },
+    {
+      "id": "slicing/edit-material-profile",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:2381",
+      "kind": "button",
+      "label": "Edit material profile",
+      "action": "onClick:openProfileSettingsModal",
+      "gates": [
+        "when:isExpanded"
+      ]
+    },
+    {
+      "id": "slicing/edit-printer-profile",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:2363",
+      "kind": "button",
+      "label": "Edit printer profile",
+      "action": "onClick:openProfileSettingsModal",
+      "gates": [
+        "when:isExpanded"
+      ]
+    },
+    {
+      "id": "slicing/edit-selected-curve",
+      "source": "src/features/slicing/components/LutCurveEditor.tsx:634",
+      "kind": "button",
+      "label": "Edit selected curve",
+      "action": "onClick:onOpenEditor",
+      "gates": [
+        "when:isSettingsVariant",
+        "disabled:!canEdit"
+      ]
+    },
+    {
+      "id": "slicing/edit-selected-curve--lutcurveselector",
+      "source": "src/features/slicing/components/LutCurveEditor.tsx:649",
+      "kind": "button",
+      "label": "Edit selected curve",
+      "action": "onClick:onOpenEditor",
+      "gates": [
+        "when:!(isSettingsVariant)",
+        "disabled:!canEdit"
+      ]
+    },
+    {
+      "id": "slicing/elapsed",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:3065",
+      "kind": "container",
+      "label": "Elapsed",
+      "action": "conditional:showSlicingModal && typeof document !== 'undefined'",
+      "gates": [
+        "when:showSlicingModal && typeof document !== 'undefined'"
+      ]
+    },
+    {
+      "id": "slicing/engine",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:2424",
+      "kind": "container",
+      "label": "Engine",
+      "action": "conditional:isExpanded",
+      "gates": [
+        "when:isExpanded"
+      ]
+    },
+    {
+      "id": "slicing/est-print-time",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:2414",
+      "kind": "container",
+      "label": "Est. Print Time",
+      "action": "conditional:isExpanded",
+      "gates": [
+        "when:isExpanded"
+      ]
+    },
+    {
+      "id": "slicing/est-volume",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:2410",
+      "kind": "container",
+      "label": "Est. Volume",
+      "action": "conditional:isExpanded",
+      "gates": [
+        "when:isExpanded"
+      ]
+    },
+    {
+      "id": "slicing/export",
+      "source": "src/features/slicing/components/LutCurveEditor.tsx:1316",
+      "kind": "button",
+      "label": "Export",
+      "action": "onClick:handleExportCurve",
+      "gates": []
+    },
+    {
+      "id": "slicing/files-will-be-overwritten",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:3138",
+      "kind": "modal",
+      "label": "Files will be overwritten",
+      "action": "onClose:settleOverwriteConfirmation",
+      "gates": []
+    },
+    {
+      "id": "slicing/handleimportinputchange",
+      "source": "src/features/slicing/components/LutCurveEditor.tsx:1279",
+      "kind": "input",
+      "label": "handleImportInputChange",
+      "action": "onChange:handleImportInputChange",
+      "gates": [
+        "class:hidden"
+      ]
+    },
+    {
+      "id": "slicing/handleopenmaterialaaeditor",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:2594",
+      "kind": "button",
+      "label": "handleOpenMaterialAaEditor",
+      "action": "onClick:handleOpenMaterialAaEditor",
+      "gates": [
+        "when:isExpanded && antiAliasingAvailable && aaQualityMode === 'expert'",
+        "disabled:!activeMaterialProfile"
+      ]
+    },
+    {
+      "id": "slicing/handleopensessionaaoverride",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:2619",
+      "kind": "button",
+      "label": "handleOpenSessionAaOverride",
+      "action": "onClick:handleOpenSessionAaOverride",
+      "gates": [
+        "when:isExpanded && antiAliasingAvailable && aaQualityMode === 'expert'",
+        "disabled:!activeMaterialProfile"
+      ]
+    },
+    {
+      "id": "slicing/import",
+      "source": "src/features/slicing/components/LutCurveEditor.tsx:1327",
+      "kind": "button",
+      "label": "Import",
+      "action": "onClick:handleImportCurve",
+      "gates": []
+    },
+    {
+      "id": "slicing/keep-editing",
+      "source": "src/features/slicing/components/LutCurveEditor.tsx:1694",
+      "kind": "button",
+      "label": "Keep Editing",
+      "action": "onClick:handleCancelDiscardClose",
+      "gates": []
+    },
+    {
+      "id": "slicing/layer-height",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:2404",
+      "kind": "container",
+      "label": "Layer Height",
+      "action": "conditional:isExpanded",
+      "gates": [
+        "when:isExpanded"
+      ]
+    },
+    {
+      "id": "slicing/layers",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:2400",
+      "kind": "container",
+      "label": "Layers",
+      "action": "conditional:isExpanded",
+      "gates": [
+        "when:isExpanded"
+      ]
+    },
+    {
+      "id": "slicing/material",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:2389",
+      "kind": "container",
+      "label": "Material",
+      "action": "conditional:isExpanded",
+      "gates": [
+        "when:isExpanded"
+      ]
+    },
+    {
+      "id": "slicing/material-anti-aliasing-settings",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:2802",
+      "kind": "modal",
+      "label": "Material Anti-Aliasing Settings",
+      "action": "conditional:isMaterialAaEditorOpen && materialAaEditorDraft && activeMaterialProf…",
+      "gates": [
+        "when:isMaterialAaEditorOpen && materialAaEditorDraft && activeMaterialProfile && typeof document !== 'un…"
+      ]
+    },
+    {
+      "id": "slicing/material-anti-aliasing-settings--slicingpanel",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:2814",
+      "kind": "container",
+      "label": "Material Anti-Aliasing Settings",
+      "action": "conditional:isMaterialAaEditorOpen && materialAaEditorDraft && activeMaterialProf…",
+      "gates": [
+        "when:isMaterialAaEditorOpen && materialAaEditorDraft && activeMaterialProfile && typeof document !== 'un…"
+      ]
+    },
+    {
+      "id": "slicing/material-profile-settings",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:2612",
+      "kind": "container",
+      "label": "Material Profile Settings",
+      "action": "conditional:isExpanded && antiAliasingAvailable && aaQualityMode === 'expert'",
+      "gates": [
+        "when:isExpanded && antiAliasingAvailable && aaQualityMode === 'expert'"
+      ]
+    },
+    {
+      "id": "slicing/network-unavailable",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:2455",
+      "kind": "container",
+      "label": "Network unavailable.",
+      "action": "conditional:isExpanded && showRemoteOfflineLayerHeightOverride",
+      "gates": [
+        "when:isExpanded && showRemoteOfflineLayerHeightOverride"
+      ]
+    },
+    {
+      "id": "slicing/new-curve",
+      "source": "src/features/slicing/components/LutCurveEditor.tsx:1519",
+      "kind": "input",
+      "label": "New Curve",
+      "action": "onChange:setDraftCreateName",
+      "gates": []
+    },
+    {
+      "id": "slicing/no-meshes-loaded-yet-import-a-model-first-then-r",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:2340",
+      "kind": "container",
+      "label": "No meshes loaded yet. Import a model first, then return to Slicing.",
+      "action": "conditional:models.length === 0 && isExpanded",
+      "gates": [
+        "when:models.length === 0 && isExpanded"
+      ]
+    },
+    {
+      "id": "slicing/no-render",
+      "source": "src/features/slicing/components/LutCurveEditor.tsx:1156",
+      "kind": "empty-state",
+      "label": "(no render)",
+      "action": "early-return:!isOpen",
+      "gates": [
+        "when:!isOpen",
+        "early-return:!isOpen"
+      ]
+    },
+    {
+      "id": "slicing/no-render--slicemetricsdebugmodal",
+      "source": "src/features/slicing/components/SliceMetricsDebugModal.tsx:108",
+      "kind": "empty-state",
+      "label": "(no render)",
+      "action": "early-return:!isOpen || !benchmark",
+      "gates": [
+        "when:!isOpen || !benchmark",
+        "early-return:!isOpen || !benchmark"
+      ]
+    },
+    {
+      "id": "slicing/offline-layer-height",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:2434",
+      "kind": "container",
+      "label": "Offline Layer Height",
+      "action": "conditional:isExpanded && showRemoteOfflineLayerHeightOverride",
+      "gates": [
+        "when:isExpanded && showRemoteOfflineLayerHeightOverride"
+      ]
+    },
+    {
+      "id": "slicing/offline-layer-height-override-in-micrometers",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:2442",
+      "kind": "component",
+      "label": "Offline layer height override in micrometers",
+      "action": "onChange:setClampedRemoteOfflineLayerHeightMm",
+      "gates": [
+        "when:isExpanded && showRemoteOfflineLayerHeightOverride"
+      ]
+    },
+    {
+      "id": "slicing/onclose",
+      "source": "src/features/slicing/components/SliceMetricsDebugModal.tsx:161",
+      "kind": "container",
+      "label": "onClose",
+      "action": "onClick:onClose",
+      "gates": []
+    },
+    {
+      "id": "slicing/ontoggle",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:465",
+      "kind": "container",
+      "label": "onToggle",
+      "action": "onClick:onToggle",
+      "gates": []
+    },
+    {
+      "id": "slicing/opaque-clear-custom",
+      "source": "src/features/slicing/components/LutCurveEditor.tsx:1546",
+      "kind": "button",
+      "label": "Opaque / Clear / Custom",
+      "action": "onClick:setDraftCreatePreset",
+      "gates": []
+    },
+    {
+      "id": "slicing/out-of-bounds-models-will-be-excluded",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:3098",
+      "kind": "modal",
+      "label": "Out-of-bounds models will be excluded",
+      "action": "onClose:settleOutOfBoundsSliceConfirmation",
+      "gates": []
+    },
+    {
+      "id": "slicing/output",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:2418",
+      "kind": "container",
+      "label": "Output",
+      "action": "conditional:isExpanded",
+      "gates": [
+        "when:isExpanded"
+      ]
+    },
+    {
+      "id": "slicing/overwrite-and-slice",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:3157",
+      "kind": "button",
+      "label": "Overwrite and Slice",
+      "action": "onClick:settleOverwriteConfirmation",
+      "gates": []
+    },
+    {
+      "id": "slicing/pipeline-stage",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:3036",
+      "kind": "container",
+      "label": "Pipeline Stage",
+      "action": "conditional:showSlicingModal && typeof document !== 'undefined'",
+      "gates": [
+        "when:showSlicingModal && typeof document !== 'undefined'"
+      ]
+    },
+    {
+      "id": "slicing/position",
+      "source": "src/features/slicing/components/LutCurveEditor.tsx:1367",
+      "kind": "container",
+      "label": "Position",
+      "action": "conditional:selectedPoint !== null",
+      "gates": [
+        "when:selectedPoint !== null"
+      ]
+    },
+    {
+      "id": "slicing/printer",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:2371",
+      "kind": "container",
+      "label": "Printer",
+      "action": "conditional:isExpanded",
+      "gates": [
+        "when:isExpanded"
+      ]
+    },
+    {
+      "id": "slicing/progress",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:3046",
+      "kind": "container",
+      "label": "Progress",
+      "action": "conditional:showSlicingModal && typeof document !== 'undefined'",
+      "gates": [
+        "when:showSlicingModal && typeof document !== 'undefined'"
+      ]
+    },
+    {
+      "id": "slicing/quit-without-saving",
+      "source": "src/features/slicing/components/LutCurveEditor.tsx:1701",
+      "kind": "button",
+      "label": "Quit Without Saving",
+      "action": "onClick:handleConfirmDiscardClose",
+      "gates": []
+    },
+    {
+      "id": "slicing/remote-material-unavailable",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:2437",
+      "kind": "container",
+      "label": "Remote material unavailable.",
+      "action": "conditional:isExpanded && showRemoteOfflineLayerHeightOverride",
+      "gates": [
+        "when:isExpanded && showRemoteOfflineLayerHeightOverride"
+      ]
+    },
+    {
+      "id": "slicing/remove",
+      "source": "src/features/slicing/components/LutCurveEditor.tsx:1404",
+      "kind": "button",
+      "label": "Remove",
+      "action": "onClick:handleRemoveSelected",
+      "gates": [
+        "when:selectedPoint !== null",
+        "disabled:isEndpoint || draftPoints.length <= 2"
+      ]
+    },
+    {
+      "id": "slicing/rename",
+      "source": "src/features/slicing/components/LutCurveEditor.tsx:1307",
+      "kind": "button",
+      "label": "Rename",
+      "action": "onClick:handleOpenRename",
+      "gates": []
+    },
+    {
+      "id": "slicing/rename-lut-curve-profile",
+      "source": "src/features/slicing/components/LutCurveEditor.tsx:1624",
+      "kind": "modal",
+      "label": "Rename LUT curve profile",
+      "action": "onClose:handleCancelRename",
+      "gates": []
+    },
+    {
+      "id": "slicing/reset",
+      "source": "src/features/slicing/components/LutCurveEditor.tsx:1453",
+      "kind": "button",
+      "label": "Reset",
+      "action": "onClick:handleResetDraft",
+      "gates": [
+        "disabled:!isDirty"
+      ]
+    },
+    {
+      "id": "slicing/running-ready-cancelled-failed",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:3003",
+      "kind": "container",
+      "label": "Running / Ready / Cancelled / Failed",
+      "action": "conditional:showSlicingModal && typeof document !== 'undefined'",
+      "gates": [
+        "when:showSlicingModal && typeof document !== 'undefined'"
+      ]
+    },
+    {
+      "id": "slicing/save",
+      "source": "src/features/slicing/components/LutCurveEditor.tsx:1464",
+      "kind": "button",
+      "label": "Save",
+      "action": "onClick:handleSave",
+      "gates": [
+        "disabled:!isDirty"
+      ]
+    },
+    {
+      "id": "slicing/save-material",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:2853",
+      "kind": "button",
+      "label": "Save Material",
+      "action": "onClick:handleSaveMaterialAaEditor",
+      "gates": [
+        "when:isMaterialAaEditorOpen && materialAaEditorDraft && activeMaterialProfile && typeof document !== 'un…"
+      ]
+    },
+    {
+      "id": "slicing/save-name",
+      "source": "src/features/slicing/components/LutCurveEditor.tsx:1645",
+      "kind": "button",
+      "label": "Save Name",
+      "action": "onClick:handleConfirmRename",
+      "gates": [
+        "disabled:draftRenameName.trim().length === 0"
+      ]
+    },
+    {
+      "id": "slicing/select-curve-profile-to-edit",
+      "source": "src/features/slicing/components/LutCurveEditor.tsx:1292",
+      "kind": "popover",
+      "label": "Select curve profile to edit",
+      "action": "onChange:handleSelectCurveFromModal",
+      "gates": []
+    },
+    {
+      "id": "slicing/select-lut-curve",
+      "source": "src/features/slicing/components/LutCurveEditor.tsx:614",
+      "kind": "popover",
+      "label": "Select LUT curve",
+      "action": "onChange:handleSelectCurve",
+      "gates": []
+    },
+    {
+      "id": "slicing/selected-point-alpha",
+      "source": "src/features/slicing/components/LutCurveEditor.tsx:1389",
+      "kind": "component",
+      "label": "Selected point alpha",
+      "action": "onChange:handleInspectorChange",
+      "gates": [
+        "when:selectedPoint !== null"
+      ]
+    },
+    {
+      "id": "slicing/selected-point-position",
+      "source": "src/features/slicing/components/LutCurveEditor.tsx:1369",
+      "kind": "component",
+      "label": "Selected point position",
+      "action": "onChange:handleInspectorChange",
+      "gates": [
+        "when:selectedPoint !== null",
+        "disabled:isEndpoint"
+      ]
+    },
+    {
+      "id": "slicing/session-anti-aliasing-override",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:2874",
+      "kind": "modal",
+      "label": "Session Anti-Aliasing Override",
+      "action": "conditional:isSessionAaOverrideOpen && editingSessionAaOverrideDraft && typeof do…",
+      "gates": [
+        "when:isSessionAaOverrideOpen && editingSessionAaOverrideDraft && typeof document !== 'undefined'"
+      ]
+    },
+    {
+      "id": "slicing/session-anti-aliasing-override--slicingpanel",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:2886",
+      "kind": "container",
+      "label": "Session Anti-Aliasing Override",
+      "action": "conditional:isSessionAaOverrideOpen && editingSessionAaOverrideDraft && typeof do…",
+      "gates": [
+        "when:isSessionAaOverrideOpen && editingSessionAaOverrideDraft && typeof document !== 'undefined'"
+      ]
+    },
+    {
+      "id": "slicing/session-overrides",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:2630",
+      "kind": "container",
+      "label": "Session Overrides",
+      "action": "conditional:isExpanded && antiAliasingAvailable && aaQualityMode === 'expert'",
+      "gates": [
+        "when:isExpanded && antiAliasingAvailable && aaQualityMode === 'expert'"
+      ]
+    },
+    {
+      "id": "slicing/setaaautopreset",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:2533",
+      "kind": "button",
+      "label": "setAaAutoPreset",
+      "action": "onClick:setAaAutoPreset",
+      "gates": []
+    },
+    {
+      "id": "slicing/setaaqualitymode",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:2477",
+      "kind": "button",
+      "label": "setAaQualityMode",
+      "action": "onClick:setAaQualityMode",
+      "gates": [
+        "disabled:disabled"
+      ]
+    },
+    {
+      "id": "slicing/setdraftpoints",
+      "source": "src/features/slicing/components/LutCurveEditor.tsx:1351",
+      "kind": "component",
+      "label": "setDraftPoints",
+      "action": "onChange:setDraftPoints",
+      "gates": []
+    },
+    {
+      "id": "slicing/seteditingsessionaaoverridedraft",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:2904",
+      "kind": "component",
+      "label": "setEditingSessionAaOverrideDraft",
+      "action": "onChange:setEditingSessionAaOverrideDraft",
+      "gates": [
+        "when:isSessionAaOverrideOpen && editingSessionAaOverrideDraft && typeof document !== 'undefined'"
+      ]
+    },
+    {
+      "id": "slicing/setmaterialaaeditordraft",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:2832",
+      "kind": "component",
+      "label": "setMaterialAaEditorDraft",
+      "action": "onChange:setMaterialAaEditorDraft",
+      "gates": [
+        "when:isMaterialAaEditorOpen && materialAaEditorDraft && activeMaterialProfile && typeof document !== 'un…"
+      ]
+    },
+    {
+      "id": "slicing/setsliceintent",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:2769",
+      "kind": "button",
+      "label": "setSliceIntent",
+      "action": "onClick:setSliceIntent",
+      "gates": [
+        "disabled:!enabled"
+      ]
+    },
+    {
+      "id": "slicing/setsliceplatescope",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:2683",
+      "kind": "button",
+      "label": "setSlicePlateScope",
+      "action": "onClick:setSlicePlateScope",
+      "gates": []
+    },
+    {
+      "id": "slicing/slice-performance-metrics",
+      "source": "src/features/slicing/components/SliceMetricsDebugModal.tsx:166",
+      "kind": "modal",
+      "label": "Slice performance metrics",
+      "action": "onClick:event.stopPropagation",
+      "gates": []
+    },
+    {
+      "id": "slicing/slice-plates",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:2681",
+      "kind": "container",
+      "label": "Slice plates",
+      "action": "conditional:isExpanded && !singlePlate",
+      "gates": [
+        "when:isExpanded && !singlePlate"
+      ]
+    },
+    {
+      "id": "slicing/slice-printable-models",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:3118",
+      "kind": "button",
+      "label": "Slice Printable Models",
+      "action": "onClick:settleOutOfBoundsSliceConfirmation",
+      "gates": []
+    },
+    {
+      "id": "slicing/slicing-plate",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:2994",
+      "kind": "container",
+      "label": "Slicing Plate",
+      "action": "conditional:showSlicingModal && typeof document !== 'undefined'",
+      "gates": [
+        "when:showSlicingModal && typeof document !== 'undefined'"
+      ]
+    },
+    {
+      "id": "slicing/slicing-progress",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:2971",
+      "kind": "modal",
+      "label": "Slicing progress",
+      "action": "conditional:showSlicingModal && typeof document !== 'undefined'",
+      "gates": [
+        "when:showSlicingModal && typeof document !== 'undefined'"
+      ]
+    },
+    {
+      "id": "slicing/slicing-slice-all",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:2715",
+      "kind": "button",
+      "label": "Slicing… / Slice All",
+      "action": "onClick:handleSliceAllPlates",
+      "gates": [
+        "disabled:isDisabled"
+      ]
+    },
+    {
+      "id": "slicing/speed",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:3051",
+      "kind": "container",
+      "label": "Speed",
+      "action": "conditional:showSlicingModal && typeof document !== 'undefined' && slicingModalSt…",
+      "gates": [
+        "when:showSlicingModal && typeof document !== 'undefined' && slicingModalStage === 'running' && liveLayer…"
+      ]
+    },
+    {
+      "id": "slicing/surface",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:2401",
+      "kind": "container",
+      "label": "—",
+      "action": "conditional:isExpanded",
+      "gates": [
+        "when:isExpanded"
+      ]
+    },
+    {
+      "id": "slicing/surface--slicingpanel",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:2405",
+      "kind": "container",
+      "label": "—",
+      "action": "conditional:isExpanded",
+      "gates": [
+        "when:isExpanded"
+      ]
+    },
+    {
+      "id": "slicing/surface--slicingpanel-2",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:3047",
+      "kind": "container",
+      "label": "%",
+      "action": "conditional:showSlicingModal && typeof document !== 'undefined'",
+      "gates": [
+        "when:showSlicingModal && typeof document !== 'undefined'"
+      ]
+    },
+    {
+      "id": "slicing/the-selected-machine-does-not-support-aa-at-this",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:2464",
+      "kind": "container",
+      "label": "The selected Machine does not support AA at this time.",
+      "action": "conditional:isExpanded",
+      "gates": [
+        "when:isExpanded"
+      ]
+    },
+    {
+      "id": "slicing/the-selected-machine-does-not-support-aa-at-this--slicingpanel",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:2661",
+      "kind": "container",
+      "label": "The selected Machine does not support AA at this time.",
+      "action": "conditional:isExpanded && !(antiAliasingAvailable)",
+      "gates": [
+        "when:isExpanded && !(antiAliasingAvailable)"
+      ]
+    },
+    {
+      "id": "slicing/v-slicer-v3",
+      "source": "src/features/slicing/components/SlicingPanel.tsx:2425",
+      "kind": "container",
+      "label": "v / Slicer V3",
+      "action": "conditional:isExpanded",
+      "gates": [
+        "when:isExpanded"
+      ]
+    },
+    {
+      "id": "support-blockers/no-render",
+      "source": "src/features/support-blockers/SupportBlockerCursor.tsx:54",
+      "kind": "empty-state",
+      "label": "(no render)",
+      "action": "early-return:!point",
+      "gates": [
+        "when:!point",
+        "early-return:!point"
+      ]
+    },
+    {
+      "id": "support-blockers/no-render--supportblockeroverlay",
+      "source": "src/features/support-blockers/SupportBlockerOverlay.tsx:77",
+      "kind": "empty-state",
+      "label": "(no render)",
+      "action": "early-return:!built",
+      "gates": [
+        "when:!built",
+        "early-return:!built"
+      ]
+    },
+    {
       "id": "ui/apply",
       "source": "src/components/ui/miniStepperField.tsx:46",
       "kind": "input",
@@ -21593,6 +24389,158 @@
       "kind": "popover",
       "label": "SubmenuFlyout",
       "action": "renders:popover",
+      "gates": []
+    },
+    {
+      "id": "updater/cancel",
+      "source": "src/features/updater/UpdateCheckerSection.tsx:261",
+      "kind": "button",
+      "label": "Cancel",
+      "action": "onClick:setShowWarning",
+      "gates": []
+    },
+    {
+      "id": "updater/cancel--updatessettingstab",
+      "source": "src/features/updater/UpdatesSettingsTab.tsx:93",
+      "kind": "button",
+      "label": "Cancel",
+      "action": "onClick:setShowChannelSettings",
+      "gates": []
+    },
+    {
+      "id": "updater/check-again",
+      "source": "src/features/updater/UpdateCheckerSection.tsx:148",
+      "kind": "button",
+      "label": "Check Again",
+      "action": "onClick:onCheck",
+      "gates": []
+    },
+    {
+      "id": "updater/check-for-updates",
+      "source": "src/features/updater/UpdateCheckerSection.tsx:75",
+      "kind": "button",
+      "label": "Check for Updates",
+      "action": "onClick:onCheck",
+      "gates": []
+    },
+    {
+      "id": "updater/check-for-updates--availablestate",
+      "source": "src/features/updater/UpdateCheckerSection.tsx:215",
+      "kind": "button",
+      "label": "Check for Updates",
+      "action": "onClick:onCheck",
+      "gates": []
+    },
+    {
+      "id": "updater/confirm-update-and-restart",
+      "source": "src/features/updater/UpdateCheckerSection.tsx:250",
+      "kind": "modal",
+      "label": "Confirm update and restart",
+      "action": "onClose:setShowWarning",
+      "gates": []
+    },
+    {
+      "id": "updater/development-previews",
+      "source": "src/features/updater/UpdatesSettingsTab.tsx:144",
+      "kind": "tab",
+      "label": "Development Previews",
+      "action": "onClick:handleChannelSelect",
+      "gates": []
+    },
+    {
+      "id": "updater/development-previews--updatessettingstab",
+      "source": "src/features/updater/UpdatesSettingsTab.tsx:165",
+      "kind": "container",
+      "label": "Development Previews",
+      "action": "conditional:isPendingDevSwitch",
+      "gates": [
+        "when:isPendingDevSwitch"
+      ]
+    },
+    {
+      "id": "updater/install",
+      "source": "src/features/updater/UpdateCheckerSection.tsx:84",
+      "kind": "button",
+      "label": "Install",
+      "action": "renders:button",
+      "gates": [
+        "disabled:true"
+      ]
+    },
+    {
+      "id": "updater/install--availablestate",
+      "source": "src/features/updater/UpdateCheckerSection.tsx:240",
+      "kind": "button",
+      "label": "Install",
+      "action": "onClick:setShowWarning",
+      "gates": []
+    },
+    {
+      "id": "updater/release-channel-settings",
+      "source": "src/features/updater/UpdatesSettingsTab.tsx:66",
+      "kind": "button",
+      "label": "Release channel settings",
+      "action": "onClick:setShowChannelSettings",
+      "gates": [
+        "when:!isLinux"
+      ]
+    },
+    {
+      "id": "updater/release-channel-settings--updatessettingstab",
+      "source": "src/features/updater/UpdatesSettingsTab.tsx:82",
+      "kind": "modal",
+      "label": "Release channel settings",
+      "action": "onClose:setShowChannelSettings",
+      "gates": []
+    },
+    {
+      "id": "updater/releases",
+      "source": "src/features/updater/UpdateCheckerSection.tsx:409",
+      "kind": "button",
+      "label": "Releases",
+      "action": "onClick:button",
+      "gates": []
+    },
+    {
+      "id": "updater/retry",
+      "source": "src/features/updater/UpdateCheckerSection.tsx:470",
+      "kind": "button",
+      "label": "Retry",
+      "action": "onClick:onRetry",
+      "gates": []
+    },
+    {
+      "id": "updater/stable-builds",
+      "source": "src/features/updater/UpdatesSettingsTab.tsx:127",
+      "kind": "tab",
+      "label": "Stable Builds",
+      "action": "onClick:handleChannelSelect",
+      "gates": []
+    },
+    {
+      "id": "updater/switch-to-previews-apply",
+      "source": "src/features/updater/UpdatesSettingsTab.tsx:100",
+      "kind": "button",
+      "label": "Switch to Previews / Apply",
+      "action": "onClick:handleApplyChannel",
+      "gates": [
+        "disabled:pendingChannel === channel"
+      ]
+    },
+    {
+      "id": "updater/update-and-restart",
+      "source": "src/features/updater/UpdateCheckerSection.tsx:262",
+      "kind": "button",
+      "label": "Update & Restart",
+      "action": "onClick:setShowWarning",
+      "gates": []
+    },
+    {
+      "id": "updater/view-on-github",
+      "source": "src/features/updater/UpdateCheckerSection.tsx:224",
+      "kind": "button",
+      "label": "View on GitHub",
+      "action": "onClick:openExternal",
       "gates": []
     }
   ]

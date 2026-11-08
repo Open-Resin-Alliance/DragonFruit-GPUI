@@ -11,9 +11,15 @@
 // tree (JSX text, `msg`/`_` templates, `<Trans>` children), then from the
 // accessible name, then from the handler.
 //
-// Scope: every `.tsx` under `src/components/**` except `__tests__`,
-// `*.test.tsx` and `*.stories.tsx`, plus `src/app/page.tsx`. Test files are
-// reported in `skipped`, not parsed.
+// Scope: every `.tsx` under `src/components/**` and `src/features/**` except
+// `__tests__`, `*.test.tsx`, `*.dom-test.tsx` and `*.stories.tsx`, plus
+// `src/app/page.tsx`. Test files are reported in `skipped`, not parsed.
+//
+// `src/features` is walked because the component tree only *mounts* feature
+// panels: `PreparePanelStack` renders `<OrganicCutPanel />` and
+// `<MeshSmoothingSettingsPanel />`, `SettingsModal` renders `<UpdatesSettingsTab />`,
+// and the panel bodies (with every control inside) live under `src/features`.
+// Walking components alone captured the mounts and dropped the controls.
 //
 // Output shape (deterministic, no timestamps):
 //   { generatedBy, roots, skipped, collisions, counts, rows: [
@@ -29,15 +35,17 @@ import { fileURLToPath } from 'node:url';
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, '..', '..');
 const componentsRoot = resolve(repoRoot, 'src', 'components');
+const featuresRoot = resolve(repoRoot, 'src', 'features');
 const appRoot = resolve(repoRoot, 'src', 'app');
 const pagePath = resolve(appRoot, 'page.tsx');
 
 export const surfacePath = resolve(scriptDir, 'surface.json');
 export const ledgerPath = resolve(repoRoot, 'docs', 'internal', 'gpui-coverage.json');
 
-const SOURCE_ROOTS = [componentsRoot, pagePath];
+export const sourceRoots = [componentsRoot, featuresRoot, pagePath];
+const SOURCE_ROOT_LABELS = ['src/components/**/*.tsx', 'src/features/**/*.tsx', 'src/app/page.tsx'];
 const SKIP_DIRS = new Set(['__tests__', 'node_modules', 'dist', '.next', '.git']);
-const SKIP_FILE = /\.(test|stories)\.tsx$|\.d\.tsx?$/;
+const SKIP_FILE = /\.(dom-)?(test|stories)\.tsx$|\.d\.tsx?$/;
 
 const HANDLERS = ['onSubmit', 'onClick', 'onChange', 'onSelect'];
 const NAMED_INTERACTIVE = /(Button|Input|Select|Toggle|Switch|Checkbox|Radio|Link|Tab|Slider|Field)$/;
@@ -97,6 +105,24 @@ export function loadTypeScript() {
 }
 
 const toPosix = (p) => p.split('\\').join('/');
+
+const isUnder = (path, root) => {
+  const rel = relative(root, path);
+  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
+};
+
+/**
+ * True when `path` is a `.tsx` file the extractor parses. `path` may be
+ * absolute or repo-relative. Both `src/components` and `src/features` are in
+ * scope; `src/app` is not, except for `page.tsx`.
+ */
+export function isSurfaceSourcePath(path) {
+  const abs = isAbsolute(path) ? resolve(path) : resolve(repoRoot, path);
+  if (!abs.endsWith('.tsx') || SKIP_FILE.test(abs)) return false;
+  if (abs === pagePath) return true;
+  if (!isUnder(abs, componentsRoot) && !isUnder(abs, featuresRoot)) return false;
+  return !toPosix(relative(repoRoot, abs)).split('/').some((segment) => SKIP_DIRS.has(segment));
+}
 
 const compareStrings = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 const areaOfId = (id) => id.slice(0, id.indexOf('/'));
@@ -314,7 +340,15 @@ export function extractFromSource(source, filePath, state = null) {
 
   function areaFor(rel) {
     if (rel.startsWith('src/app/')) return 'app';
-    const relToComponents = toPosix(relative(componentsRoot, resolve(repoRoot, rel)));
+    const abs = resolve(repoRoot, rel);
+    // A feature's rows are named for the feature (`organicCut/…`), not for the
+    // leaf directory: `features/export/components/ExportPanel.tsx` and
+    // `features/slicing/components/SlicingPanel.tsx` share no area.
+    if (isUnder(abs, featuresRoot)) {
+      const segments = toPosix(relative(featuresRoot, abs)).split('/');
+      return segments.length > 1 ? segments[0] : 'features';
+    }
+    const relToComponents = toPosix(relative(componentsRoot, abs));
     const dir = dirname(relToComponents);
     return dir === '.' || dir === 'src' ? 'components' : toPosix(basename(dir));
   }
@@ -757,11 +791,12 @@ function functionReturnsJsx(fn, ts = loadTypeScript()) {
 function* walkFiles(path, skipped) {
   const stat = statSync(path);
   if (stat.isFile()) {
-    if (SKIP_FILE.test(path)) {
+    if (!path.endsWith('.tsx')) return;
+    if (!isSurfaceSourcePath(path)) {
       skipped.push(toPosix(relative(repoRoot, path)));
       return;
     }
-    if (path.endsWith('.tsx')) yield path;
+    yield path;
     return;
   }
   for (const entry of readdirSync(path, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
@@ -788,7 +823,7 @@ export function extractAll() {
   const files = [];
   const state = { usedIds: new Map(), signatures: new Set(), collisions: [] };
 
-  for (const root of SOURCE_ROOTS) {
+  for (const root of sourceRoots) {
     for (const file of walkFiles(root, skipped)) files.push(file);
   }
   // `src/app` contains more than page.tsx; only page.tsx is in scope.
@@ -823,7 +858,12 @@ export function countsFor(rows) {
   return { total: rows.length, byArea: sortObject(byArea), byKind: sortObject(byKind) };
 }
 
-/** Add new surface ids to the ledger without touching an existing row's status or evidence. */
+/**
+ * Add new surface ids to the ledger without touching an existing row's status or
+ * evidence. Existing rows keep their position — the file is hand-annotated by
+ * the area audits, and `check-coverage` reads ledger order as age — while new
+ * rows are appended in area/id order, so the diff of a re-run is additions only.
+ */
 export function seedLedger(rows, path = ledgerPath) {
   let ledger = { version: 1, note: 'Surface coverage for the GPUI port. Status: absent -> rendered -> wired -> verified.', rows: [] };
   if (existsSync(path)) {
@@ -831,10 +871,10 @@ export function seedLedger(rows, path = ledgerPath) {
     ledger.rows ??= [];
   }
   const existing = new Map(ledger.rows.map((row) => [row.id, row]));
-  let added = 0;
+  const addedRows = [];
   for (const row of rows) {
     if (existing.has(row.id)) continue;
-    existing.set(row.id, {
+    const entry = {
       id: row.id,
       source: row.source,
       kind: row.kind,
@@ -845,15 +885,15 @@ export function seedLedger(rows, path = ledgerPath) {
       status: 'absent',
       pixels: null,
       behaviour: null,
-    });
-    added += 1;
+    };
+    existing.set(row.id, entry);
+    addedRows.push(entry);
   }
-  ledger.rows = [...existing.values()].sort(
-    (a, b) => compareStrings(areaOfId(a.id), areaOfId(b.id)) || compareStrings(a.id, b.id),
-  );
+  addedRows.sort((a, b) => compareStrings(areaOfId(a.id), areaOfId(b.id)) || compareStrings(a.id, b.id));
+  ledger.rows = [...ledger.rows, ...addedRows];
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, `${JSON.stringify(ledger, null, 2)}\n`);
-  return { added, total: ledger.rows.length, path };
+  return { added: addedRows.length, total: ledger.rows.length, path };
 }
 
 function main() {
@@ -861,7 +901,7 @@ function main() {
   const counts = countsFor(rows);
   const output = {
     generatedBy: 'gpui/scripts/extract-surface.mjs',
-    roots: ['src/components/**/*.tsx', 'src/app/page.tsx'],
+    roots: SOURCE_ROOT_LABELS,
     skipped,
     collisions,
     diagnostics,

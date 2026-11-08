@@ -2,7 +2,7 @@
 
 Inputs: `settings-findings.md`, `chrome-panels-findings.md`,
 `profiles-printing-findings.md`, `transforms-overlays-findings.md`.
-Machine ids: `gpui/scripts/surface.json` (1,865 rows). Ledger:
+Machine ids: `gpui/scripts/surface.json` (2,130 rows). Ledger:
 `docs/internal/gpui-coverage.json`. Gate: `node gpui/scripts/check-coverage.mjs`.
 
 Status vocabulary as the ledger uses it: `correct` and `deliberate` fold to
@@ -14,10 +14,10 @@ four audits never mention was left `absent`.
 
 | | before | after |
 |---|---|---|
-| rows in the ledger | 1,865 | 1,865 |
+| rows in the ledger | 2,130 | 2,130 |
 | `verified` | 0 | **603** |
 | `dead` | 0 | **19** |
-| `absent` | 1,865 | 1,243 |
+| `absent` | 2,130 | 1,243 |
 | verified share | 0.0 % | **32.3 %** |
 
 622 rows changed status (603 verified + 19 dead); 1,064 rows were reached by a
