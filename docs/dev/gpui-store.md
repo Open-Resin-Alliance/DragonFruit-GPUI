@@ -32,9 +32,22 @@ not move.
 
 | File | Type | Holds |
 |---|---|---|
-| `settings.json` | `Settings` | User preferences, grouped the way Settings tabs group them: `general` (UI scale, language, layout persistence, import defaults, support-placement help), `camera` (feel preset, FOV, projection, trackpad), `workspaces`, `multiPlate`, `mesh` (shader, matcap, colours), `performance`, `spaceMouse`, `plugins`, `sceneAutosave`, `backups`, `uvtools`, `ui` (theme preference and overrides), `hotkeys`, `logging` |
+| `settings.json` | `Settings` | User preferences, grouped the way Settings tabs group them: `general` (UI scale, language, layout persistence, import defaults, support-placement help), `camera` (feel preset, FOV, projection, trackpad), `workspaces` (camera scope and per-mode defaults), `view3d` (build volume, origin mode, screen size, SAT overlays), `multiPlate` (plate ordering, fixed columns, follow-landed), `mesh` (shader, matcap, colours, lighting), `performance` (PNG compression, AA on supports, and `thumbnail` render options), `spaceMouse`, `plugins`, `experiments` (per-experiment overrides), `sceneAutosave`, `backups`, `uvtools`, `ui` (theme preference and overrides), `hotkeys`, `logging`, `updates` (release channel) |
 | `session.json` | `Session` | What to reopen with: `lastFile`, the camera pose (`yaw`, `pitch`, `distance`, `target`, `fovY`, `orthographic`), the Prepare `activeTool` index, and `panelLayout` — layout version 6, panel id → placement (`dock`, `order`, `width`, float position) plus left/right dock widths |
 | `support-presets.json` | `SupportPresets` | The user's support presets and `activePresetId`. Only user presets are stored: the built-ins (`detail`, `structure`, `anchor`) are code in `src/supports/Settings/presets.ts` and are re-derived on every launch. A preset's `settings` tree stays raw JSON because the supports crate owns its shape |
+
+`session.json` is deliberately a separate file from `settings.json`. It holds
+what the app was doing — `lastFile`, the camera pose, the Prepare `activeTool`
+and the `panelLayout` — which changes at viewport-interaction rate and is
+worthless once the scene is closed. `settings.json` holds preferences the user
+chose and expects to keep. Splitting them means the debounced settings writer
+never rewrites volatile view state, a discarded or corrupt session cannot cost
+the user their preferences, and the newer-schema read-only guard applies to one
+document without freezing the other. The layout keeps the source's document
+version and storage key: version 6, as `floatingLayoutPreferences.ts` wrote
+under `lumenslicer:floating-panel-layout:v6`. Session saves are direct, not
+debounced, because the app calls them at deliberate points (scene close,
+layout change) rather than at input speed.
 
 Every field is `#[serde(default)]`. A file written before a field existed still
 loads, and an unknown enum value falls back to its default rather than failing
@@ -129,6 +142,28 @@ pub fn is_read_only(&self, file: StoreFile) -> bool;
 Loads return defaults rather than `Result`: being unable to read a preference
 file is a normal first run or a recovered corruption, not an error the caller
 can act on. Saves return `Result` because a failed write is actionable.
+
+## What the UI may rely on
+
+The store owns documents; the settings surfaces edit a draft in
+`features::settings`. That facade is the whole contract:
+
+- **`hydrate` is the single entry point.** The app calls it with
+  `Store::load_settings()`'s value at startup and after any external change.
+  Every settings surface renders the hydrated value; no control falls back to a
+  private literal default.
+- **`edit()` marks the draft dirty.** `take_dirty()` reads and clears that flag,
+  and `true` means the app should save `snapshot()`. A caller that mutates the
+  draft without `edit()` must call `mark_dirty()` itself.
+- **`snapshot()` preserves fields the tabs cannot express.** It writes the draft
+  over a copy of the hydrated document, so a value with no control — a shader
+  type the Mesh tab does not list, a PNG strategy with no matching segment —
+  survives a save instead of being reset by omission.
+- **A newer `schemaVersion` makes the file read-only, not clobbered.**
+  `Store::is_read_only` reports the state, the load still yields defaults, and
+  every save fails with `StoreError::NewerSchema`. The UI should show that the
+  document is owned by a newer build rather than retry; the guard is per file,
+  so a newer `settings.json` leaves `session.json` writable.
 
 ## Constraints
 

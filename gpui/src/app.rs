@@ -100,6 +100,77 @@ impl Mode {
     }
 }
 
+/// Which panel the Support stack shows.
+///
+/// The source keeps two independent fields — `supportRailMode`
+/// (`islands`/`manual`/`auto`, `page.tsx:1615`) and
+/// `transformMgr.transformMode === 'hollowing'` — and renders every panel with
+/// `display: none` unless it matches (`page.tsx:10860-10882`). One enum carries
+/// both because this build mounts exactly one Support panel at a time: selecting
+/// a rail panel writes its variant, and Hollow writes [`Self::Hollowing`],
+/// which is the source's "Hollowing wins while it is selected".
+///
+/// `active_tool` stays the Prepare tool only, so switching Support panels never
+/// overwrites the tool the user will return to (the source's
+/// `prepareToolMemoryRef`).
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum SupportPanel {
+    Islands,
+    /// The source's `useState<SupportRailMode>('manual')` default.
+    #[default]
+    Manual,
+    Auto,
+    Hollowing,
+}
+
+impl SupportPanel {
+    /// The three rail panel tiles, in `buildSupportToolRailEntries` order
+    /// (`toolRailEntries.ts:208-210`): Islands, Manual, Automatic.
+    pub(crate) const RAIL: [SupportPanel; 3] = [Self::Islands, Self::Manual, Self::Auto];
+
+    /// The panel a rail tile selects, by its index in [`Self::RAIL`].
+    pub(crate) fn from_rail(index: usize) -> Self {
+        Self::RAIL.get(index).copied().unwrap_or_default()
+    }
+
+    /// The Support panel body's tool index (`features::tool_panels` only knows
+    /// the three `supportRailMode` panels; Hollowing has its own body).
+    fn tool_index(self) -> Option<usize> {
+        match self {
+            Self::Islands => Some(0),
+            Self::Manual => Some(1),
+            Self::Auto => Some(2),
+            Self::Hollowing => None,
+        }
+    }
+
+    /// The stack entry's id, title and kind.
+    fn meta(self) -> (&'static str, &'static str, panels::list::PanelKind) {
+        match self {
+            Self::Islands => (
+                "support-islands",
+                "Islands",
+                panels::list::PanelKind::Supports,
+            ),
+            Self::Manual => (
+                "support-settings",
+                "Support Settings",
+                panels::list::PanelKind::Supports,
+            ),
+            Self::Auto => (
+                "support-auto",
+                "Auto Supports (Beta)",
+                panels::list::PanelKind::Supports,
+            ),
+            Self::Hollowing => (
+                "support-hollowing",
+                "Hollowing",
+                panels::list::PanelKind::Supports,
+            ),
+        }
+    }
+}
+
 /// One entry of the editor's notification stack. The source keeps a toast per
 /// kind; this build only raises the scene-import report (and export, once
 /// `panel_content` calls [`DragonFruit::show_toast`]).
@@ -190,7 +261,21 @@ pub(crate) struct DragonFruit {
     #[allow(dead_code)]
     pub(crate) select_fleet_unit: Option<String>,
     pub(crate) settings_tab: usize,
+    /// The Prepare tool index (`active_tool` in the source). Support selection
+    /// lives in [`Self::support_panel`] instead, so the two workspaces keep
+    /// their own tool, as the source's `prepareToolMemoryRef` does.
     pub(crate) active_tool: usize,
+    /// `supportRailMode` plus the Hollowing tool: the Support stack's selection.
+    pub(crate) support_panel: SupportPanel,
+    /// `settings.json` / `session.json`: the only state that survives a
+    /// restart. `None` when the data directory cannot be opened, in which case
+    /// the app runs exactly as before and nothing is persisted.
+    store: Option<gpui_store::Store>,
+    /// The file this session opened, written to `session.json` on exit.
+    last_file: Option<PathBuf>,
+    /// `session.json`'s `lastFile`, opened on the first frame: `new` has no
+    /// built entity to spawn the background load from.
+    pending_reopen: Option<PathBuf>,
     pub(crate) window_width: f32,
     /// An OS file drag is over the canvas (`isPrepareDragActive`).
     pub(crate) drag_active: bool,
@@ -210,6 +295,20 @@ impl DragonFruit {
             .skip(1)
             .find(|arg| !arg.starts_with("--"))
             .map(PathBuf::from);
+
+        // The store is the only state that outlives the process:
+        // `settings.json` hydrates the settings draft once, and `session.json`
+        // restores the last file, camera pose, Prepare tool and panel layout.
+        // A store that cannot open leaves every one of those at its default and
+        // disables the saves below.
+        let store = gpui_store::Store::open().ok();
+        let session = match &store {
+            Some(store) => {
+                features::settings::hydrate(store.load_settings());
+                Some(store.load_session())
+            }
+            None => None,
+        };
 
         let mut app = Self {
             mesh: None,
@@ -263,6 +362,10 @@ impl DragonFruit {
             select_fleet_unit: None,
             settings_tab: 0,
             active_tool: 0,
+            support_panel: SupportPanel::default(),
+            store,
+            last_file: None,
+            pending_reopen: None,
             window_width: 0.0,
             drag_active: false,
             drag_unsupported: false,
@@ -270,17 +373,91 @@ impl DragonFruit {
             toast_seq: 0,
             scale_logged: false,
         };
+        if let Some(session) = &session {
+            app.apply_session(session);
+        }
         if let Some(path) = path {
             match load_file(&path) {
-                Ok(loaded) => app.apply_loaded(loaded),
+                Ok(loaded) => {
+                    app.apply_loaded(loaded);
+                    app.last_file = Some(path);
+                }
                 Err(error) => {
                     eprintln!("{error:#}");
                     let text = load_failure_text(&path, &error);
                     app.show_toast(text, ui::ToastTone::Error, cx);
                 }
             }
+        } else if let Some(last) = app.last_file.take() {
+            // Reopen what the last session had. The load is spawned from the
+            // first frame, when the entity exists; a path that no longer
+            // exists was already filtered out by `apply_session`.
+            app.pending_reopen = Some(last);
         }
         app
+    }
+
+    /// Restore `session.json`: the camera pose, the Prepare tool and the panel
+    /// layout. [`Self::last_file`] keeps the path, which `new` hands to
+    /// [`Self::pending_reopen`] when the command line named no file.
+    fn apply_session(&mut self, session: &gpui_store::Session) {
+        if let Some(pose) = session.camera {
+            restore_camera(&self.camera, &pose);
+        }
+        // The rail owns the list; a document from a newer build with more tools
+        // must not index past this build's match arms.
+        self.active_tool = (session.active_tool as usize).min(rail::prepare_tool_count() - 1);
+        apply_session_layout(&self.layout, &session.panel_layout);
+        self.last_file = session.last_file.clone().filter(|path| path.is_file());
+    }
+
+    /// Persist a settings edit for the frame that just handled input, and wait
+    /// on nothing: the debounced writer coalesces edits and owns the disk IO.
+    /// The read-only guard covers a `settings.json` written by a newer build,
+    /// which must not be downgraded.
+    fn persist_settings(&self) {
+        if !features::settings::take_dirty() {
+            return;
+        }
+        let Some(store) = &self.store else {
+            return;
+        };
+        if store.is_read_only(gpui_store::StoreFile::Settings) {
+            return;
+        }
+        let _ = store.save_settings_debounced(&features::settings::snapshot());
+    }
+
+    /// Write `session.json` now. Session saves are direct, not debounced: they
+    /// happen at deliberate points (a load, a scene close, exit), not at input
+    /// speed. A newer document is left untouched.
+    fn save_session(&self) {
+        let Some(store) = &self.store else {
+            return;
+        };
+        if store.is_read_only(gpui_store::StoreFile::Session) {
+            return;
+        }
+        let _ = store.save_session(&self.session_document());
+    }
+
+    /// `session.json`'s document for the current state.
+    fn session_document(&self) -> gpui_store::Session {
+        let camera = self.camera.borrow();
+        gpui_store::Session {
+            last_file: self.last_file.clone(),
+            camera: Some(gpui_store::CameraPose {
+                yaw: camera.yaw,
+                pitch: camera.pitch,
+                distance: camera.distance,
+                target: camera.target.to_array(),
+                fov_y: camera.fov_y,
+                orthographic: camera.orthographic,
+            }),
+            active_tool: self.active_tool as u32,
+            panel_layout: session_layout(&self.layout),
+            ..Default::default()
+        }
     }
 
     /// Install a finished load. A plain mesh keeps the identity transform; a
@@ -374,7 +551,14 @@ impl DragonFruit {
                 .await;
             this.update(cx, move |this, cx| {
                 match result {
-                    Ok(loaded) => this.apply_loaded(loaded),
+                    Ok(loaded) => {
+                        this.apply_loaded(loaded);
+                        // The next launch reopens this file (`session.json`);
+                        // session saves are direct, so record it now rather
+                        // than only at exit.
+                        this.last_file = Some(toast_path.clone());
+                        this.save_session();
+                    }
                     Err(error) => {
                         eprintln!("{error:#}");
                         // A failed import leaves the current scene untouched.
@@ -418,10 +602,14 @@ impl DragonFruit {
         self.layer = 0.0;
         self.lower_layer = 0.0;
         self.mode = Mode::Prepare;
+        // There is nothing left to reopen: a deleted model must not come back
+        // with the next launch's `session.json`.
+        self.last_file = None;
         // Models going to zero resets the camera home (`useStlLoadCameraIntro`).
         self.camera
             .borrow_mut()
             .home(glam::Vec3::new(0.0, 0.0, 110.0));
+        self.save_session();
     }
 
     /// Raise a toast for `TOAST_DURATION_MS`, replacing the current one.
@@ -475,11 +663,43 @@ impl DragonFruit {
     }
 }
 
+/// The window closing is this build's exit: write `session.json` and wait for
+/// the debounced settings writer so an edit made in the last 500 ms still lands.
+/// A read-only document (written by a newer build) is left untouched, matching
+/// [`gpui_store::Store::save_session`]'s guard.
+impl Drop for DragonFruit {
+    fn drop(&mut self) {
+        let Some(store) = &self.store else {
+            return;
+        };
+        // An edit in the last frame may not have rendered yet, so the queue
+        // could still be empty; take the flag here so closing the window never
+        // loses the change.
+        if features::settings::take_dirty() && !store.is_read_only(gpui_store::StoreFile::Settings)
+        {
+            let _ = store.save_settings_debounced(&features::settings::snapshot());
+        }
+        self.save_session();
+        let _ = store.flush_debounced();
+    }
+}
+
 impl Render for DragonFruit {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // `handleModeChange`: an empty scene can only be Prepare.
         if self.mesh.is_none() && self.mode != Mode::Prepare {
             self.mode = Mode::Prepare;
+        }
+
+        // Input handlers run before the frame they invalidate, so a settings
+        // edit is on the draft by the time its `cx.notify()` renders. Taking
+        // the flag here keeps the write off the click handler's stack.
+        self.persist_settings();
+
+        // `session.json`'s `lastFile` reopens once, on the first frame: the
+        // background load needs the entity `new` has not returned yet.
+        if let Some(path) = self.pending_reopen.take() {
+            self.load_path(path, cx);
         }
 
         if !self.scale_logged {
@@ -1063,7 +1283,12 @@ impl Render for DragonFruit {
             })
             // `ToolRail` renders only in Prepare/Support with models.
             .when(has_models && matches!(mode, Mode::Prepare | Mode::Support), |this| {
-                this.child(rail::tool_rail(mode, self.active_tool, entity.clone()))
+                this.child(rail::tool_rail(
+                    mode,
+                    self.active_tool,
+                    self.support_panel,
+                    entity.clone(),
+                ))
             })
             .child({
                 let mut defs = Vec::new();
@@ -1130,54 +1355,28 @@ impl Render for DragonFruit {
                         }
                     }
                     Mode::Support => {
-                        // `SupportPanelStack`: the rail tool selects the panel.
-                        let meta: Option<(&'static str, &'static str, panels::list::PanelKind)> =
-                            match self.active_tool {
-                                0 => Some((
-                                    "support-islands",
-                                    "Islands",
-                                    panels::list::PanelKind::Supports,
-                                )),
-                                1 => Some((
-                                    "support-settings",
-                                    "Support Settings",
-                                    panels::list::PanelKind::Supports,
-                                )),
-                                2 => Some((
-                                    "support-auto",
-                                    "Auto Supports (Beta)",
-                                    panels::list::PanelKind::Supports,
-                                )),
-                                3 => Some((
-                                    "support-hollowing",
-                                    "Hollowing",
-                                    panels::list::PanelKind::Supports,
-                                )),
-                                _ => None,
-                            };
-                        if let Some((id, title, kind)) = meta {
-                            let body = if self.active_tool == 3 {
-                                Some(
-                                    features::support_panels::hollowing_body(
-                                        &self.hollowing,
-                                        entity.clone(),
-                                    )
-                                    .into_any_element(),
-                                )
-                            } else {
-                                features::tool_panels::tool_panel(
-                                    self.active_tool,
-                                    mode,
+                        // `SupportPanelStack`: `supportRailMode` (and the
+                        // Hollowing tool) select one panel. The rail writes
+                        // `support_panel`; `active_tool` stays Prepare's.
+                        let (id, title, kind) = self.support_panel.meta();
+                        let body = match self.support_panel {
+                            SupportPanel::Hollowing => Some(
+                                features::support_panels::hollowing_body(
+                                    &self.hollowing,
                                     entity.clone(),
                                 )
-                            };
-                            if let Some(body) = body {
-                                defs.push(
-                                    panels::list::PanelDef::new(id, title, kind)
-                                        .dock(panels::list::PanelDock::Right)
-                                        .content(body),
-                                );
-                            }
+                                .into_any_element(),
+                            ),
+                            panel => panel.tool_index().and_then(|tool| {
+                                features::tool_panels::tool_panel(tool, mode, entity.clone())
+                            }),
+                        };
+                        if let Some(body) = body {
+                            defs.push(
+                                panels::list::PanelDef::new(id, title, kind)
+                                    .dock(panels::list::PanelDock::Right)
+                                    .content(body),
+                            );
                         }
                     }
                     Mode::Export => defs.push(
@@ -1453,6 +1652,102 @@ fn mesh_color(selected: bool, hovered: bool) -> [f32; 3] {
     } else {
         [srgb_to_linear(0xa3), srgb_to_linear(0xa3), srgb_to_linear(0xa3)]
     }
+}
+
+/// A restored camera pose, applied to the parked camera before the first frame.
+///
+/// `Camera`'s smoothing goals are private, and `orient_to` is the only public
+/// setter that writes them — writing `yaw`/`pitch` alone is undone by the next
+/// `step`. `orient_to` starts the source's 400 ms `tweenCamera`; stepping it
+/// once with a full second's delta lands on the end pose and clears the tween,
+/// because a restored pose is a restore, not an entry animation. The distance,
+/// target and projection set here are the tween's start and end, so only the
+/// angles were ever in flight.
+fn restore_camera(camera: &Rc<RefCell<Camera>>, pose: &gpui_store::CameraPose) {
+    let mut camera = camera.borrow_mut();
+    camera.distance = pose.distance;
+    camera.target = glam::Vec3::from_array(pose.target);
+    camera.fov_y = pose.fov_y;
+    camera.orthographic = pose.orthographic;
+    camera.orient_to(pose.yaw, pose.pitch);
+    let _ = camera.step(1.0);
+}
+
+/// `panel_layout.rs`'s placement as the store's plain copy.
+fn session_placement(
+    placement: gpui_core::panel_layout::PanelPlacement,
+) -> gpui_store::PanelPlacement {
+    gpui_store::PanelPlacement {
+        dock: match placement.dock {
+            gpui_core::panel_layout::PanelDock::Left => gpui_store::PanelDock::Left,
+            gpui_core::panel_layout::PanelDock::Right => gpui_store::PanelDock::Right,
+            gpui_core::panel_layout::PanelDock::Float => gpui_store::PanelDock::Float,
+        },
+        order: placement.order as u32,
+        width: placement.width,
+        float: placement
+            .float
+            .map(|(x, y)| gpui_store::FloatPoint { x, y }),
+    }
+}
+
+/// The live panel layout as `session.json`'s `panelLayout`.
+fn session_layout(layout: &gpui_core::panel_layout::PanelLayout) -> gpui_store::SessionLayout {
+    let state = layout.state.borrow();
+    let mut panels = std::collections::BTreeMap::new();
+    // `loaded` holds placements read from disk for panels not shown yet; the
+    // live `panels` map wins for the panels this session did show.
+    for (id, placement) in &state.loaded {
+        panels.insert(id.clone(), session_placement(*placement));
+    }
+    for (id, placement) in &state.panels {
+        panels.insert(String::from(*id), session_placement(*placement));
+    }
+    gpui_store::SessionLayout {
+        panels,
+        left_dock_width: state.left_width,
+        right_dock_width: state.right_width,
+        ..Default::default()
+    }
+}
+
+/// Seed the panel layout from `session.json`.
+///
+/// `PanelLayout` persists itself to `floating-panel-layout.json` and loads that
+/// file when it is constructed, so this only has work to do when that file is
+/// absent (first run, or a deleted config): the session copy is the fallback,
+/// never an override of a layout the user has actually moved since.
+fn apply_session_layout(
+    layout: &gpui_core::panel_layout::PanelLayout,
+    saved: &gpui_store::SessionLayout,
+) {
+    {
+        let state = layout.state.borrow();
+        // `loaded` is populated from the layout's own file, so either map being
+        // non-empty means the panel document already exists.
+        if !state.panels.is_empty() || !state.loaded.is_empty() {
+            return;
+        }
+    }
+    let mut state = layout.state.borrow_mut();
+    for (id, placement) in &saved.panels {
+        let dock = match placement.dock {
+            gpui_store::PanelDock::Left => gpui_core::panel_layout::PanelDock::Left,
+            gpui_store::PanelDock::Right => gpui_core::panel_layout::PanelDock::Right,
+            gpui_store::PanelDock::Float => gpui_core::panel_layout::PanelDock::Float,
+        };
+        state.loaded.insert(
+            id.clone(),
+            gpui_core::panel_layout::PanelPlacement {
+                dock,
+                order: placement.order as usize,
+                float: placement.float.map(|point| (point.x, point.y)),
+                width: placement.width,
+            },
+        );
+    }
+    state.left_width = saved.left_dock_width;
+    state.right_width = saved.right_dock_width;
 }
 
 fn rasterize_logo() -> Option<PathBuf> {

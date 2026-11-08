@@ -8,21 +8,23 @@
 //!
 //! # State the parent does not carry
 //!
-//! `tool_rail` is handed only the app mode, the active tool index, and the
-//! entity. Four pieces of the React component therefore live in this module:
+//! `tool_rail` is handed the app mode, the Prepare tool index, the Support
+//! panel selection and the entity. Three pieces of the React component live in
+//! this module:
 //!
 //! - the layout preference (`ToolLayout` in the React app, persisted in settings),
 //! - the Models panel's visibility (`modelsPanelVisible`), mirrored into the
 //!   parent's `collapsed` map — the only panel-visibility lever `PanelLayout`
-//!   exposes,
-//! - the Support panel mode (`supportRailMode`) and the Hollowing tool, which the
-//!   source keeps independent of Prepare's `transformMode`, and
+//!   exposes, and
 //! - the two Support view toggles (`interiorView`, line/full support drawing),
 //!   which the parent has no fields for.
 //!
-//! `active_tool` is the parent's Prepare tool only. Support's panel mode and the
-//! Hollowing tool are rail-local, so selecting a panel never overwrites the
-//! Prepare tool the user will return to (the source's per-workspace tool memory).
+//! The Support selection is not rail-local: `DragonFruit::support_panel` (the
+//! source's `supportRailMode` plus `transformMgr.transformMode === 'hollowing'`)
+//! is written through the entity so the panel stack can mount the chosen panel.
+//! `active_tool` is the parent's Prepare tool only, so selecting a Support panel
+//! never overwrites the Prepare tool the user will return to (the source's
+//! per-workspace tool memory).
 //!
 //! # PORT DEVIATIONS
 //!
@@ -65,14 +67,14 @@
 //!   and its own chevron can re-expand it without updating this preference.
 //!   Switching to the bar re-shows it (`modelsPanelShown = modelsPanelVisible ||
 //!   toolLayout === 'horizontal'`); switching back re-applies the preference.
-//! - `support_mode` (`supportRailMode`, default `'manual'`) and `hollowing`
-//!   (`transformMgr.transformMode === 'hollowing'`). The source keeps both
-//!   independent of Prepare's `transformMode`; this module does too, so
-//!   `active_tool` is never overwritten from Support. Selecting a panel clears
-//!   Hollowing, and selecting Hollowing keeps the panel mode remembered, as in
-//!   the source. The selected Support panel is not wired to the panel stack yet:
-//!   `main.rs` always mounts the "supports" panel, and `DragonFruit` has no
-//!   hollowing transform mode, so Hollow only lights its tile.
+//! - `support_panel` (`supportRailMode`, default `'manual'`, plus
+//!   `transformMgr.transformMode === 'hollowing'`): this module writes it to the
+//!   entity, which mounts the matching panel. The source keeps the two fields
+//!   independent; one enum carries both because only one Support panel shows at
+//!   a time — selecting a panel leaves Hollowing, and Hollowing is left only by
+//!   selecting a panel again. The source's "Hollowing keeps the panel mode
+//!   remembered" therefore reduces to the tile that is not lit while Hollowing
+//!   shows.
 //! - `interior_view` and `view_lines` (`interiorView`,
 //!   `supportDisplaySettings.navigationDiscsOnly`).
 //!
@@ -87,9 +89,9 @@
 //! - The source has one shared `transformMode`, so entering Support resets it to
 //!   `'select'` (no gizmo) and restores the remembered Prepare tool on the way
 //!   back. `DragonFruit::active_tool` is only the Prepare tool here, so the
-//!   shell's gizmo check (`active_tool == 1` in `main.rs`) still sees Transform
-//!   while Support is showing a panel. Fixing that needs a per-workspace tool
-//!   state on the entity.
+//!   shell's gizmo check (`active_tool == 1` in `app.rs`) still sees Transform
+//!   while Support is showing a panel. Fixing that needs the gizmo check to read
+//!   the mode, not a per-workspace tool state on the entity.
 //! - The source renders the rail only when `scene.models.length > 0`; `main.rs`
 //!   renders it unconditionally (the entity carries no model count).
 
@@ -104,6 +106,7 @@ use gpui::{
 use gpui_core::icons::icon;
 use gpui_core::theme::*;
 use gpui_ui::ui::{ContextMenuEntry, context_menu};
+use crate::app::SupportPanel;
 use crate::{DragonFruit, Mode};
 
 /// The tile's side, in pixels (`h-[54px]` / `w-[54px]`).
@@ -147,9 +150,10 @@ enum Separated {
 }
 
 /// What a click does. Prepare's tools set the parent's `active_tool`; Support's
-/// panel mode and Hollowing are rail-local, as in the source's separate
-/// `supportRailMode` / `transformMode`; the Models entry toggles the parent's
-/// `collapsed` map; the two Support view toggles are rail-local.
+/// panel tools and Hollowing set the parent's `support_panel` (the source's
+/// `supportRailMode` / `transformMode === 'hollowing'`); the Models entry
+/// toggles the parent's `collapsed` map; the two Support view toggles are
+/// rail-local.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Action {
     SelectPrepareTool(usize),
@@ -182,10 +186,6 @@ struct RailState {
     menu: Option<(f32, f32)>,
     /// `modelsPanelVisible` — the stored preference, not the shown state.
     models_visible: bool,
-    /// `supportRailMode`: 0 Islands, 1 Manual, 2 Automatic (default `'manual'`).
-    support_mode: usize,
-    /// `transformMgr.transformMode === 'hollowing'`.
-    hollowing: bool,
     interior_view: bool,
     view_lines: bool,
 }
@@ -197,9 +197,6 @@ impl Default for RailState {
             hovered: None,
             menu: None,
             models_visible: true,
-            // `useState<SupportRailMode>('manual')`.
-            support_mode: 1,
-            hollowing: false,
             interior_view: false,
             view_lines: false,
         }
@@ -352,6 +349,13 @@ const PREPARE_TOOLS: [(&str, &str, &str, &str, Option<Separated>); 8] = [
     ),
 ];
 
+/// How many Prepare tools the rail has. `app.rs` clamps a restored
+/// `session.json` tool index with it, so `PREPARE_TOOLS` stays the single
+/// source of truth for the count.
+pub(crate) fn prepare_tool_count() -> usize {
+    PREPARE_TOOLS.len()
+}
+
 /// The three Support panel tools, in rail order (`buildSupportToolRailEntries`).
 const SUPPORT_PANELS: [(&str, &str, &str, &str, Option<Separated>); 3] = [
     (
@@ -377,16 +381,15 @@ const SUPPORT_PANELS: [(&str, &str, &str, &str, Option<Separated>); 3] = [
     ),
 ];
 
-fn entries_for(mode: Mode, active_tool: usize, layout: Layout) -> Vec<RailEntry> {
-    let (models_visible, support_mode, hollowing, interior_view, view_lines) = RAIL.with(|state| {
+fn entries_for(
+    mode: Mode,
+    active_tool: usize,
+    support_panel: SupportPanel,
+    layout: Layout,
+) -> Vec<RailEntry> {
+    let (models_visible, interior_view, view_lines) = RAIL.with(|state| {
         let state = state.borrow();
-        (
-            state.models_visible,
-            state.support_mode,
-            state.hollowing,
-            state.interior_view,
-            state.view_lines,
-        )
+        (state.models_visible, state.interior_view, state.view_lines)
     });
 
     let mut entries = Vec::new();
@@ -421,8 +424,9 @@ fn entries_for(mode: Mode, active_tool: usize, layout: Layout) -> Vec<RailEntry>
                     label,
                     hint,
                     icon,
-                    // A panel tool is lit only while Hollowing is not showing.
-                    active: !hollowing && support_mode == index,
+                    // `active: !hollowingActive && mode === railMode`: a panel
+                    // tool is lit only while Hollowing is not showing.
+                    active: support_panel == SupportPanel::from_rail(index),
                     invert_lit: false,
                     tone: Tone::Tool,
                     disabled: false,
@@ -435,7 +439,7 @@ fn entries_for(mode: Mode, active_tool: usize, layout: Layout) -> Vec<RailEntry>
                 label: "Hollow",
                 hint: "Create cavity or open-face shell",
                 icon: "hollow-shell",
-                active: hollowing,
+                active: support_panel == SupportPanel::Hollowing,
                 invert_lit: false,
                 tone: Tone::Tool,
                 disabled: false,
@@ -491,19 +495,31 @@ fn apply_action(action: Action, entity: &WeakEntity<DragonFruit>, cx: &mut App) 
                 .ok();
         }
         Action::SelectSupportPanel(index) => {
-            RAIL.with(|state| {
-                let mut state = state.borrow_mut();
-                state.support_mode = index;
-                // The source leaves Hollowing for the selected panel.
-                state.hollowing = false;
-            });
-            entity.update(cx, |_, cx| cx.notify()).ok();
+            let panel = SupportPanel::from_rail(index);
+            entity
+                .update(cx, |this, cx| {
+                    // Selecting a panel leaves Hollowing, exactly as the
+                    // source's panel tool sets `transformMode` back to
+                    // `'select'`.
+                    if this.support_panel != panel {
+                        this.support_panel = panel;
+                        cx.notify();
+                    }
+                })
+                .ok();
         }
         Action::SelectHollowing => {
-            // Hollowing keeps the panel mode, so leaving it lands on the panel
-            // the user last chose (`supportToolMemoryRef`).
-            RAIL.with(|state| state.borrow_mut().hollowing = true);
-            entity.update(cx, |_, cx| cx.notify()).ok();
+            // Hollowing wins the stack while it is selected; the source keeps
+            // the panel mode remembered, which this single field restores by
+            // selecting a panel again (`supportToolMemoryRef`).
+            entity
+                .update(cx, |this, cx| {
+                    if this.support_panel != SupportPanel::Hollowing {
+                        this.support_panel = SupportPanel::Hollowing;
+                        cx.notify();
+                    }
+                })
+                .ok();
         }
         Action::ToggleModels => {
             let visible = RAIL.with(|state| {
@@ -871,17 +887,19 @@ fn horizontal_rail(
 }
 
 /// The tool rail for `mode`, with `active_tool` selecting the current Prepare
-/// tool.
+/// tool and `support_panel` the current Support panel.
 ///
 /// Prepare's indices are the eight tools in `PREPARE_TOOLS` order (0 Drag,
-/// 1 Transform, … 7 Smooth). Support's panel mode and Hollowing are rail-local
-/// (`support_mode`, `hollowing`), matching the source's `supportRailMode` and
-/// `transformMode === 'hollowing'`, so `active_tool` is never overwritten from
-/// Support. Export and Printing have no rail, matching the React call site,
-/// which renders it only in Prepare and Support.
+/// 1 Transform, … 7 Smooth). Support's tiles select
+/// [`SupportPanel`] — the source's `supportRailMode` plus
+/// `transformMode === 'hollowing'` — which the parent's panel stack reads, so
+/// `active_tool` is never overwritten from Support. Export and Printing have no
+/// rail, matching the React call site, which renders it only in Prepare and
+/// Support.
 pub fn tool_rail(
     mode: Mode,
     active_tool: usize,
+    support_panel: SupportPanel,
     entity: WeakEntity<DragonFruit>,
 ) -> AnyElement {
     // The source renders the rail only in Prepare and Support.
@@ -889,7 +907,7 @@ pub fn tool_rail(
         return div().into_any_element();
     }
     let layout = RAIL.with(|state| state.borrow().layout);
-    let entries = entries_for(mode, active_tool, layout);
+    let entries = entries_for(mode, active_tool, support_panel, layout);
     let overlays = overlays(entity.clone());
     let rail = match layout {
         Layout::Vertical => vertical_rail(entries, entity, overlays),

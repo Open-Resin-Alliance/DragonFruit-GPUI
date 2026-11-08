@@ -25,7 +25,7 @@ task. Findings are ranked by user-visible impact; W3 executes them.
 ## Systematic
 
 4. **`rounded-lg` read as 8px** in six settings/preview modules where
-   `globals.css:43` says 14px — the same misreading fixed elsewhere this cycle.
+   `globals.css`'s `--radius-lg` says 14px — the same misreading fixed elsewhere this cycle.
    Search the remaining `ROUNDED_LG = 8` / literal `8.0` radii.
 
 ## Method
