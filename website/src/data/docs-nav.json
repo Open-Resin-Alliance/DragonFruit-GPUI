@@ -274,6 +274,22 @@
             {
               "label": "GPUI Widgets",
               "slug": "dev/gpui-widgets"
+            },
+            {
+              "label": "GPUI VOXL Reader",
+              "slug": "dev/gpui-voxl"
+            },
+            {
+              "label": "GPUI Store",
+              "slug": "dev/gpui-store"
+            },
+            {
+              "label": "GPUI Locale",
+              "slug": "dev/gpui-locale"
+            },
+            {
+              "label": "GPUI Full-Port Plan",
+              "slug": "dev/gpui-full-port-plan"
             }
           ]
         },

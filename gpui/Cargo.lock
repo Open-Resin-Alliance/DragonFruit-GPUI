@@ -2541,6 +2541,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "gpui-locale"
+version = "0.0.0"
+dependencies = [
+ "bite-gpui",
+ "ryu",
+]
+
+[[package]]
+name = "gpui-store"
+version = "0.0.0"
+dependencies = [
+ "dirs",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "gpui-supports"
 version = "0.0.0"
 dependencies = [
@@ -2554,6 +2573,15 @@ dependencies = [
  "bite-gpui",
  "declarative-gpui",
  "gpui-core",
+]
+
+[[package]]
+name = "gpui-voxl"
+version = "0.0.0"
+dependencies = [
+ "flate2",
+ "serde_json",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
