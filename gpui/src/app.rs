@@ -292,7 +292,6 @@ pub(crate) struct DragonFruit {
     last_file: Option<PathBuf>,
     /// `session.json`'s `lastFile`, opened on the first frame: `new` has no
     /// built entity to spawn the background load from.
-    pending_reopen: Option<PathBuf>,
     pub(crate) window_width: f32,
     /// An OS file drag is over the canvas (`isPrepareDragActive`).
     pub(crate) drag_active: bool,
@@ -401,7 +400,6 @@ impl DragonFruit {
             support_panel: SupportPanel::default(),
             store,
             last_file: None,
-            pending_reopen: None,
             window_width: 0.0,
             drag_active: false,
             drag_unsupported: false,
@@ -430,12 +428,9 @@ impl DragonFruit {
                     app.show_toast(text, ui::ToastTone::Error, cx);
                 }
             }
-        } else if let Some(last) = app.last_file.take() {
-            // Reopen what the last session had. The load is spawned from the
-            // first frame, when the entity exists; a path that no longer
-            // exists was already filtered out by `apply_session`.
-            app.pending_reopen = Some(last);
         }
+        // `lastFile` is remembered for the recent list, not reopened: the app
+        // starts on an empty plate, which is what the source does.
         app
     }
 
@@ -958,12 +953,6 @@ impl Render for DragonFruit {
         // edit is on the draft by the time its `cx.notify()` renders. Taking
         // the flag here keeps the write off the click handler's stack.
         self.persist_settings();
-
-        // `session.json`'s `lastFile` reopens once, on the first frame: the
-        // background load needs the entity `new` has not returned yet.
-        if let Some(path) = self.pending_reopen.take() {
-            self.load_path(path, cx);
-        }
 
         if !self.scale_logged {
             self.scale_logged = true;

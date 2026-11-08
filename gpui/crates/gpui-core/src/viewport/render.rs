@@ -76,12 +76,22 @@ impl Viewport {
                     }
                 }
                 if mesh_changed {
-                    let vertex_buffer =
-                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("viewport vertices"),
-                            contents: bytemuck::cast_slice(&mesh.vertices),
-                            usage: wgpu::BufferUsages::VERTEX,
-                        });
+                    // 64 MiB per chunk keeps every buffer well inside the
+                    // device limit while a 300 MB model still loads.
+                    const CHUNK_BYTES: usize = 64 * 1024 * 1024;
+                    let vertex_chunks: Vec<(wgpu::Buffer, u32)> = mesh
+                        .vertices
+                        .chunks(CHUNK_BYTES / std::mem::size_of::<[f32; 3]>())
+                        .map(|chunk| {
+                            let buffer =
+                                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                    label: Some("viewport vertices"),
+                                    contents: bytemuck::cast_slice(chunk),
+                                    usage: wgpu::BufferUsages::VERTEX,
+                                });
+                            (buffer, chunk.len() as u32)
+                        })
+                        .collect();
                     let footprint_buffer =
                         device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                             label: Some("viewport footprint"),
@@ -89,8 +99,7 @@ impl Viewport {
                             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
                         });
                     self.mesh = Some(GpuMesh {
-                        vertex_buffer,
-                        vertex_count: mesh.vertices.len() as u32,
+                        vertex_chunks,
                         footprint_buffer,
                         footprint_vertex_count: outline.len() as u32,
                     });
@@ -469,8 +478,10 @@ impl Viewport {
                 }
                 pass.set_pipeline(&self.mesh_pipeline);
                 pass.set_bind_group(1, &self.model_bind, &[]);
-                pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-                pass.draw(0..mesh.vertex_count, 0..1);
+                for (buffer, count) in &mesh.vertex_chunks {
+                    pass.set_vertex_buffer(0, buffer.slice(..));
+                    pass.draw(0..*count, 0..1);
+                }
             }
             // The gizmo last, so its depth-test-always handles land on top of
             // the model rather than being punched through by it. The source

@@ -71,8 +71,10 @@ pub(super) struct SupportInstance {
 }
 
 pub(super) struct GpuMesh {
-    pub(super) vertex_buffer: wgpu::Buffer,
-    pub(super) vertex_count: u32,
+    /// `wgpu`'s `max_buffer_size` is 256 MiB by default and the device is
+    /// GPUI's, so a large model is split into chunks instead of failing
+    /// validation on one buffer.
+    pub(super) vertex_chunks: Vec<(wgpu::Buffer, u32)>,
     pub(super) footprint_buffer: wgpu::Buffer,
     pub(super) footprint_vertex_count: u32,
 }
