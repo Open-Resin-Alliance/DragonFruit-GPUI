@@ -255,11 +255,9 @@ pub(super) fn axis_arrows(metrics: &PlateMetrics) -> Vec<[f32; 6]> {
             // Cone: `ConeGeometry(headRadius, headLength, 12)`, base capped.
             let b0 = ring(length, head_radius, a0);
             let b1 = ring(length, head_radius, a1);
-            // Absolute positions, so the cone continues the shaft's ramp
-            // instead of restarting it (which read as a bright ring at the
-            // shaft/cone seam).
-            let cone_base = shade(length, total);
-            let cone_tip = shade(total, total);
+            // The head is solid: the ramp belongs to the shaft only.
+            let cone_base = tip;
+            let cone_tip = tip;
             let center = center_at(length);
             let cone_radial = radial(length, b0, b1);
             push_tri_colors(
