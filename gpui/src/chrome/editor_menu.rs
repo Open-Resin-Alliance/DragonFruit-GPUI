@@ -153,7 +153,7 @@ fn select(entity: &WeakEntity<DragonFruit>, id: &str, cx: &mut App) {
                 // `dispatchDeleteModelAction(..., scene.deleteModels)`, gated on
                 // `hasTargetModel`.
                 "delete" => {
-                    if this.mesh.is_some() {
+                    if this.has_mesh() {
                         this.delete_model();
                     }
                 }

@@ -3,6 +3,7 @@
 
 use anyhow::Result;
 use gpui_interop::WgpuSurface;
+use std::collections::BTreeMap;
 use wgpu::util::DeviceExt as _;
 
 use crate::stl::Vertex;
@@ -457,21 +458,6 @@ impl Viewport {
                 bind_group_layouts: &[Some(&uniform_layout), Some(&model_layout)],
                 immediate_size: 0,
             });
-        let model_uniform = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("viewport model"),
-            // `ModelUniform`: matrix + clip + bounds_min/max + stripe.
-            size: std::mem::size_of::<super::uniforms::ModelUniform>() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let model_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("viewport model"),
-            layout: &model_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: model_uniform.as_entire_binding(),
-            }],
-        });
         let mesh_pipeline = pipeline(
             device,
             &mesh_pipeline_layout,
@@ -1249,6 +1235,8 @@ impl Viewport {
             grid_vertex_count: grid_edges.len() as u32,
             footprint,
             mesh_pipeline,
+            model_layout,
+            meshes: BTreeMap::new(),
             composite_pipeline,
             uniform,
             scene_bind,
@@ -1259,9 +1247,6 @@ impl Viewport {
             metrics,
             below_plate: false,
             front_from_back: None,
-            mesh: None,
-            mesh_ptr: 0,
-            mesh_matrix: glam::Mat4::IDENTITY,
             support,
             support_uniform,
             support_bind,
@@ -1280,8 +1265,6 @@ impl Viewport {
             support_disk_instances: None,
             support_disk_instance_count: 0,
             supports_ptr: 0,
-            model_uniform,
-            model_bind,
             gizmo,
             gizmo_buffer: device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("viewport gizmo"),

@@ -4,7 +4,7 @@
 use std::cmp::Ordering;
 use std::path::Path;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use dragonfruit_mesh_core::mesh::{IndexedMesh, Vec3};
 use dragonfruit_mesh_core::refine::{refine_long_edges_with_budget, refinement_budget};
 use dragonfruit_mesh_core::vertex_occlusion::bake_smoothed_vertex_occlusion;
@@ -172,6 +172,16 @@ pub fn overhang_points(mesh: &MeshData, angle_degrees: f32) -> Vec<[f32; 3]> {
 
 /// Whether a world-space ray hits the model, by Moller-Trumbore.
 pub fn raycast(mesh: &MeshData, origin: GVec3, direction: GVec3) -> bool {
+    raycast_distance(mesh, origin, direction).is_some()
+}
+
+/// Distance along the ray to the nearest triangle, by Moller-Trumbore.
+///
+/// `direction` is normalised first, so the returned `t` is in millimetres
+/// along the ray. Picking a model out of a crowd needs the distance, not just
+/// the boolean: the nearest hit wins, and testing the first model in the list
+/// would pick whichever happens to come first in import order.
+pub fn raycast_distance(mesh: &MeshData, origin: GVec3, direction: GVec3) -> Option<f32> {
     let direction = direction.normalize();
     // Slab test against the bounding box first: hover raycasts run on every
     // pointer move, and most of them miss the model entirely.
@@ -185,7 +195,7 @@ pub fn raycast(mesh: &MeshData, origin: GVec3, direction: GVec3) -> bool {
         let o = origin[axis];
         if d.abs() < 1e-8 {
             if o < min[axis] || o > max[axis] {
-                return false;
+                return None;
             }
         } else {
             let t1 = (min[axis] - o) / d;
@@ -195,8 +205,9 @@ pub fn raycast(mesh: &MeshData, origin: GVec3, direction: GVec3) -> bool {
         }
     }
     if t_max < t_min.max(0.0) {
-        return false;
+        return None;
     }
+    let mut nearest = f32::INFINITY;
     for triangle in mesh.vertices.chunks_exact(3) {
         let a = GVec3::from_array(triangle[0].pos);
         let b = GVec3::from_array(triangle[1].pos);
@@ -219,11 +230,17 @@ pub fn raycast(mesh: &MeshData, origin: GVec3, direction: GVec3) -> bool {
         if v < 0.0 || u + v > 1.0 {
             continue;
         }
-        if direction.dot(qvec) * inv > 0.0 {
-            return true;
+        // Moller-Trumbore's ray parameter: `edge2 · qvec / det`, *not*
+        // `direction · qvec / det` (that is `v`, a barycentric coordinate the
+        // old boolean hit test reused as a positivity check). Using `v` here
+        // makes every model report its barycentric coordinate, so models at
+        // different depths compare equal.
+        let t = edge2.dot(qvec) * inv;
+        if t > 0.0 {
+            nearest = nearest.min(t);
         }
     }
-    false
+    nearest.is_finite().then_some(nearest)
 }
 
 #[cfg(test)]
@@ -234,9 +251,21 @@ mod tests {
     fn exports_binary_stl() {
         let mesh = MeshData {
             vertices: vec![
-                Vertex { pos: [0.0, 0.0, 0.0], normal: [0.0, 0.0, 1.0], ao: 1.0 },
-                Vertex { pos: [1.0, 0.0, 0.0], normal: [0.0, 0.0, 1.0], ao: 1.0 },
-                Vertex { pos: [0.0, 1.0, 0.0], normal: [0.0, 0.0, 1.0], ao: 1.0 },
+                Vertex {
+                    pos: [0.0, 0.0, 0.0],
+                    normal: [0.0, 0.0, 1.0],
+                    ao: 1.0,
+                },
+                Vertex {
+                    pos: [1.0, 0.0, 0.0],
+                    normal: [0.0, 0.0, 1.0],
+                    ao: 1.0,
+                },
+                Vertex {
+                    pos: [0.0, 1.0, 0.0],
+                    normal: [0.0, 0.0, 1.0],
+                    ao: 1.0,
+                },
             ],
             footprint: Vec::new(),
             center: GVec3::ZERO,

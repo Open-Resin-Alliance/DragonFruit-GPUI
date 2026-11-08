@@ -310,15 +310,16 @@ impl DragonFruit {
         let camera = self.camera.borrow();
         let at_home = (camera.target - HOME_TARGET).length() < 0.5
             && (camera.distance - home_distance()).abs() < 0.5;
+        let transform = self.transform();
         Snapshot {
             mode: self.mode.label().to_owned(),
-            has_mesh: self.mesh.is_some(),
-            selected: self.selected.get(),
+            has_mesh: self.has_mesh(),
+            selected: self.selected(),
             active_tool: self.active_tool,
             support_panel: support_panel_name(self.support_panel).to_owned(),
-            translate: self.translate,
-            rotation: self.rotation,
-            scale: self.scale,
+            translate: transform.translate.to_array(),
+            rotation: transform.rotation,
+            scale: transform.scale.to_array(),
             camera_yaw: camera.yaw,
             camera_pitch: camera.pitch,
             camera_distance: camera.distance,

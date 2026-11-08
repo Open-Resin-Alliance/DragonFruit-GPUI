@@ -184,6 +184,7 @@ struct Model {
     bounds_min: vec4<f32>,
     bounds_max: vec4<f32>,
     stripe: vec4<f32>,
+    color: vec4<f32>,
 };
 @group(1) @binding(0) var<uniform> model: Model;
 
@@ -309,7 +310,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let head = vec3<f32>(1.0) * 1.0 * max(dot(n, head_dir), 0.0);
     let irradiance = ambient + hemi + key + fill + head;
 
-    let base = uniforms.base_color;
+    let base = model.color.rgb;
     let f0 = mix(vec3<f32>(0.04), base, 0.02);
     // `DEFAULT_MATERIAL_ROUGHNESS` is 0.55 (the 0.9 is only the prop fallback),
     // metalness 0.02. No extra multiplier: the old 1.5 boost was the hotspot.

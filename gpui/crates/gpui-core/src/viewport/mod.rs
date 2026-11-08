@@ -82,7 +82,6 @@
 //! - `SceneMoodOverlay`'s gradient colours are the dark-theme defaults
 //!   (`--scene-gradient-radial` etc.); custom themes are not read here.
 
-
 mod construct;
 mod cube;
 
@@ -97,10 +96,14 @@ mod uniforms;
 
 use anyhow::Result;
 use gpui_interop::WgpuSurface;
+use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use self::plate::PlateMetrics;
 use self::targets::Targets;
 use self::uniforms::GpuMesh;
+use crate::scene::ModelId;
+use crate::stl::MeshData;
 
 const SAMPLE_COUNT: u32 = 4;
 
@@ -108,6 +111,20 @@ const SAMPLE_COUNT: u32 = 4;
 /// re-exported so a caller can build and name them without depending on
 /// `gpui-supports` directly.
 pub use gpui_supports::{NodeInstance, ShaftInstance, SupportBatches};
+
+/// One model the mesh pass draws.
+///
+/// The app resolves the scene into this list each frame: identity for the
+/// upload cache, geometry, the world matrix the model is drawn with (the
+/// running gesture's draft for the active model) and its albedo (the
+/// selection/hover tint is per model).
+#[derive(Clone)]
+pub struct ModelDraw {
+    pub id: ModelId,
+    pub mesh: Arc<MeshData>,
+    pub matrix: glam::Mat4,
+    pub color: [f32; 3],
+}
 
 /// `DEFAULT_SUPPORT_COLOR` in `src/supports/SupportProxyMeshLayer.tsx` — the
 /// proxy layer's base grey, the colour `meshBasicMaterial` paints a support
@@ -176,6 +193,13 @@ pub struct Viewport {
     grid_vertex_count: u32,
     footprint: wgpu::RenderPipeline,
     mesh_pipeline: wgpu::RenderPipeline,
+    /// The per-model uniform layout, kept so a model's uniform and bind group
+    /// can be created lazily the first time it is drawn.
+    model_layout: wgpu::BindGroupLayout,
+    /// One `GpuMesh` per model, keyed by id. A model that leaves the scene
+    /// loses its buffers on the next frame (`retain`); a duplicate of a VOXL
+    /// chunk shares the `Arc` and therefore uploads once.
+    meshes: BTreeMap<ModelId, GpuMesh>,
     composite_pipeline: wgpu::RenderPipeline,
     uniform: wgpu::Buffer,
     scene_bind: wgpu::BindGroup,
@@ -188,10 +212,6 @@ pub struct Viewport {
     below_plate: bool,
     /// `FrontMarkerDecal`'s `sideRef`: `None` before the first frame.
     front_from_back: Option<bool>,
-    mesh: Option<GpuMesh>,
-    mesh_ptr: usize,
-    /// The transform the footprint hull was baked through.
-    mesh_matrix: glam::Mat4,
     support: wgpu::RenderPipeline,
     support_uniform: wgpu::Buffer,
     support_bind: wgpu::BindGroup,
@@ -214,8 +234,6 @@ pub struct Viewport {
     /// Identity of the support set whose instances are uploaded, so a frame
     /// that draws the same set pays no buffer rebuild — the mesh's trick.
     supports_ptr: usize,
-    model_uniform: wgpu::Buffer,
-    model_bind: wgpu::BindGroup,
     /// The transform gizmo: unlit, depth-test-always, drawn after the model so
     /// no handle can hide behind it (the source's `depthTest: false`).
     gizmo: wgpu::RenderPipeline,

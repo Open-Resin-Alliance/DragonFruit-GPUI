@@ -6,9 +6,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use camera::Camera;
 use gpui::{
-    AnyElement, Context, Corners, ExternalPaths, FocusHandle, FontWeight, IntoElement,
-    MouseButton, Render, ScrollDelta, SharedString, Window, div, gpu_canvas, prelude::*, px,
-    relative, rgb, rgba,
+    AnyElement, Context, Corners, ExternalPaths, FocusHandle, FontWeight, IntoElement, MouseButton,
+    Render, ScrollDelta, SharedString, Window, div, gpu_canvas, prelude::*, px, relative, rgb,
+    rgba,
 };
 use gpui_interop::attach;
 use gpui_wgpu::{ImportedTextureExt as _, WgpuRenderer};
@@ -20,9 +20,9 @@ use crate::panels::empty_scene;
 use crate::{features, panels};
 
 use anyhow::Result;
+use gpui_core::theme::*;
 use gpui_core::{camera, icons, stl, viewport};
 use gpui_ui::{panel_fields, ui};
-use gpui_core::theme::*;
 
 // The loader lives at `src/scene/mod.rs` (a sibling of this file), not in the
 // `src/app/` submodule directory, so name the path explicitly.
@@ -188,11 +188,19 @@ pub struct Toast {
 }
 
 pub(crate) struct DragonFruit {
-    pub(crate) mesh: Option<Arc<stl::MeshData>>,
+    /// The plate's models and the active model. Everything that used to read
+    /// the single `mesh`/`translate`/`rotation`/`scale` fields reads this
+    /// scene through the active model now.
+    pub(crate) scene: gpui_core::scene::Scene,
     /// The parsed VOXL container when the last load was a scene: `SUPP` and
-    /// every model's `MODL` entry. `mesh`/`translate`/`rotation`/`scale` stay
-    /// the single-model view the viewport draws.
-    pub(crate) scene: Option<gpui_voxl::Scene>,
+    /// every model's `MODL` entry. The scene above is the drawable view of it.
+    /// Retained for the support panel's `SUPP` document.
+    #[allow(dead_code)]
+    pub(crate) voxl: Option<gpui_voxl::Scene>,
+    /// `session.json`'s `rotation` key. It was the port's single-model
+    /// orientation; with per-model transforms it is legacy and only read back
+    /// when the scene is empty (a launch has no model to rotate).
+    session_rotation: [f32; 3],
     /// Time of the last frame, for the camera's real delta. The source drives
     /// every tween from `requestAnimationFrame`'s timestamp, so the port must
     /// not advance at a fixed step: a 144Hz window would finish a tween 2.4x
@@ -212,9 +220,8 @@ pub(crate) struct DragonFruit {
     #[allow(dead_code)]
     pub(crate) status: String,
     pub(crate) loading: bool,
-    pub(crate) selected: Rc<Cell<bool>>,
-    /// `hoveredMeshModelId` — the pointer is over the model.
-    pub(crate) hovered: Rc<Cell<bool>>,
+    /// `hoveredMeshModelId` — the model under the pointer, if any.
+    pub(crate) hovered: Rc<Cell<Option<gpui_core::scene::ModelId>>>,
     pub(crate) smoke: bool,
     pub(crate) smoke_done: Rc<Cell<bool>>,
     /// `--scenario`: the steps the first frame hands to the driver. Taken once,
@@ -253,24 +260,14 @@ pub(crate) struct DragonFruit {
     pub(crate) show_box: bool,
     pub(crate) overhang_view: bool,
     pub(crate) logo: Option<PathBuf>,
-    pub(crate) translate: [f32; 3],
-    /// The Euler rotation in radians, `[x, y, z]` about the fixed world axes:
-    /// the same three numbers the source's `ModelTransform` stores in an
-    /// `Euler` of order `'ZYX'`, which `quaternionFromGlobalEuler` builds as
-    /// `qz · qy · qx`.
-    pub(crate) rotation: [f32; 3],
-    /// Per-axis scale, `1.0` at the model's own size. The gizmo's scale handles
-    /// multiply all three (`uniformScaling`, the source's default) and so does
-    /// the transform panel's uniform switch; the vector is the type
-    /// `applyScaleFactor` multiplies, so a per-axis mode has somewhere to write.
-    pub(crate) scale: [f32; 3],
-    /// The running gesture's stand-in transform.
+    /// The running gesture's stand-in transform for the active model.
     ///
     /// The source separates the two halves of a drag: the live transform moves
-    /// the model, and only the release commits it. This field is that stand-in.
-    /// The viewport, picking and the gizmo read it in place of the committed
-    /// fields above; the transform panel's store and `session.json` see nothing
-    /// until [`Self::commit_draft`] folds it in, once, on release.
+    /// the model, and only the release commits it. This field is that stand-in
+    /// for the active model. The viewport, picking and the gizmo read it in
+    /// place of the committed model transform; the transform panel's store and
+    /// `session.json` see nothing until [`Self::commit_draft`] folds it in,
+    /// once, on release.
     pub(crate) draft: Option<gizmo::Transform>,
     pub(crate) support_angle: f32,
     pub(crate) support_density: f32,
@@ -410,18 +407,20 @@ impl DragonFruit {
         };
 
         let mut app = Self {
-            mesh: None,
-            scene: None,
+            scene: gpui_core::scene::Scene::new(),
+            voxl: None,
+            session_rotation: [0.0; 3],
             last_frame: None,
-            camera: Rc::new(RefCell::new(Camera::parked(glam::Vec3::new(0.0, 0.0, 110.0)))),
+            camera: Rc::new(RefCell::new(Camera::parked(glam::Vec3::new(
+                0.0, 0.0, 110.0,
+            )))),
             viewport: Rc::new(RefCell::new(None)),
             grab: None,
             drag: Rc::new(Cell::new(None)),
             last: Rc::new(Cell::new((0.0, 0.0))),
             status: String::new(),
             loading: false,
-            selected: Rc::new(Cell::new(true)),
-            hovered: Rc::new(Cell::new(false)),
+            hovered: Rc::new(Cell::new(None)),
             smoke,
             smoke_done: Rc::new(Cell::new(false)),
             scenario,
@@ -449,9 +448,6 @@ impl DragonFruit {
             show_box: true,
             overhang_view: false,
             logo: rasterize_logo(),
-            translate: [0.0; 3],
-            rotation: [0.0; 3],
-            scale: [1.0; 3],
             draft: None,
             support_angle: 45.0,
             support_density: 0.5,
@@ -515,9 +511,11 @@ impl DragonFruit {
     /// `new` parked it and the app always starts on the home pose.
     fn apply_session(&mut self, session: &gpui_store::Session) {
         // A session file from a build without the key loads as the identity;
-        // a hand-edited one with a NaN must not poison the model matrix.
+        // a hand-edited one with a NaN must not poison a model matrix. With
+        // per-model transforms the key is legacy: a launch has no model, so it
+        // is only echoed back until a file supplies the real transforms.
         if session.rotation.iter().all(|angle| angle.is_finite()) {
-            self.rotation = session.rotation;
+            self.session_rotation = session.rotation;
         }
         // The rail owns the list; a document from a newer build with more tools
         // must not index past this build's match arms.
@@ -525,7 +523,8 @@ impl DragonFruit {
         apply_session_layout(&self.layout, &session.panel_layout);
         self.last_file = session.last_file.clone().filter(|path| path.is_file());
         self.recent_files = session.recent_files.clone();
-        self.recent_files.truncate(gpui_store::session::RECENT_FILES_LIMIT);
+        self.recent_files
+            .truncate(gpui_store::session::RECENT_FILES_LIMIT);
         self.sync_recents();
     }
 
@@ -620,91 +619,124 @@ impl DragonFruit {
         gpui_store::Session {
             last_file: self.last_file.clone(),
             active_tool: self.active_tool as u32,
-            rotation: self.rotation,
+            rotation: self
+                .scene
+                .active_model()
+                .map(|model| model.rotation)
+                .unwrap_or(self.session_rotation),
             recent_files: self.recent_files.clone(),
             panel_layout: session_layout(&self.layout),
             ..Default::default()
         }
     }
 
-    /// Install a finished load. A plain mesh keeps the identity transform; a
-    /// VOXL scene also installs the first model's placement and keeps the
-    /// parsed container for the support panel.
+    /// Install a finished load: an STL becomes one model, a VOXL scene one
+    /// model per `MODL` entry. The first model is made active, which is the
+    /// source's import behaviour (`useSceneCollectionManager.ts:7470-7475`).
     fn apply_loaded(&mut self, loaded: Loaded) {
         match loaded {
             Loaded::Mesh(mesh) => {
-                self.scene = None;
+                self.voxl = None;
                 // Plate centre is the origin in the port's plate-local frame;
                 // `defaultImportCenterXY` is computed from `plateLocalRect` in the source.
-                self.translate = scene::placement(&mesh, [0.0, 0.0]);
-                self.rotation = [0.0; 3];
-                self.scale = [1.0; 3];
-                self.set_mesh(mesh);
+                let translate = scene::placement(&mesh, [0.0, 0.0]);
+                let name = mesh.name.clone();
+                self.install_models(vec![scene::ImportedModel {
+                    name,
+                    mesh: Arc::new(mesh),
+                    translate,
+                    rotation: [0.0; 3],
+                    scale: [1.0; 3],
+                    visible: true,
+                }]);
             }
             Loaded::Scene(import) => {
-                self.translate = import.translate;
-                self.rotation = import.rotation;
-                self.scale = import.scale;
                 if self.smoke {
                     let models = import.scene.models.len();
                     let meshes = import.scene.meshes.len();
+                    let resolved = import.models.len();
                     eprintln!(
-                        "smoke: VOXL v{} with {models} model(s), {meshes} MESH chunk(s); \
-                         translate [{:.2}, {:.2}, {:.2}], rotation [{:.3}, {:.3}, {:.3}] rad, \
-                         scale [{:.3}, {:.3}, {:.3}]",
+                        "smoke: VOXL v{} with {models} model(s), {meshes} MESH chunk(s), \
+                         {resolved} resolved",
                         import.scene.version,
-                        self.translate[0],
-                        self.translate[1],
-                        self.translate[2],
-                        self.rotation[0],
-                        self.rotation[1],
-                        self.rotation[2],
-                        self.scale[0],
-                        self.scale[1],
-                        self.scale[2],
                     );
                 }
-                self.scene = Some(import.scene);
-                self.set_mesh(import.mesh);
+                self.voxl = Some(import.scene);
+                self.install_models(import.models);
             }
         }
     }
 
-    pub(crate) fn set_mesh(&mut self, mesh: stl::MeshData) {
-        if self.smoke {
-            // The gate reads these lines to check a load produced real
-            // geometry: triangle count and millimetre bounding box.
-            eprintln!(
-                "smoke: mesh '{}': {} triangles, size {:.2} x {:.2} x {:.2} mm, \
-                 center ({:.2}, {:.2}, {:.2}), radius {:.2} mm",
-                mesh.name,
-                mesh.triangles,
-                mesh.size[0],
-                mesh.size[1],
-                mesh.size[2],
-                mesh.center.x,
-                mesh.center.y,
-                mesh.center.z,
-                mesh.radius,
+    /// Replace the plate's contents with `models`, make the first one active
+    /// and frame it. The camera intro still frames the active model only; the
+    /// scene's whole-bounds framing is a later step.
+    fn install_models(&mut self, models: Vec<scene::ImportedModel>) {
+        let mut installed = gpui_core::scene::Scene::new();
+        for model in models {
+            if self.smoke {
+                // The gate reads these lines to check a load produced real
+                // geometry: triangle count, millimetre bounding box and the
+                // model's own world translate.
+                eprintln!(
+                    "smoke: model '{}': {} triangles, size {:.2} x {:.2} x {:.2} mm, \
+                     center ({:.2}, {:.2}, {:.2}), radius {:.2} mm, \
+                     translate [{:.2}, {:.2}, {:.2}]",
+                    model.name,
+                    model.mesh.triangles,
+                    model.mesh.size[0],
+                    model.mesh.size[1],
+                    model.mesh.size[2],
+                    model.mesh.center.x,
+                    model.mesh.center.y,
+                    model.mesh.center.z,
+                    model.mesh.radius,
+                    model.translate[0],
+                    model.translate[1],
+                    model.translate[2],
+                );
+            }
+            installed.push(
+                model.name,
+                model.mesh,
+                model.translate,
+                model.rotation,
+                model.scale,
+                model.visible,
             );
         }
-        let mesh = Arc::new(mesh);
+        if let Some(first) = installed.models.first().map(|model| model.id) {
+            installed.set_active(first);
+        }
+        self.scene = installed;
+        self.draft = None;
+        self.hovered.set(None);
+        self.gizmo_drag = None;
+        self.gizmo_hover = None;
+        self.gizmo_cache = None;
+
         // The intro animates from wherever the camera is (the parked home pose
-        // in a fresh scene) to the model's framing.
-        // Frame where the model actually lands: the import placement moves it, so
-        // the raw bbox centre is no longer the model's world centre.
-        let world_center = mesh.center + glam::Vec3::from_array(self.translate);
-        self.camera
-            .borrow_mut()
-            .focus(world_center, mesh.radius.max(1.0));
-        // `useSlicingManager`: `numLayers = ceil(heightMm / layerHeightMm)`.
-        self.num_layers = (mesh.size[2] / LAYER_HEIGHT_MM).ceil().max(0.0) as u32;
-        // The source opens with the upper thumb at the top and the lower at the
-        // bottom, so the whole model is visible.
-        self.layer = self.num_layers as f32;
-        self.lower_layer = 0.0;
-        self.selected.set(true);
-        self.mesh = Some(mesh);
+        // in a fresh scene) to the active model's framing. Frame where the
+        // model actually lands: the import placement moves it, so the raw bbox
+        // centre is no longer the model's world centre.
+        if let Some(model) = self.scene.active_model() {
+            let world_center = model.world_center();
+            self.camera
+                .borrow_mut()
+                .focus(world_center, model.mesh.radius.max(1.0));
+            // `useSlicingManager`: `numLayers = ceil(heightMm / layerHeightMm)`,
+            // where the height is the scene's tallest visible model.
+            self.num_layers = (self.scene.max_height_world() / LAYER_HEIGHT_MM)
+                .ceil()
+                .max(0.0) as u32;
+            // The source opens with the upper thumb at the top and the lower at
+            // the bottom, so the whole model is visible.
+            self.layer = self.num_layers as f32;
+            self.lower_layer = 0.0;
+        } else {
+            self.num_layers = 0;
+            self.layer = 0.0;
+            self.lower_layer = 0.0;
+        }
     }
 
     /// Load a mesh or scene file off the UI thread. Mirrors `open_stl`'s
@@ -787,41 +819,80 @@ impl DragonFruit {
         self.load_path(path, cx);
     }
 
-    /// `GLOBAL.DELETE` / the fixed `Delete` key: remove the selected model.
+    /// `GLOBAL.DELETE` / the fixed `Delete` key: remove the active model.
     /// The source deletes the selection (or the active model) through the
     /// history store; this build has no undo, so the removal is final.
+    ///
+    /// With models left on the plate the next one becomes active and the scene
+    /// keeps its placement; only the last model takes the empty-scene reset
+    /// and forgets the reopenable file.
     pub(crate) fn delete_model(&mut self) {
-        self.mesh = None;
-        self.scene = None;
+        let Some(active) = self.scene.active else {
+            return;
+        };
+        self.scene.remove(active);
+        self.after_scene_edit();
+        self.save_session();
+    }
+
+    /// The app menu's `New scene`: empty the plate whatever is selected. The
+    /// source's `newScene` clears the collection; the port's old
+    /// `delete_model` did both jobs because "the model" was the whole plate.
+    pub(crate) fn clear_scene(&mut self) {
+        self.scene = gpui_core::scene::Scene::new();
+        self.after_scene_edit();
+        self.save_session();
+    }
+
+    /// The shared tail of a removal: drop the support set generated from the
+    /// gone models, end any gesture, and re-derive the layer stack (or reset
+    /// the empty scene).
+    fn after_scene_edit(&mut self) {
+        // The support set was generated from the deleted model.
         *self.supports.borrow_mut() = None;
-        self.selected.set(false);
+        self.hovered.set(None);
         self.gizmo_drag = None;
         self.gizmo_hover = None;
         self.draft = None;
         self.grab = None;
         self.editor_menu = None;
-        self.num_layers = 0;
-        self.layer = 0.0;
-        self.lower_layer = 0.0;
-        self.mode = Mode::Prepare;
-        // There is nothing left to reopen: a deleted model must not come back
-        // with the next launch's `session.json`.
-        self.last_file = None;
-        // Models going to zero resets the camera home (`useStlLoadCameraIntro`).
-        self.camera
-            .borrow_mut()
-            .home(glam::Vec3::new(0.0, 0.0, 110.0));
-        self.save_session();
+        if self.scene.is_empty() {
+            self.voxl = None;
+            self.num_layers = 0;
+            self.layer = 0.0;
+            self.lower_layer = 0.0;
+            self.mode = Mode::Prepare;
+            // There is nothing left to reopen: a deleted model must not come
+            // back with the next launch's `session.json`.
+            self.last_file = None;
+            // Models going to zero resets the camera home
+            // (`useStlLoadCameraIntro`).
+            self.camera
+                .borrow_mut()
+                .home(glam::Vec3::new(0.0, 0.0, 110.0));
+        } else {
+            self.num_layers = (self.scene.max_height_world() / LAYER_HEIGHT_MM)
+                .ceil()
+                .max(0.0) as u32;
+            self.layer = self.layer.clamp(0.0, self.num_layers as f32);
+            self.lower_layer = self.lower_layer.clamp(0.0, self.layer);
+        }
     }
 
-    /// The transform everything on screen draws with: the running gesture's
-    /// draft while one is live, the committed fields otherwise.
+    /// The active model's transform: the running gesture's draft while one is
+    /// live, the committed model transform otherwise.
     pub(crate) fn transform(&self) -> gizmo::Transform {
-        self.draft.unwrap_or(gizmo::Transform {
-            translate: glam::Vec3::from_array(self.translate),
-            rotation: self.rotation,
-            scale: glam::Vec3::from_array(self.scale),
-        })
+        if let Some(draft) = self.draft {
+            return draft;
+        }
+        self.scene
+            .active_model()
+            .map(|model| gizmo::Transform {
+                translate: glam::Vec3::from_array(model.translate),
+                rotation: model.rotation,
+                scale: glam::Vec3::from_array(model.scale),
+            })
+            .unwrap_or_default()
     }
 
     /// The model matrix the viewport, the hover raycast and the gizmo all use.
@@ -842,15 +913,14 @@ impl DragonFruit {
     /// unaffected. Under a rotation the model's centre `translate + center` is
     /// invariant — which is what makes `Drag::locked_center` correct.
     pub(crate) fn model_matrix(&self) -> glam::Mat4 {
-        let matrix = self.transform().matrix();
-        let Some(mesh) = &self.mesh else {
-            return matrix;
+        let transform = self.transform();
+        let Some(model) = self.scene.active_model() else {
+            return transform.matrix();
         };
-        let pivot = mesh.center;
-        glam::Mat4::from_translation(pivot) * matrix * glam::Mat4::from_translation(-pivot)
+        model.matrix_for(transform.translate, transform.rotation, transform.scale)
     }
 
-    /// Fold a finished gesture's draft into the committed fields.
+    /// Fold a finished gesture's draft into the active model's transform.
     ///
     /// This is the one write a drag performs on the entity: the pointer stream
     /// only ever touched [`Self::draft`]. Returns whether there was a draft to
@@ -859,9 +929,12 @@ impl DragonFruit {
         let Some(draft) = self.draft.take() else {
             return false;
         };
-        self.translate = draft.translate.to_array();
-        self.rotation = draft.rotation;
-        self.scale = draft.scale.to_array();
+        let Some(model) = self.scene.active_model_mut() else {
+            return false;
+        };
+        model.translate = draft.translate.to_array();
+        model.rotation = draft.rotation;
+        model.scale = draft.scale.to_array();
         true
     }
 
@@ -872,32 +945,87 @@ impl DragonFruit {
         self.draft = None;
     }
 
+    /// Whether the plate holds a model. The panels' `has_mesh` snapshot and
+    /// every "is there anything to act on" gate read this, so a scene with N
+    /// models answers exactly as the single-model scene did.
+    pub(crate) fn has_mesh(&self) -> bool {
+        !self.scene.is_empty()
+    }
+
+    /// The active model's geometry.
+    pub(crate) fn active_mesh(&self) -> Option<&Arc<stl::MeshData>> {
+        self.scene.active_model().map(|model| &model.mesh)
+    }
+
+    /// The active model's display name — the panel's row title.
+    pub(crate) fn active_model_name(&self) -> Option<&str> {
+        self.scene.active_model().map(|model| model.name.as_str())
+    }
+
+    /// How many models are on the plate.
+    pub(crate) fn model_count(&self) -> usize {
+        self.scene.models().len()
+    }
+
+    /// Whether a model is active. This is the port's stand-in for
+    /// `activeModelId !== null`; the source's selection *set* arrives with the
+    /// multi-selection step.
+    pub(crate) fn selected(&self) -> bool {
+        self.scene.active.is_some()
+    }
+
+    /// The Models panel's row click: with one row the click cannot name a
+    /// different model, so it re-establishes the first model as active rather
+    /// than dropping the selection.
+    pub(crate) fn select_active(&mut self) {
+        if self.scene.active.is_none() {
+            if let Some(first) = self.scene.models.first().map(|model| model.id) {
+                self.scene.set_active(first);
+            }
+        }
+    }
+
+    /// The transform panel's write-back: its three rows edit the active model.
+    pub(crate) fn set_active_transform(
+        &mut self,
+        translate: [f32; 3],
+        rotation: [f32; 3],
+        scale: [f32; 3],
+    ) {
+        let Some(model) = self.scene.active_model_mut() else {
+            return;
+        };
+        model.translate = translate;
+        model.rotation = rotation;
+        model.scale = scale;
+    }
+
     /// Whether the gizmo answers the pointer.
     ///
     /// `SceneCanvas` mounts `UnifiedGizmo` in Prepare, in the Transform tool,
     /// with an active model — and the source's `enabled` gate is what makes a
     /// handle with nothing to transform impossible. The same three conditions
-    /// are the gate here, with the port's selection standing in for
-    /// `activeModelId`.
+    /// are the gate here.
     fn gizmo_enabled(&self) -> bool {
-        self.mode == Mode::Prepare
-            && self.active_tool == 1
-            && self.mesh.is_some()
-            && self.selected.get()
+        self.mode == Mode::Prepare && self.active_tool == 1 && self.selected()
     }
 
-    /// Where the gizmo sits: the model's own centre through the transform the
-    /// viewport draws with, or the position a rotation/scale drag locked at
-    /// press (`ScreenSpaceGizmo`'s `lockedDragPosition`).
+    /// Where the gizmo sits: the active model's own centre through the
+    /// transform the viewport draws with, or the position a rotation/scale drag
+    /// locked at press (`ScreenSpaceGizmo`'s `lockedDragPosition`).
     fn gizmo_center(&self) -> Option<glam::Vec3> {
         if !self.gizmo_enabled() {
             return None;
         }
-        if let Some(center) = self.gizmo_drag.as_ref().and_then(gizmo::Drag::locked_center) {
+        if let Some(center) = self
+            .gizmo_drag
+            .as_ref()
+            .and_then(gizmo::Drag::locked_center)
+        {
             return Some(center);
         }
-        let mesh = self.mesh.as_ref()?;
-        Some(self.model_matrix().transform_point3(mesh.center))
+        let model = self.scene.active_model()?;
+        Some(self.model_matrix().transform_point3(model.mesh.center))
     }
 
     /// Start a gesture if `pointer` is over a handle. Returns whether the press
@@ -912,16 +1040,23 @@ impl DragonFruit {
         let Some(center) = self.gizmo_center() else {
             return false;
         };
-        let view = gizmo::View::new(camera, width / height, glam::Vec2::new(width, height), center);
+        let view = gizmo::View::new(
+            camera,
+            width / height,
+            glam::Vec2::new(width, height),
+            center,
+        );
         let Some(handle) = gizmo::pick(&view, pointer) else {
             return false;
         };
         // The transform panel's `mesh_min_z` and the model matrix's pivot: the
-        // model's local underside and bbox centre.
-        let mesh_bounds = self
-            .mesh
-            .as_ref()
-            .map(|mesh| (mesh.center.z - mesh.size[2] * 0.5, mesh.center.z));
+        // active model's local underside and bbox centre.
+        let mesh_bounds = self.scene.active_model().map(|model| {
+            (
+                model.mesh.center.z - model.mesh.size[2] * 0.5,
+                model.mesh.center.z,
+            )
+        });
         let Some(drag) = gizmo::Drag::begin(&view, pointer, handle, self.transform(), mesh_bounds)
         else {
             return false;
@@ -1025,8 +1160,12 @@ impl DragonFruit {
             return false;
         }
         let hovered = self.gizmo_center().and_then(|center| {
-            let view =
-                gizmo::View::new(camera, width / height, glam::Vec2::new(width, height), center);
+            let view = gizmo::View::new(
+                camera,
+                width / height,
+                glam::Vec2::new(width, height),
+                center,
+            );
             gizmo::pick(&view, pointer)
         });
         if hovered == self.gizmo_hover {
@@ -1078,10 +1217,7 @@ impl DragonFruit {
             return;
         }
 
-        if let Some(stl) = supported
-            .iter()
-            .find(|path| file_extension(path) == "stl")
-        {
+        if let Some(stl) = supported.iter().find(|path| file_extension(path) == "stl") {
             self.load_path(stl.clone(), cx);
         }
     }
@@ -1116,7 +1252,7 @@ impl Render for DragonFruit {
         self.frames = self.frames.wrapping_add(1);
 
         // `handleModeChange`: an empty scene can only be Prepare.
-        if self.mesh.is_none() && self.mode != Mode::Prepare {
+        if self.scene.is_empty() && self.mode != Mode::Prepare {
             self.mode = Mode::Prepare;
         }
 
@@ -1143,37 +1279,51 @@ impl Render for DragonFruit {
         if self.empty_scene.loading {
             window.request_animation_frame();
         }
-        let mesh = self.mesh.clone();
-        let click_mesh = self.mesh.clone();
+        // Resolve the scene into the viewport's per-model draw list once per
+        // frame. The running draft lives on the entity, so the active model's
+        // matrix comes from `model_matrix`; every other model is its committed
+        // placement.
+        let draw_models: Vec<viewport::ModelDraw> = self
+            .scene
+            .models()
+            .iter()
+            .filter(|model| model.visible)
+            .map(|model| viewport::ModelDraw {
+                id: model.id,
+                mesh: model.mesh.clone(),
+                matrix: if Some(model.id) == self.scene.active {
+                    self.model_matrix()
+                } else {
+                    model.matrix()
+                },
+                color: mesh_color(
+                    Some(model.id) == self.scene.active,
+                    self.hovered.get() == Some(model.id),
+                ),
+            })
+            .collect();
+        // The pointer handlers raycast the same geometry/matrix pairs the
+        // viewport draws, so hover and click cannot disagree with the frame.
+        let pick_models = draw_models.clone();
         // `cameraInteractionCycleEnabled = hasModelsOnPlate && ...`: nothing on
         // the plate means the empty scene does not answer the pointer.
-        let camera_enabled = Rc::new(Cell::new(self.mesh.is_some()));
-        // Grab: a left drag that lands on the model slides it across the plate.
+        let camera_enabled = Rc::new(Cell::new(self.has_mesh()));
+        // Grab: a left drag that lands on a model slides it across the plate.
         // The source moves the model under the pointer in every prepare tool, not
         // only the Move tool.
-        let grab_mode = self.mesh.is_some();
-        // The model matrix is a pure function of the running draft, so the hot
-        // path never reads a half-committed transform.
-        let model_matrix = self.model_matrix();
+        let grab_mode = self.has_mesh();
         // `publishClip`'s upper plane: none at layer 0 or at the top layer,
         // parked (infinite) when the cross-section switch is closed.
         let supports = self.supports.clone();
-        let translate = self.transform().translate;
-        let clip_z = if self.cross_section && self.mesh.is_some() {
+        let clip_z = if self.cross_section && self.has_mesh() {
             let upper = self.layer;
             let max_layer = self.num_layers as f32;
             if upper <= 0.0 || upper >= max_layer {
                 f32::INFINITY
             } else {
-                self.mesh
-                    .as_ref()
-                    .map(|mesh| {
-                        // The clip plane is in world space, so the model's own
-                        // translate has to be included.
-                        let z_min = mesh.center.z + translate.z - mesh.size[2] * 0.5;
-                        z_min + upper * LAYER_HEIGHT_MM + CLIP_EPSILON_MM
-                    })
-                    .unwrap_or(f32::INFINITY)
+                // The clip plane is in world space; the scene's lowest visible
+                // point is where the layer stack starts.
+                self.scene.min_z_world() + upper * LAYER_HEIGHT_MM + CLIP_EPSILON_MM
             }
         } else {
             f32::INFINITY
@@ -1214,10 +1364,13 @@ impl Render for DragonFruit {
         let hovered = self.hovered.clone();
         let last = self.last.clone();
         let smoke = self.smoke;
-        let selected_state = self.selected.clone();
-        let hovered_state = self.hovered.clone();
         let smoke_done = self.smoke_done.clone();
-        let triangles = self.mesh.as_ref().map(|mesh| mesh.triangles).unwrap_or(0);
+        let triangles = self
+            .scene
+            .models()
+            .iter()
+            .map(|model| model.mesh.triangles)
+            .sum();
         let loading = self.loading;
         let entity = cx.entity().downgrade();
 
@@ -1249,19 +1402,16 @@ impl Render for DragonFruit {
             let scale = gpu.scale_factor();
             let width = (bounds.size.width.0 * scale).round().max(1.0) as u32;
             let height = (bounds.size.height.0 * scale).round().max(1.0) as u32;
-            let mesh_ref = mesh.as_deref();
-            let base_color = mesh_color(selected_state.get(), hovered_state.get());
+            let mesh_ref = &draw_models;
             if let Err(error) = state.render(
                 &device,
                 &queue,
                 mesh_ref,
                 supports.borrow().as_ref(),
                 show_layers,
-                model_matrix,
                 clip_z,
                 gizmo_draw.as_deref().map(|vertices| vertices.as_slice()),
                 &canvas_camera.borrow(),
-                base_color,
                 width,
                 height,
             ) {
@@ -1275,7 +1425,7 @@ impl Render for DragonFruit {
                     return;
                 }
             }
-            if smoke && mesh_ref.is_some() && !smoke_done.get() {
+            if smoke && !mesh_ref.is_empty() && !smoke_done.get() {
                 smoke_done.set(true);
                 match state.readback(&device, &queue) {
                     Ok((painted, total)) => {
@@ -1390,7 +1540,7 @@ impl Render for DragonFruit {
                         }
                         // A right button that travelled turned the camera; only
                         // the ones that stayed put open the editor menu.
-                        if this.mesh.is_some() && !dragged {
+                        if this.has_mesh() && !dragged {
                             this.editor_menu = Some(position);
                             cx.notify();
                         }
@@ -1414,7 +1564,7 @@ impl Render for DragonFruit {
             let camera = camera.clone();
             let entity = entity.clone();
             let hovered = hovered.clone();
-            let hover_mesh = click_mesh.clone();
+            let hover_models = pick_models.clone();
             move |event, window, cx| {
                 if let Some(button) = drag.get() {
                     let (lx, ly) = last.get();
@@ -1480,20 +1630,17 @@ impl Render for DragonFruit {
                     entity.update(cx, |_, cx| cx.notify()).ok();
                     return;
                 }
-                // `hoveredMeshModelId`: the pointer over the model tints it.
-                let hit = hover_mesh.as_ref().is_some_and(|mesh| {
+                // `hoveredMeshModelId`: the pointer over a model tints that
+                // model, and the nearest hit wins.
+                let hit = {
                     let size = window.viewport_size();
                     let width = size.width.0.max(1.0);
                     let height = size.height.0.max(1.0);
                     let ndc_x = event.position.x.0 / width * 2.0 - 1.0;
                     let ndc_y = 1.0 - event.position.y.0 / height * 2.0;
-                    let (origin, direction) =
-                        camera.borrow().ray(width / height, ndc_x, ndc_y);
-                    let inverse = model_matrix.inverse();
-                    let origin = inverse.transform_point3(origin);
-                    let direction = inverse.transform_vector3(direction);
-                    stl::raycast(mesh, origin, direction)
-                });
+                    let (origin, direction) = camera.borrow().ray(width / height, ndc_x, ndc_y);
+                    pick_model(&hover_models, origin, direction)
+                };
                 if hovered.get() != hit {
                     hovered.set(hit);
                     entity.update(cx, |_, cx| cx.notify()).ok();
@@ -1518,7 +1665,7 @@ impl Render for DragonFruit {
         })
         .on_mouse_down(MouseButton::Left, {
             let camera = camera.clone();
-            let mesh = click_mesh.clone();
+            let hit_models = pick_models.clone();
             let entity = entity.clone();
             move |event, window, cx| {
                 let size = window.viewport_size();
@@ -1553,17 +1700,11 @@ impl Render for DragonFruit {
                     return;
                 }
 
-                let Some(mesh) = mesh.as_ref() else {
-                    return;
-                };
                 let ndc_x = pointer.x / width * 2.0 - 1.0;
                 let ndc_y = 1.0 - pointer.y / height * 2.0;
                 let (origin, direction) = camera.borrow().ray(width / height, ndc_x, ndc_y);
-                let inverse = model_matrix.inverse();
-                let origin = inverse.transform_point3(origin);
-                let direction = inverse.transform_vector3(direction);
-                let hit = stl::raycast(mesh, origin, direction);
-                if grab_mode && hit {
+                let hit = pick_model(&hit_models, origin, direction);
+                if grab_mode && hit.is_some() {
                     // Same drag cell as the camera: the move handler branches on
                     // the button, so a grab and an orbit cannot both be live.
                     drag.set(Some(MouseButton::Left));
@@ -1571,7 +1712,11 @@ impl Render for DragonFruit {
                     let grab_camera = camera.clone();
                     entity
                         .update(cx, |this, cx| {
-                            this.selected.set(true);
+                            // The grab reads `transform()`, so the picked model
+                            // has to be active before the gesture starts.
+                            if let Some(id) = hit {
+                                this.scene.set_active(id);
+                            }
                             let camera = grab_camera.borrow();
                             this.begin_grab(pointer, width, height, &camera);
                             cx.notify();
@@ -1581,7 +1726,15 @@ impl Render for DragonFruit {
                 }
                 entity
                     .update(cx, |this, cx| {
-                        this.selected.set(hit);
+                        // A plain click is the source's `selectModel(id,
+                        // 'single')`: the picked model becomes the active one,
+                        // and clicking past every model clears the selection.
+                        match hit {
+                            Some(id) => {
+                                this.scene.set_active(id);
+                            }
+                            None => this.scene.clear_active(),
+                        }
                         cx.notify();
                     })
                     .ok();
@@ -1664,13 +1817,13 @@ impl Render for DragonFruit {
         });
 
         let mesh_name = self
-            .mesh
-            .as_ref()
-            .map(|mesh| mesh.name.clone())
+            .scene
+            .active_model()
+            .map(|model| model.name.clone())
             .unwrap_or_else(|| "No model".to_owned());
         let mode = self.mode;
         let show_settings = self.show_settings;
-        let has_models = self.mesh.is_some();
+        let has_models = self.has_mesh();
         let layer = self.layer;
 
         self.window_width = window.viewport_size().width.0;
@@ -1792,10 +1945,11 @@ impl Render for DragonFruit {
                         // prefers the hovered point; there is no hover raycast
                         // here, so the whole model is framed.
                         if key == "f" && !primary && !alt && !repeat {
-                            if let Some(mesh) = &this.mesh {
+                            if let Some(model) = this.scene.active_model() {
+                                let world = this.model_matrix().transform_point3(model.mesh.center);
+                                let radius = model.mesh.radius.max(1.0);
                                 let mut camera = this.camera.borrow_mut();
-                                let world = this.model_matrix().transform_point3(mesh.center);
-                                camera.focus(world, mesh.radius.max(1.0));
+                                camera.focus(world, radius);
                                 changed = true;
                             }
                         }
@@ -1810,7 +1964,7 @@ impl Render for DragonFruit {
                         // `usePrepareTransformHotkeys`: canvas tools only in
                         // Prepare with a model. `shift+m` is the local-space
                         // twin; the flag has no field here.
-                        if this.mode == Mode::Prepare && this.mesh.is_some() && !primary && !alt {
+                        if this.mode == Mode::Prepare && this.has_mesh() && !primary && !alt {
                             let tool = match key.as_str() {
                                 "q" => Some(0),
                                 "m" => Some(1),
@@ -1835,7 +1989,7 @@ impl Render for DragonFruit {
                             && !alt
                             && !shift
                             && !repeat
-                            && this.mesh.is_some()
+                            && this.has_mesh()
                         {
                             this.delete_model();
                             changed = true;
@@ -1849,8 +2003,7 @@ impl Render for DragonFruit {
                         let is_down = key == "down" || (is_printing && key == "s");
                         if (is_up || is_down) && !primary && !alt && this.num_layers > 0 {
                             let delta = if is_up { 1.0 } else { -1.0 };
-                            let next = (this.layer + delta)
-                                .clamp(0.0, this.num_layers as f32);
+                            let next = (this.layer + delta).clamp(0.0, this.num_layers as f32);
                             if next != this.layer {
                                 this.layer = next;
                                 changed = true;
@@ -1872,16 +2025,9 @@ impl Render for DragonFruit {
                 ))
             })
             .when(has_models, |this| {
-                this.child(
-                    div()
-                        .absolute()
-                        .bottom(px(4.))
-                        .left(px(4.))
-                        .child(panels::empty_scene::model_stats_card(
-                            self.stats.clone(),
-                            entity.clone(),
-                        )),
-                )
+                this.child(div().absolute().bottom(px(4.)).left(px(4.)).child(
+                    panels::empty_scene::model_stats_card(self.stats.clone(), entity.clone()),
+                ))
             })
             .when(mode == Mode::Printing && has_models, |this| {
                 this.child(features::printing_preview::printing_preview(
@@ -1895,63 +2041,73 @@ impl Render for DragonFruit {
                 this.child(drop_overlay(self.drag_unsupported))
             })
             // `ToolRail` renders only in Prepare/Support with models.
-            .when(has_models && matches!(mode, Mode::Prepare | Mode::Support), |this| {
-                this.child(rail::tool_rail(
-                    mode,
-                    self.active_tool,
-                    self.support_panel,
-                    entity.clone(),
-                ))
-            })
+            .when(
+                has_models && matches!(mode, Mode::Prepare | Mode::Support),
+                |this| {
+                    this.child(rail::tool_rail(
+                        mode,
+                        self.active_tool,
+                        self.support_panel,
+                        entity.clone(),
+                    ))
+                },
+            )
             .child({
                 let mut defs = Vec::new();
                 // `PreparePanelStack` / Support's stack carry the Models panel;
                 // Export and Printing do not.
                 if has_models && matches!(mode, Mode::Prepare | Mode::Support) {
                     defs.push(
-                        panels::list::PanelDef::new("models", "Models", panels::list::PanelKind::Models)
-                            .dock(panels::list::PanelDock::Left)
-                            .header_right(panels::content::models_add_button(entity.clone()))
-                            .content(panels::content::models_body(
-                                mesh_name.clone(),
-                                triangles,
-                                self.selected.get(),
-                                entity.clone(),
-                            )),
+                        panels::list::PanelDef::new(
+                            "models",
+                            "Models",
+                            panels::list::PanelKind::Models,
+                        )
+                        .dock(panels::list::PanelDock::Left)
+                        .header_right(panels::content::models_add_button(entity.clone()))
+                        .content(panels::content::models_body(
+                            mesh_name.clone(),
+                            triangles,
+                            self.selected(),
+                            entity.clone(),
+                        )),
                     );
                 }
                 match mode {
                     Mode::Prepare => {
                         if has_models {
-                            let meta: Option<(&'static str, &'static str, panels::list::PanelKind)> =
-                                match self.active_tool {
-                                    1 => Some((
-                                        "prepare-transform",
-                                        "Transform",
-                                        panels::list::PanelKind::Transform,
-                                    )),
-                                    4 => Some((
-                                        "prepare-duplicate",
-                                        "Duplicate",
-                                        panels::list::PanelKind::Duplicate,
-                                    )),
-                                    5 => Some((
-                                        "prepare-arrange",
-                                        "Arrange",
-                                        panels::list::PanelKind::Arrange,
-                                    )),
-                                    6 => Some((
-                                        "prepare-split",
-                                        "Split",
-                                        panels::list::PanelKind::OrganicCut,
-                                    )),
-                                    7 => Some((
-                                        "prepare-smooth",
-                                        "Smoothing",
-                                        panels::list::PanelKind::Smoothing,
-                                    )),
-                                    _ => None,
-                                };
+                            let meta: Option<(
+                                &'static str,
+                                &'static str,
+                                panels::list::PanelKind,
+                            )> = match self.active_tool {
+                                1 => Some((
+                                    "prepare-transform",
+                                    "Transform",
+                                    panels::list::PanelKind::Transform,
+                                )),
+                                4 => Some((
+                                    "prepare-duplicate",
+                                    "Duplicate",
+                                    panels::list::PanelKind::Duplicate,
+                                )),
+                                5 => Some((
+                                    "prepare-arrange",
+                                    "Arrange",
+                                    panels::list::PanelKind::Arrange,
+                                )),
+                                6 => Some((
+                                    "prepare-split",
+                                    "Split",
+                                    panels::list::PanelKind::OrganicCut,
+                                )),
+                                7 => Some((
+                                    "prepare-smooth",
+                                    "Smoothing",
+                                    panels::list::PanelKind::Smoothing,
+                                )),
+                                _ => None,
+                            };
                             if let Some((id, title, kind)) = meta {
                                 if let Some(body) = features::tool_panels::tool_panel(
                                     self.active_tool,
@@ -1972,9 +2128,9 @@ impl Render for DragonFruit {
                             if self.active_tool == 1 {
                                 if let Some(def) =
                                     crate::widgets::orientation_panel::orientation_panel_def(
-                                        self.mesh
-                                            .as_ref()
-                                            .map(|mesh| mesh.name.clone().into()),
+                                        self.scene
+                                            .active_model()
+                                            .map(|model| model.name.clone().into()),
                                         entity.clone(),
                                     )
                                 {
@@ -2007,9 +2163,9 @@ impl Render for DragonFruit {
                             // The Auto Supports panel's header gear opens the
                             // settings dialog; only that panel has one.
                             let def = if self.support_panel == SupportPanel::Auto {
-                                def.header_right(
-                                    features::tool_panels::supports_settings_gear(entity.clone()),
-                                )
+                                def.header_right(features::tool_panels::supports_settings_gear(
+                                    entity.clone(),
+                                ))
                             } else {
                                 def
                             };
@@ -2074,27 +2230,23 @@ impl Render for DragonFruit {
                         .bottom(px(6.0))
                         .w(px(48.))
                         .child(
-                            ui::card()
-                                .size_full()
-                                .flex()
-                                .flex_col()
-                                .child(
-                                    div()
-                                        .py(px(4.0))
-                                        .flex_1()
-                                        .min_h(px(0.0))
-                                        .flex()
-                                        .flex_col()
-                                        .child(overlays::layer_slider(
-                                            layer,
-                                            Some(self.lower_layer),
-                                            self.cross_section,
-                                            0.0,
-                                            self.num_layers as f32,
-                                            1.0,
-                                            entity.clone(),
-                                        )),
-                                ),
+                            ui::card().size_full().flex().flex_col().child(
+                                div()
+                                    .py(px(4.0))
+                                    .flex_1()
+                                    .min_h(px(0.0))
+                                    .flex()
+                                    .flex_col()
+                                    .child(overlays::layer_slider(
+                                        layer,
+                                        Some(self.lower_layer),
+                                        self.cross_section,
+                                        0.0,
+                                        self.num_layers as f32,
+                                        1.0,
+                                        entity.clone(),
+                                    )),
+                            ),
                         ),
                 )
             })
@@ -2326,8 +2478,25 @@ fn srgb_to_linear(channel: u8) -> f32 {
     }
 }
 
-/// `blendTintColor` from `src/features/shaders/mesh/tint.ts`: linear lerp from
-/// the unselected `#a3a3a3` toward the theme selection `#ec2a77` at 0.70.
+/// The nearest model along a world-space ray.
+///
+/// Each model answers in its own local frame and reports a world distance
+/// (`gpui_core::scene::raycast_distance`), so the winner is the nearest hit
+/// rather than whichever model happens to come first in import order.
+fn pick_model(
+    models: &[viewport::ModelDraw],
+    origin: glam::Vec3,
+    direction: glam::Vec3,
+) -> Option<gpui_core::scene::ModelId> {
+    models
+        .iter()
+        .filter_map(|model| {
+            gpui_core::scene::raycast_distance(&model.mesh, model.matrix, origin, direction)
+                .map(|distance| (model.id, distance))
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(id, _)| id)
+}
 
 /// Where the pointer's ray meets the plate plane at `z`.
 fn plane_hit(camera: &Camera, aspect: f32, ndc_x: f32, ndc_y: f32, z: f32) -> Option<glam::Vec3> {
@@ -2339,6 +2508,9 @@ fn plane_hit(camera: &Camera, aspect: f32, ndc_x: f32, ndc_y: f32, z: f32) -> Op
     (t > 0.0).then(|| origin + direction * t)
 }
 
+/// `blendTintColor` from `src/features/shaders/mesh/tint.ts`: linear lerp from
+/// the unselected `#a3a3a3` toward the theme selection `#ec2a77` at 0.70 —
+/// and the selected pink the real app renders the active model with.
 fn mesh_color(selected: bool, hovered: bool) -> [f32; 3] {
     // Calibrated against the real app's selected poussin render: the model's
     // material is a saturated pink, not the #a3a3a3 default blended with the
@@ -2360,7 +2532,11 @@ fn mesh_color(selected: bool, hovered: bool) -> [f32; 3] {
             base + (tint[2] - base) * 0.5,
         ]
     } else {
-        [srgb_to_linear(0xa3), srgb_to_linear(0xa3), srgb_to_linear(0xa3)]
+        [
+            srgb_to_linear(0xa3),
+            srgb_to_linear(0xa3),
+            srgb_to_linear(0xa3),
+        ]
     }
 }
 

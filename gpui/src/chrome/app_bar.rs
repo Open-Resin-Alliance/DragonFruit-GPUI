@@ -1366,11 +1366,10 @@ fn app_menu(
             "menu-new-scene" => {
                 entity
                     .update(cx, |this, cx| {
-                        // `delete_model` is the one path that clears the scene:
-                        // it also homes the camera, drops the selection and the
-                        // session's last file, and saves. Clearing the fields
-                        // here skipped all of that.
-                        this.delete_model();
+                        // `newScene` empties the collection whatever is
+                        // selected; `clear_scene` also homes the camera, drops
+                        // the selection and the session's last file, and saves.
+                        this.clear_scene();
                         this.status = "No model loaded".to_owned();
                         this.show_app_menu = false;
                         cx.notify();

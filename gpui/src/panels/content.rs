@@ -400,10 +400,11 @@ fn model_row(
                 .child(hint("model-delete-tip", delete_button, "Delete model")),
         )
         .on_click(move |_, _, cx| {
-            // `onSelect(model.id, 'single')`: the app's selection is one flag.
+            // `onSelect(model.id, 'single')`: with one row the row *is* the
+            // active model, so the click re-establishes it rather than clearing.
             click_entity
                 .update(cx, |this, cx| {
-                    this.selected.set(true);
+                    this.select_active();
                     cx.notify();
                 })
                 .ok();
@@ -662,7 +663,7 @@ pub fn supports_body(count: usize, entity: WeakEntity<DragonFruit>) -> impl Into
             let angle = auto_support::live_settings().overhang_self_support_angle_deg;
             generate_entity
                 .update(cx, |this, cx| {
-                    if let Some(mesh) = this.mesh.as_ref() {
+                    if let Some(mesh) = this.active_mesh() {
                         let model = this.model_matrix();
                         let points = stl::overhang_points(mesh, angle);
                         let target = (300.0 * this.support_density).max(1.0) as usize;
@@ -1112,7 +1113,7 @@ pub fn export_body(entity: WeakEntity<DragonFruit>) -> impl IntoElement {
                 .on_click(move |_, _, cx| {
                     export_entity
                         .update(cx, |this, cx| {
-                            let Some(mesh) = this.mesh.as_ref() else {
+                            let Some(mesh) = this.active_mesh() else {
                                 return;
                             };
                             let Some(path) = rfd::FileDialog::new()

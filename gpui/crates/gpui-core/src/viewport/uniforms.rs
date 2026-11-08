@@ -55,6 +55,10 @@ pub(super) struct ModelUniform {
     pub(super) bounds_max: [f32; 4],
     /// `(r, g, b)` stripe colour, `w` enabled.
     pub(super) stripe: [f32; 4],
+    /// The model's own albedo. Per model, not per scene: the selection and
+    /// hover tints are per model (`StlMesh`'s tint ignores every mesh but the
+    /// active one), so the colour cannot live in the shared scene uniform.
+    pub(super) color: [f32; 4],
 }
 
 /// One support instance: the unit mesh's transform plus its taper ratio.
@@ -75,6 +79,17 @@ pub(super) struct GpuMesh {
     /// GPUI's, so a large model is split into chunks instead of failing
     /// validation on one buffer.
     pub(super) vertex_chunks: Vec<(wgpu::Buffer, u32)>,
-    pub(super) footprint_buffer: wgpu::Buffer,
-    pub(super) footprint_vertex_count: u32,
+    /// The footprint outline, already baked into world space, and its vertex
+    /// count. `None` while no outline has been built yet (and for a mesh whose
+    /// convex hull is degenerate).
+    pub(super) footprint: Option<(wgpu::Buffer, u32)>,
+    /// The `Arc<MeshData>` pointer the vertices came from, so a replaced
+    /// geometry re-uploads while a shared one does not.
+    pub(super) mesh_ptr: usize,
+    /// The transform the footprint hull was baked through.
+    pub(super) matrix: glam::Mat4,
+    /// The model's uniform and bind group. One pair per model, so a drag on
+    /// one model touches only that model's uniform.
+    pub(super) uniform: wgpu::Buffer,
+    pub(super) bind: wgpu::BindGroup,
 }

@@ -26,14 +26,12 @@ impl Viewport {
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        mesh: Option<&MeshData>,
+        models: &[super::ModelDraw],
         supports: Option<&SupportBatches>,
         layers: ViewLayers,
-        model: glam::Mat4,
         clip_z: f32,
         gizmo: Option<&[[f32; 7]]>,
         camera: &Camera,
-        base_color: [f32; 3],
         width: u32,
         height: u32,
     ) -> Result<()> {
@@ -52,34 +50,62 @@ impl Viewport {
             self.size = (width, height);
         }
 
-        if let Some(mesh) = mesh {
-            let ptr = mesh as *const MeshData as usize;
-            // The footprint outline is drawn with the scene uniform, not the
-            // model's, so the hull is baked through `model` here — otherwise it
-            // stays at the plate centre after the model is dragged.
-            //
-            // The geometry buffer is *not* part of that: the vertices never
-            // change with the transform, and re-uploading them on every frame of
-            // a drag is what used to make moving a high-poly model crawl. Only
-            // the footprint — a few hundred points — follows the matrix.
-            let mesh_changed = self.mesh_ptr != ptr;
-            let matrix_changed = self.mesh_matrix != model;
-            if mesh_changed || matrix_changed {
-                let mut outline = Vec::with_capacity(mesh.footprint.len() * 2);
-                for index in 0..mesh.footprint.len() {
-                    for point in [
-                        mesh.footprint[index],
-                        mesh.footprint[(index + 1) % mesh.footprint.len()],
-                    ] {
-                        let world = model.transform_point3(glam::Vec3::new(point[0], point[1], 0.0));
-                        outline.push([world.x, world.y]);
-                    }
+        // One `GpuMesh` per model. The vertex buffers upload once per mesh
+        // pointer (a shared VOXL chunk is one upload), and the footprint hull
+        // is re-baked through the model's matrix whenever the placement moves
+        // — a few hundred points, not the geometry.
+        let bounds_min = [
+            self.metrics.center_x - self.metrics.plate_width * 0.5,
+            self.metrics.center_y - self.metrics.plate_depth * 0.5,
+            0.0,
+            0.0,
+        ];
+        let bounds_max = [
+            self.metrics.center_x + self.metrics.plate_width * 0.5,
+            self.metrics.center_y + self.metrics.plate_depth * 0.5,
+            self.metrics.volume_height,
+            0.0,
+        ];
+        let mut any_outside = false;
+        for model in models {
+            let ptr = std::sync::Arc::as_ptr(&model.mesh) as usize;
+            let layout = &self.model_layout;
+            let entry = self.meshes.entry(model.id).or_insert_with(|| {
+                let uniform = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("viewport model"),
+                    // `ModelUniform`: matrix + clip + bounds_min/max + stripe
+                    // + colour.
+                    size: std::mem::size_of::<ModelUniform>() as u64,
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+                let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("viewport model"),
+                    layout,
+                    entries: &[wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: uniform.as_entire_binding(),
+                    }],
+                });
+                GpuMesh {
+                    vertex_chunks: Vec::new(),
+                    footprint: None,
+                    mesh_ptr: usize::MAX,
+                    matrix: glam::Mat4::IDENTITY,
+                    uniform,
+                    bind,
                 }
+            });
+            let mesh_changed = entry.mesh_ptr != ptr;
+            let matrix_changed = entry.matrix != model.matrix;
+            if mesh_changed || matrix_changed {
+                let outline = footprint_outline(&model.mesh, model.matrix);
                 if mesh_changed {
                     // 64 MiB per chunk keeps every buffer well inside the
                     // device limit while a 300 MB model still loads.
                     const CHUNK_BYTES: usize = 64 * 1024 * 1024;
-                    let vertex_chunks: Vec<(wgpu::Buffer, u32)> = mesh
+                    entry.vertex_chunks = model
+                        .mesh
                         .vertices
                         .chunks(CHUNK_BYTES / std::mem::size_of::<[f32; 3]>())
                         .map(|chunk| {
@@ -92,33 +118,67 @@ impl Viewport {
                             (buffer, chunk.len() as u32)
                         })
                         .collect();
-                    let footprint_buffer =
-                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("viewport footprint"),
-                            contents: bytemuck::cast_slice(&outline),
-                            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                        });
-                    self.mesh = Some(GpuMesh {
-                        vertex_chunks,
-                        footprint_buffer,
-                        footprint_vertex_count: outline.len() as u32,
-                    });
-                    self.mesh_ptr = ptr;
-                } else if let Some(gpu) = &self.mesh {
-                    // Same mesh, same outline length: the hull is a copy, not a
-                    // new buffer.
-                    queue.write_buffer(
-                        &gpu.footprint_buffer,
-                        0,
-                        bytemuck::cast_slice(&outline),
-                    );
+                    entry.mesh_ptr = ptr;
                 }
-                self.mesh_matrix = model;
+                // The outline length is a property of the mesh, so a moved
+                // model rewrites the same buffer instead of allocating.
+                let reuse = entry
+                    .footprint
+                    .as_ref()
+                    .is_some_and(|(_, count)| *count as usize == outline.len());
+                if outline.is_empty() {
+                    entry.footprint = None;
+                } else if reuse {
+                    let (buffer, _) = entry.footprint.as_ref().expect("reuse checked above");
+                    queue.write_buffer(buffer, 0, bytemuck::cast_slice(&outline));
+                } else {
+                    let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("viewport footprint"),
+                        contents: bytemuck::cast_slice(&outline),
+                        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                    });
+                    entry.footprint = Some((buffer, outline.len() as u32));
+                }
+                entry.matrix = model.matrix;
             }
-        } else {
-            self.mesh = None;
-            self.mesh_ptr = 0;
+
+            // The stripe is on only when the model actually escapes the
+            // volume; the AABB test is per model on the CPU so a fitting model
+            // pays nothing in the shader.
+            let centre = model.matrix.transform_point3(model.mesh.center);
+            let half = glam::Vec3::from_array(model.mesh.size) * 0.5;
+            let min = centre - half;
+            let max = centre + half;
+            let outside = min.x < bounds_min[0]
+                || max.x > bounds_max[0]
+                || min.y < bounds_min[1]
+                || max.y > bounds_max[1]
+                || min.z < 0.0
+                || max.z > self.metrics.volume_height;
+            any_outside |= outside;
+            let color = super::plate::out_of_bounds_stripe_color();
+            queue.write_buffer(
+                &entry.uniform,
+                0,
+                bytemuck::bytes_of(&ModelUniform {
+                    matrix: model.matrix.to_cols_array_2d(),
+                    clip: [clip_z, 0.0, 0.0, 0.0],
+                    bounds_min,
+                    bounds_max,
+                    stripe: [
+                        color[0],
+                        color[1],
+                        color[2],
+                        if outside { 1.0 } else { 0.0 },
+                    ],
+                    color: [model.color[0], model.color[1], model.color[2], 1.0],
+                }),
+            );
         }
+        // A model that left the scene loses its buffers; the realistic model
+        // count makes this walk free.
+        self.meshes
+            .retain(|id, _| models.iter().any(|model| model.id == *id));
 
         let eye = camera.eye();
         let forward = (camera.target - eye).normalize();
@@ -136,7 +196,7 @@ impl Viewport {
 
             let ortho_fade_t = ((view_signed_z - ORTHO_FADE_VISIBLE_VIEW_Z)
                 / (ORTHO_FADE_HIDDEN_VIEW_Z - ORTHO_FADE_VISIBLE_VIEW_Z).max(0.0001))
-                .clamp(0.0, 1.0);
+            .clamp(0.0, 1.0);
             let ortho_fade = ortho_fade_t * ortho_fade_t * (3.0 - 2.0 * ortho_fade_t);
             plate_opacity = 1.0 - ortho_fade;
 
@@ -159,12 +219,12 @@ impl Viewport {
 
             let height_fade_t = ((camera_z - FADE_HIDDEN_Z)
                 / (FADE_VISIBLE_Z - FADE_HIDDEN_Z).max(0.0001))
-                .clamp(0.0, 1.0);
+            .clamp(0.0, 1.0);
             let smooth_height_fade = height_fade_t * height_fade_t * (3.0 - 2.0 * height_fade_t);
 
             let side_view_raw = ((SIDE_VIEW_FADE_START_ABS_Z - view_abs_z)
                 / (SIDE_VIEW_FADE_START_ABS_Z - SIDE_VIEW_FADE_END_ABS_Z).max(0.0001))
-                .clamp(0.0, 1.0);
+            .clamp(0.0, 1.0);
             let side_view_fade = side_view_raw * side_view_raw * (3.0 - 2.0 * side_view_raw);
             let side_height_gate =
                 ((SIDE_VIEW_HEIGHT_MAX_Z - camera_z) / SIDE_VIEW_HEIGHT_MAX_Z).clamp(0.0, 1.0);
@@ -217,45 +277,8 @@ impl Viewport {
             }),
         );
 
-        queue.write_buffer(
-            &self.model_uniform,
-            0,
-            bytemuck::bytes_of(&ModelUniform {
-                matrix: model.to_cols_array_2d(),
-                clip: [clip_z, 0.0, 0.0, 0.0],
-                bounds_min: [
-                    self.metrics.center_x - self.metrics.plate_width * 0.5,
-                    self.metrics.center_y - self.metrics.plate_depth * 0.5,
-                    0.0,
-                    0.0,
-                ],
-                bounds_max: [
-                    self.metrics.center_x + self.metrics.plate_width * 0.5,
-                    self.metrics.center_y + self.metrics.plate_depth * 0.5,
-                    self.metrics.volume_height,
-                    0.0,
-                ],
-                // The stripe is on only when the model actually escapes the
-                // volume; the AABB test is on the CPU so a fitting model pays
-                // nothing in the shader.
-                stripe: {
-                    let outside = mesh.is_some_and(|mesh| {
-                        let centre = model.transform_point3(mesh.center);
-                        let half = glam::Vec3::from_array(mesh.size) * 0.5;
-                        let min = centre - half;
-                        let max = centre + half;
-                        min.x < self.metrics.center_x - self.metrics.plate_width * 0.5
-                            || max.x > self.metrics.center_x + self.metrics.plate_width * 0.5
-                            || min.y < self.metrics.center_y - self.metrics.plate_depth * 0.5
-                            || max.y > self.metrics.center_y + self.metrics.plate_depth * 0.5
-                            || min.z < 0.0
-                            || max.z > self.metrics.volume_height
-                    });
-                    let color = super::plate::out_of_bounds_stripe_color();
-                    [color[0], color[1], color[2], if outside { 1.0 } else { 0.0 }]
-                },
-            }),
-        );
+        // The model uniforms were written above, per model: every mesh draw
+        // binds its own matrix, clip plane, stripe flag and albedo.
         // The caller builds the gizmo's triangles from the camera and the handle
         // state, so the buffer is rebuilt only when they actually changed. The
         // caller memoises the build itself; the compare here is the last line of
@@ -304,7 +327,10 @@ impl Viewport {
                 inv_proj: projection.inverse().to_cols_array_2d(),
                 camera_pos: [eye.x, eye.y, eye.z],
                 _pad0: 0.0,
-                base_color,
+                // The mesh pass reads its albedo from the per-model uniform;
+                // this field stays in the block for the shaders that declare
+                // the shared struct but never use the value.
+                base_color: [0.0; 3],
                 _pad1: 0.0,
                 resolution: [width as f32, height as f32],
                 _pad2: [0.0; 2],
@@ -348,8 +374,11 @@ impl Viewport {
             &self.volume_edge_uniform,
             0,
             bytemuck::bytes_of(&ColorUniform {
-                color: srgb_linear(0x8abfff),
-                opacity: 0.18,
+                // `#ff5b6f`/0.36 once any model escapes the volume, otherwise
+                // the normal `#8abfff`/0.18. The flag is the frame's aggregate
+                // over the per-model stripe tests above.
+                color: srgb_linear(if any_outside { 0xff5b6f } else { 0x8abfff }),
+                opacity: if any_outside { 0.36 } else { 0.18 },
             }),
         );
         queue.write_buffer(
@@ -452,12 +481,18 @@ impl Viewport {
                 if let Some(instances) = &self.support_straight_instances {
                     pass.set_vertex_buffer(0, self.support_cylinder.slice(..));
                     pass.set_vertex_buffer(1, instances.slice(..));
-                    pass.draw(0..self.support_cylinder_count, 0..self.support_straight_count);
+                    pass.draw(
+                        0..self.support_cylinder_count,
+                        0..self.support_straight_count,
+                    );
                 }
                 if let Some(instances) = &self.support_tapered_instances {
                     pass.set_vertex_buffer(0, self.support_cylinder.slice(..));
                     pass.set_vertex_buffer(1, instances.slice(..));
-                    pass.draw(0..self.support_cylinder_count, 0..self.support_tapered_count);
+                    pass.draw(
+                        0..self.support_cylinder_count,
+                        0..self.support_tapered_count,
+                    );
                 }
                 if let Some(instances) = &self.support_node_instances {
                     pass.set_vertex_buffer(0, self.support_sphere.slice(..));
@@ -467,17 +502,28 @@ impl Viewport {
                 if let Some(instances) = &self.support_disk_instances {
                     pass.set_vertex_buffer(0, self.support_disk.slice(..));
                     pass.set_vertex_buffer(1, instances.slice(..));
-                    pass.draw(0..self.support_disk_count, 0..self.support_disk_instance_count);
+                    pass.draw(
+                        0..self.support_disk_count,
+                        0..self.support_disk_instance_count,
+                    );
                 }
             }
-            if let Some(mesh) = &self.mesh {
-                if !below_plate && mesh.footprint_vertex_count > 0 {
-                    pass.set_pipeline(&self.footprint);
-                    pass.set_vertex_buffer(0, mesh.footprint_buffer.slice(..));
-                    pass.draw(0..mesh.footprint_vertex_count, 0..1);
+            // One bind group and one draw per visible model. The bind group is
+            // set immediately before that model's vertex buffers, so a draw can
+            // never pair one model's uniform with another's geometry.
+            for model in models {
+                let Some(mesh) = self.meshes.get(&model.id) else {
+                    continue;
+                };
+                if !below_plate {
+                    if let Some((buffer, count)) = &mesh.footprint {
+                        pass.set_pipeline(&self.footprint);
+                        pass.set_vertex_buffer(0, buffer.slice(..));
+                        pass.draw(0..*count, 0..1);
+                    }
                 }
                 pass.set_pipeline(&self.mesh_pipeline);
-                pass.set_bind_group(1, &self.model_bind, &[]);
+                pass.set_bind_group(1, &mesh.bind, &[]);
                 for (buffer, count) in &mesh.vertex_chunks {
                     pass.set_vertex_buffer(0, buffer.slice(..));
                     pass.draw(0..*count, 0..1);
@@ -664,6 +710,26 @@ impl Viewport {
             support_instance_buffer(device, "viewport support disks", &disks),
         );
     }
+}
+
+/// The model's convex-hull footprint as world-space line pairs, through
+/// `matrix`.
+///
+/// The span is baked on the CPU because the footprint pass is drawn with the
+/// scene uniform (group 0 only); the hull follows the model's placement while
+/// the vertex buffers stay untouched.
+fn footprint_outline(mesh: &MeshData, matrix: glam::Mat4) -> Vec<[f32; 2]> {
+    let mut outline = Vec::with_capacity(mesh.footprint.len() * 2);
+    for index in 0..mesh.footprint.len() {
+        for point in [
+            mesh.footprint[index],
+            mesh.footprint[(index + 1) % mesh.footprint.len()],
+        ] {
+            let world = matrix.transform_point3(glam::Vec3::new(point[0], point[1], 0.0));
+            outline.push([world.x, world.y]);
+        }
+    }
+    outline
 }
 
 fn support_instance_buffer(

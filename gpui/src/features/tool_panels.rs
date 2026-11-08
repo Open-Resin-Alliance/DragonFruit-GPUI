@@ -391,35 +391,33 @@ pub(crate) fn sync_from_entity(entity: &WeakEntity<DragonFruit>, cx: &mut App) {
     entity
         .read_with(cx, |this, _| {
             with_store(|store| {
-                store.has_mesh = this.mesh.is_some();
+                store.has_mesh = this.has_mesh();
                 store.support_count = this
                     .supports
                     .borrow()
                     .as_ref()
                     .map(|batches| batches.straight_shafts.len() + batches.tapered_shafts.len())
                     .unwrap_or(0);
-                store.transform.position = this.translate;
-                store.transform.rotation = this.rotation;
-                store.transform.scale = this.scale;
-                if let Some(mesh) = this.mesh.as_ref() {
+                let transform = this.transform();
+                store.transform.position = transform.translate.to_array();
+                store.transform.rotation = transform.rotation;
+                store.transform.scale = transform.scale.to_array();
+                if let Some(mesh) = this.active_mesh() {
                     store.transform.has_bbox = true;
                     store.transform.original_size = mesh.size;
                     store.mesh_min_z = mesh.center.z - mesh.size[2] * 0.5;
                     store.mesh_center_z = mesh.center.z;
                     store.mesh_center = [mesh.center.x, mesh.center.y];
-                    store.duplicate.active_model_name = Some(mesh.name.clone().into());
+                    store.duplicate.active_model_name =
+                        this.active_model_name().map(|name| name.to_owned().into());
                 } else {
                     store.transform.has_bbox = false;
                     store.transform.original_size = [1.0; 3];
                     store.mesh_min_z = 0.0;
                     store.duplicate.active_model_name = None;
                 }
-                store.arrange.model_count = if store.has_mesh { 1 } else { 0 };
-                store.arrange.selected_model_count = if store.has_mesh && this.selected.get() {
-                    1
-                } else {
-                    0
-                };
+                store.arrange.model_count = this.model_count();
+                store.arrange.selected_model_count = if this.selected() { 1 } else { 0 };
                 store.organic.disabled = !store.has_mesh;
                 store.islands.model_mut().has_geometry = store.has_mesh;
             });
@@ -451,9 +449,7 @@ fn flush(
     entity
         .update(cx, |this, cx| {
             if transform_changed {
-                this.translate = position;
-                this.rotation = rotation;
-                this.scale = scale;
+                this.set_active_transform(position, rotation, scale);
             }
             cx.notify();
         })
