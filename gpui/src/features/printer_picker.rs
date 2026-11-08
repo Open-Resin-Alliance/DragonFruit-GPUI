@@ -1982,3 +1982,93 @@ fn setup_actions(view: &PickerView, entity: WeakEntity<DragonFruit>) -> Div {
         .child(switch)
         .child(right)
 }
+
+// ── The printer-profiles modal's view of this store ─────────────────────────
+//
+// `features::printer_profiles` is the `Printer & Material Profiles` modal. The
+// add flow stays here — the library and `Initial Setup` — but the modal's rail
+// lists the installed profiles and owns their order, so it reads this store's
+// list and keeps its selection, moves and removals in step. These functions are
+// that seam; every surface above is unchanged.
+
+/// One installed profile, as the modal needs to identify it: the store's id and
+/// the preset it was created from (`officialPresetId`).
+pub struct InstalledProfile {
+    pub id: String,
+    pub official_preset_id: String,
+}
+
+impl PrinterStore {
+    /// `movePrinterProfile` (`profileStore.ts:2558`): insert `id` before
+    /// `before_id`, or at the end when there is no such profile.
+    fn move_before(&mut self, id: &str, before_id: Option<&str>) {
+        let Some(index) = self.profiles.iter().position(|profile| profile.id == id) else {
+            return;
+        };
+        let moved = self.profiles.remove(index);
+        let before = before_id
+            .map(str::trim)
+            .filter(|before| !before.is_empty())
+            .and_then(|before| self.profiles.iter().position(|profile| profile.id == before));
+        match before {
+            Some(index) => self.profiles.insert(index, moved),
+            None => self.profiles.push(moved),
+        }
+    }
+
+    /// `removePrinterProfile` (`profileStore.ts:2457`), minus the material
+    /// sharing bookkeeping the modal keeps itself: drop the profile and its own
+    /// materials, and move the active printer to the first survivor.
+    fn remove(&mut self, id: &str) {
+        if !self.profiles.iter().any(|profile| profile.id == id) {
+            return;
+        }
+        self.profiles.retain(|profile| profile.id != id);
+        self.materials
+            .retain(|material| material.printer_profile_id != id);
+        if self.active_profile.as_deref() == Some(id) {
+            self.active_profile = self.profiles.first().map(|profile| profile.id.clone());
+        }
+        if self.active_profile.is_none() {
+            self.active_material = None;
+            return;
+        }
+        self.ensure_active_material();
+    }
+}
+
+/// `profileState.printerProfiles`, in rail order.
+pub fn installed_profiles() -> Vec<InstalledProfile> {
+    store()
+        .profiles
+        .iter()
+        .map(|profile| InstalledProfile {
+            id: profile.id.clone(),
+            official_preset_id: profile.official_preset_id.clone(),
+        })
+        .collect()
+}
+
+/// `profileState.activePrinterProfileId`.
+pub fn active_profile_id() -> Option<String> {
+    store().active_profile.clone()
+}
+
+/// `setActivePrinterProfile`.
+pub fn select_profile(id: &str) {
+    let mut guard = store();
+    if guard.profiles.iter().any(|profile| profile.id == id) {
+        guard.active_profile = Some(id.to_owned());
+        guard.ensure_active_material();
+    }
+}
+
+/// `movePrinterProfile`.
+pub fn move_profile(id: &str, before_id: Option<&str>) {
+    store().move_before(id, before_id);
+}
+
+/// `removePrinterProfile`.
+pub fn remove_profile(id: &str) {
+    store().remove(id);
+}

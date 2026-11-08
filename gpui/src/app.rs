@@ -264,6 +264,8 @@ pub(crate) struct DragonFruit {
     /// Printer Library, then the `Initial Setup` variant dialog. Set by
     /// `printer-menu-button` when the profile has no fleet units to quick-switch.
     pub(crate) show_printer_picker: bool,
+    /// The `Printer & Material Profiles` modal (`features::printer_profiles`).
+    pub(crate) show_printer_profiles: bool,
     /// The Auto Supports settings dialog (`AutoSupportSettingsBody`). Set by the
     /// Auto panel's header gear (`tool_panels::supports_settings_gear`) and
     /// cleared by Escape or by the dialog's own close tile.
@@ -394,6 +396,7 @@ impl DragonFruit {
             focused: false,
             show_printer_menu: false,
             show_printer_picker: false,
+            show_printer_profiles: false,
             show_support_settings: false,
             show_app_menu: false,
             show_view_menu: false,
@@ -1571,6 +1574,12 @@ impl Render for DragonFruit {
                             // The printer picker (`useEscapeToClose` in both
                             // the library and `PrinterVariantPickerModal`):
                             // the nested setup dialog closes first.
+                            if this.show_printer_profiles {
+                                if !features::printer_profiles::escape() {
+                                    this.show_printer_profiles = false;
+                                }
+                                changed = true;
+                            }
                             if this.show_printer_picker {
                                 if !features::printer_picker::escape() {
                                     this.show_printer_picker = false;
@@ -1614,7 +1623,11 @@ impl Render for DragonFruit {
                         // has no "focused input" query to test instead. The Auto
                         // Supports settings dialog and the printer picker take
                         // the same hold.
-                        if this.show_settings || this.show_support_settings || this.show_printer_picker {
+                        if this.show_settings
+                            || this.show_support_settings
+                            || this.show_printer_picker
+                            || this.show_printer_profiles
+                        {
                             return;
                         }
 
@@ -1940,6 +1953,12 @@ impl Render for DragonFruit {
             ))
             .child(features::auto_support_settings::auto_support_settings(
                 self.show_support_settings,
+                entity.clone(),
+            ))
+            // The printer profiles modal paints under the picker, which the
+            // modal opens for its Add flow.
+            .child(features::printer_profiles::printer_profiles(
+                self.show_printer_profiles,
                 entity.clone(),
             ))
             // The bar's printer picker: the library sheet and the nested

@@ -4,6 +4,7 @@ pub mod arrange_panels;
 pub mod auto_support_settings;
 pub mod organic_cut_panel;
 pub mod printer_picker;
+pub mod printer_profiles;
 pub mod printing_preview;
 pub mod scene_modals;
 pub mod settings;
