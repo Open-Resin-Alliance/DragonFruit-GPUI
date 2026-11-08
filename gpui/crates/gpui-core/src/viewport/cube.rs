@@ -50,22 +50,12 @@ fn vs_main(in: VsIn) -> VsOut {
     return out;
 }
 
-// three's renderer tone-maps every material unless it opts out, and the gizmo's
-// `meshBasicMaterial` does not, so the source's greens arrive through ACES and
-// read duller than the atlas bytes. Without this the lime stroke is brighter
-// than the TS widget's.
-fn aces_filmic(color: vec3<f32>) -> vec3<f32> {
-    let a = color * (color + vec3<f32>(0.0245786)) - vec3<f32>(0.000090537);
-    let b = color * (0.983729 * color + vec3<f32>(0.4329510)) + vec3<f32>(0.238081);
-    return clamp(a / b, vec3<f32>(0.0), vec3<f32>(1.0));
-}
-
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let texel = textureSample(face_atlas, face_sampler, in.uv);
     // Opaque: the source's `opacity={0.75}` bleeds 25% of the scene through the
     // faces, which reads as washed out against GPUI's lighter gizmo backdrop.
-    return vec4<f32>(aces_filmic(texel.rgb * u.tint.rgb), texel.a);
+    return vec4<f32>(texel.rgb * u.tint.rgb, texel.a);
 }
 "#;
 
