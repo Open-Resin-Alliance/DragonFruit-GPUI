@@ -67,6 +67,15 @@ fn load_failure_text(path: &Path, error: &anyhow::Error) -> String {
 
 /// `useSlicingManager`'s uncontrolled default: 50 microns.
 const LAYER_HEIGHT_MM: f32 = 0.05;
+/// The build volume the viewport draws: `BUILD_VOLUME_MM` in
+/// `gpui-core/src/viewport/construct.rs:912` (the source's generic VOXL
+/// printer profile, `originMode: 'center'`). Import placement searches this
+/// rect; the constant is repeated because the viewport's copy is private and
+/// this slice only owns `app.rs`.
+const PLATE_BUILD_VOLUME_MM: (f32, f32) = (218.88, 122.88);
+/// `findFreeSpotCentersForModels`'s default argument
+/// (`useSceneCollectionManager.ts:2640`).
+const IMPORT_SPACING_MM: f32 = 5.0;
 /// The scene clip's epsilon from `publishClip`.
 const CLIP_EPSILON_MM: f32 = 1e-6;
 /// `PREPARE_DROP_EXTENSIONS` in `fileHandling.ts` (built-in plugin types).
@@ -199,8 +208,8 @@ pub(crate) struct DragonFruit {
     pub(crate) voxl: Option<gpui_voxl::Scene>,
     /// `session.json`'s per-model transforms, held while the plate is empty.
     /// The port never reopens `last_file` at boot, so a launch has no scene to
-    /// apply them to; [`Self::install_models`] restores them when the same
-    /// scene is loaded again.
+    /// apply them to; [`Self::install_models`] and [`Self::append_mesh`] (for
+    /// the first model) restore them when the same scene is loaded again.
     session_models: Vec<gpui_store::session::SessionModel>,
     /// The index into [`Self::session_models`] that was active.
     session_active: Option<usize>,
@@ -223,6 +232,11 @@ pub(crate) struct DragonFruit {
     #[allow(dead_code)]
     pub(crate) status: String,
     pub(crate) loading: bool,
+    /// Loads requested while one is in flight, drained one at a time. Dropping
+    /// several files asks for several appends at once, and two concurrent
+    /// loads would each compute a free spot against the same plate and land
+    /// their models on top of each other.
+    pending_loads: std::collections::VecDeque<PathBuf>,
     /// `hoveredMeshModelId` — the model under the pointer, if any.
     pub(crate) hovered: Rc<Cell<Option<gpui_core::scene::ModelId>>>,
     pub(crate) smoke: bool,
@@ -371,7 +385,12 @@ impl DragonFruit {
         };
         // A file named on the command line wins over the one a scenario
         // declares, which keeps `--scenario x.json other.stl` working.
-        let path = cli.file.or(scenario_model);
+        let mut paths = cli.files;
+        if let Some(model) = scenario_model {
+            if paths.is_empty() {
+                paths.push(model);
+            }
+        }
 
         if scenario.is_some() {
             // A scenario must never hang a gate: if the driver stalls (a frame
@@ -424,6 +443,7 @@ impl DragonFruit {
             last: Rc::new(Cell::new((0.0, 0.0))),
             status: String::new(),
             loading: false,
+            pending_loads: std::collections::VecDeque::new(),
             hovered: Rc::new(Cell::new(None)),
             smoke,
             smoke_done: Rc::new(Cell::new(false)),
@@ -489,7 +509,9 @@ impl DragonFruit {
         if let Some(session) = &session {
             app.apply_session(session);
         }
-        if let Some(path) = path {
+        // Each path loads on top of the last: a mesh appends (a second gate
+        // model must land beside the first), a scene file still replaces.
+        for path in paths {
             match load_file(&path) {
                 Ok(loaded) => {
                     app.apply_loaded(loaded);
@@ -518,7 +540,8 @@ impl DragonFruit {
     /// The plate is empty at this point, so the stored models are inert: there
     /// is no model to carry a transform yet. They stay in
     /// [`Self::session_models`] and [`Self::install_models`] applies them when
-    /// a load produces the same scene (matched by name, in import order).
+    /// a load produces the same scene (matched by name, in import order);
+    /// [`Self::append_mesh`] applies a one-model session to the first STL.
     fn apply_session(&mut self, session: &gpui_store::Session) {
         // A newer build or a hand-edited file may hold a stale index; `Session`
         // sanitised it at the parse boundary, and the check keeps the
@@ -674,26 +697,17 @@ impl DragonFruit {
         }
     }
 
-    /// Install a finished load: an STL becomes one model, a VOXL scene one
-    /// model per `MODL` entry. The first model is made active, which is the
-    /// source's import behaviour (`useSceneCollectionManager.ts:7470-7475`).
+    /// Install a finished load. The two formats have different semantics,
+    /// matching the source:
+    ///
+    /// * a single mesh (STL) **appends** one model to the plate — the source
+    ///   pushes the new `LoadedModel` onto its collection
+    ///   (`useSceneCollectionManager.ts:3525-3563`);
+    /// * a VOXL scene replaces the plate with the file's own contents, because
+    ///   it describes a whole collection.
     fn apply_loaded(&mut self, loaded: Loaded) {
         match loaded {
-            Loaded::Mesh(mesh) => {
-                self.voxl = None;
-                // Plate centre is the origin in the port's plate-local frame;
-                // `defaultImportCenterXY` is computed from `plateLocalRect` in the source.
-                let translate = scene::placement(&mesh, [0.0, 0.0]);
-                let name = mesh.name.clone();
-                self.install_models(vec![scene::ImportedModel {
-                    name,
-                    mesh: Arc::new(mesh),
-                    translate,
-                    rotation: [0.0; 3],
-                    scale: [1.0; 3],
-                    visible: true,
-                }]);
-            }
+            Loaded::Mesh(mesh) => self.append_mesh(mesh),
             Loaded::Scene(import) => {
                 if self.smoke {
                     let models = import.scene.models.len();
@@ -709,6 +723,79 @@ impl DragonFruit {
                 self.install_models(import.models);
             }
         }
+    }
+
+    /// Append one imported STL to the plate.
+    ///
+    /// The source pushes the new `LoadedModel` onto `models`, then moves it to
+    /// the centre `findFreeSpotCentersForModels` reports
+    /// (`useSceneCollectionManager.ts:3525-3563`, the placement at `:3555`).
+    /// Every model already on the plate keeps its transform; only the new model
+    /// is placed, made active and framed.
+    fn append_mesh(&mut self, mesh: stl::MeshData) {
+        self.voxl = None;
+        let name = mesh.name.clone();
+        // `defaultImportCenterXY` is the active plate's centre in world
+        // coordinates (`useSceneCollectionManager.ts:2536-2550`). The port has
+        // one plate and the viewport draws it centred on the origin
+        // (`originMode: 'center'`), so the plate rect is symmetric about (0, 0)
+        // and the two coincide.
+        let plate = gpui_core::scene::Rect2D::from_center(
+            0.0,
+            0.0,
+            PLATE_BUILD_VOLUME_MM.0,
+            PLATE_BUILD_VOLUME_MM.1,
+        );
+        // A single STL arrives unrotated and unscaled (`:3539-3541`), so its
+        // footprint is the mesh's own projected size. Placement sees the
+        // visible models only, as `modelsRef.current.filter(model => model.visible)`
+        // does (`:2661-2688`).
+        let footprint = gpui_core::scene::projected_footprint_size(&mesh, [0.0; 3], [1.0; 3]);
+        let blocked = self.scene.visible_footprints();
+        let center = gpui_core::scene::find_free_spot_center(
+            footprint,
+            &blocked,
+            plate,
+            IMPORT_SPACING_MM,
+        );
+        let mut translate = scene::placement(&mesh, center);
+        let mut rotation = [0.0; 3];
+        let mut scale = [1.0; 3];
+        let mut visible = true;
+        let mesh = Arc::new(mesh);
+
+        // On an empty plate `session.json`'s transform for this file is still
+        // waiting, exactly as it was for a replacing load: apply it to the
+        // first model, then consume the stored list. Once a model is on the
+        // plate the scene owns the transforms and a later import must not
+        // inherit them.
+        if self.scene.is_empty() {
+            let mut scratch = gpui_core::scene::Scene::new();
+            scratch.push(
+                name.clone(),
+                mesh.clone(),
+                translate,
+                rotation,
+                scale,
+                visible,
+            );
+            if self.restore_session_models(&mut scratch) {
+                let restored = &scratch.models[0];
+                translate = restored.translate;
+                rotation = restored.rotation;
+                scale = restored.scale;
+                visible = restored.visible;
+            }
+            self.session_models.clear();
+            self.session_active = None;
+        }
+
+        self.log_smoke_model(&name, &mesh, translate);
+        let id = self
+            .scene
+            .push(name, mesh, translate, rotation, scale, visible);
+        self.scene.set_active(id);
+        self.frame_active_model();
     }
 
     /// Apply `session.json`'s stored transforms to a freshly loaded `scene`.
@@ -757,34 +844,13 @@ impl DragonFruit {
         true
     }
 
-    /// Replace the plate's contents with `models`, make the first one active
-    /// and frame it. The camera intro still frames the active model only; the
-    /// scene's whole-bounds framing is a later step.
+    /// Replace the plate's contents with `models` — the VOXL scene path — make
+    /// the first one active and frame it. The camera intro still frames the
+    /// active model only; the scene's whole-bounds framing is a later step.
     fn install_models(&mut self, models: Vec<scene::ImportedModel>) {
         let mut installed = gpui_core::scene::Scene::new();
         for model in models {
-            if self.smoke {
-                // The gate reads these lines to check a load produced real
-                // geometry: triangle count, millimetre bounding box and the
-                // model's own world translate.
-                eprintln!(
-                    "smoke: model '{}': {} triangles, size {:.2} x {:.2} x {:.2} mm, \
-                     center ({:.2}, {:.2}, {:.2}), radius {:.2} mm, \
-                     translate [{:.2}, {:.2}, {:.2}]",
-                    model.name,
-                    model.mesh.triangles,
-                    model.mesh.size[0],
-                    model.mesh.size[1],
-                    model.mesh.size[2],
-                    model.mesh.center.x,
-                    model.mesh.center.y,
-                    model.mesh.center.z,
-                    model.mesh.radius,
-                    model.translate[0],
-                    model.translate[1],
-                    model.translate[2],
-                );
-            }
+            self.log_smoke_model(&model.name, &model.mesh, model.translate);
             installed.push(
                 model.name,
                 model.mesh,
@@ -809,16 +875,49 @@ impl DragonFruit {
         self.session_models.clear();
         self.session_active = None;
         self.scene = installed;
+        self.frame_active_model();
+    }
+
+    /// The smoke gate's model line: triangle count, millimetre bounding box and
+    /// the model's final world translate. It reads these lines to check a load
+    /// produced real geometry.
+    fn log_smoke_model(&self, name: &str, mesh: &stl::MeshData, translate: [f32; 3]) {
+        if !self.smoke {
+            return;
+        }
+        eprintln!(
+            "smoke: model '{}': {} triangles, size {:.2} x {:.2} x {:.2} mm, \
+             center ({:.2}, {:.2}, {:.2}), radius {:.2} mm, \
+             translate [{:.2}, {:.2}, {:.2}]",
+            name,
+            mesh.triangles,
+            mesh.size[0],
+            mesh.size[1],
+            mesh.size[2],
+            mesh.center.x,
+            mesh.center.y,
+            mesh.center.z,
+            mesh.radius,
+            translate[0],
+            translate[1],
+            translate[2],
+        );
+    }
+
+    /// The shared tail of installing or appending models: end any gesture and
+    /// frame the now-active model.
+    ///
+    /// The intro animates from wherever the camera is (the parked home pose in
+    /// a fresh scene) to the active model's framing. Frame where the model
+    /// actually lands: the import placement moves it, so the raw bbox centre is
+    /// no longer the model's world centre.
+    fn frame_active_model(&mut self) {
         self.draft = None;
         self.hovered.set(None);
         self.gizmo_drag = None;
         self.gizmo_hover = None;
         self.gizmo_cache = None;
 
-        // The intro animates from wherever the camera is (the parked home pose
-        // in a fresh scene) to the active model's framing. Frame where the
-        // model actually lands: the import placement moves it, so the raw bbox
-        // centre is no longer the model's world centre.
         if let Some(model) = self.scene.active_model() {
             let world_center = model.world_center();
             self.camera
@@ -843,6 +942,10 @@ impl DragonFruit {
     /// Load a mesh or scene file off the UI thread. Mirrors `open_stl`'s
     /// background load; the source's blocking import overlay is not ported.
     pub(crate) fn load_path(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        if self.loading {
+            self.pending_loads.push_back(path);
+            return;
+        }
         self.loading = true;
         // `trackRecentOpenedFiles` runs before the parse, so a file that fails
         // still lands in the list (the source tracks meshes the same way).
@@ -880,6 +983,14 @@ impl DragonFruit {
                         let text = load_failure_text(&toast_path, &error);
                         this.show_toast(text, ui::ToastTone::Error, cx);
                     }
+                }
+                // The next queued load starts only now, so it sees the model
+                // this one appended and picks a free spot beside it.
+                let next = this.pending_loads.pop_front();
+                this.loading = next.is_some();
+                if let Some(next) = next {
+                    this.load_path(next, cx);
+                    return;
                 }
                 this.loading = false;
                 this.empty_scene.loading = false;
@@ -1333,8 +1444,12 @@ impl DragonFruit {
             return;
         }
 
-        if let Some(stl) = supported.iter().find(|path| file_extension(path) == "stl") {
-            self.load_path(stl.clone(), cx);
+        let stls: Vec<PathBuf> = supported
+            .into_iter()
+            .filter(|path| file_extension(path) == "stl")
+            .collect();
+        for stl in stls {
+            self.load_path(stl, cx);
         }
     }
 }
@@ -2517,14 +2632,17 @@ fn toast_view(toast: Toast) -> impl IntoElement {
 struct Cli {
     smoke: bool,
     scenario: Option<PathBuf>,
-    file: Option<PathBuf>,
+    /// Every positional path. More than one is the append gate: each loads on
+    /// top of the previous, which is exactly what the Models panel's plus and
+    /// a multi-file drop do.
+    files: Vec<PathBuf>,
 }
 
 fn cli_args() -> Cli {
     let mut cli = Cli {
         smoke: false,
         scenario: None,
-        file: None,
+        files: Vec::new(),
     };
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut index = 0;
@@ -2542,11 +2660,7 @@ fn cli_args() -> Cli {
                     }
                 }
                 other if other.starts_with("--") => {}
-                other => {
-                    if cli.file.is_none() {
-                        cli.file = Some(PathBuf::from(other));
-                    }
-                }
+                other => cli.files.push(PathBuf::from(other)),
             },
         }
         index += advance;

@@ -17,9 +17,10 @@
 //! here yet: the first slice draws N models and picks one active model, and
 //! every one of those concepts is migrated by a later wave.
 
+use std::cmp::Ordering;
 use std::sync::Arc;
 
-use glam::{Mat4, Vec3};
+use glam::{Mat4, Vec2, Vec3};
 
 use crate::stl::{self, MeshData};
 
@@ -106,6 +107,18 @@ impl Model {
     pub fn raycast_distance(&self, origin: Vec3, direction: Vec3) -> Option<f32> {
         raycast_distance(&self.mesh, self.matrix(), origin, direction)
     }
+
+    /// The model's footprint where it stands, as a world rect —
+    /// `modelFootprintRect` (`useSceneCollectionManager.ts:2617-2631`): the
+    /// projected size at the model's position. The source's geometry is
+    /// centred on its bbox, so its position *is* the footprint centre; this
+    /// port keeps file-space vertices, and `world_center` is the same point
+    /// (the matrix pivots on `mesh.center`, which the matrix leaves fixed).
+    pub fn footprint_rect(&self) -> Rect2D {
+        let [width, depth] = projected_footprint_size(&self.mesh, self.rotation, self.scale);
+        let center = self.world_center();
+        Rect2D::from_center(center.x, center.y, width, depth)
+    }
 }
 
 /// `quaternionFromGlobalEuler`: extrinsic XYZ, i.e. `Rz · Ry · Rx`
@@ -147,6 +160,202 @@ fn aabb_corners(mesh: &MeshData) -> impl Iterator<Item = Vec3> {
             if index & 4 == 0 { min.z } else { max.z },
         )
     })
+}
+
+/// A rectangle on the plate plane, in world millimetres.
+///
+/// The source's `Rect2D` (`useSceneCollectionManager.ts:2554`); the field
+/// names are snake_case here.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Rect2D {
+    pub min_x: f32,
+    pub max_x: f32,
+    pub min_y: f32,
+    pub max_y: f32,
+}
+
+impl Rect2D {
+    /// The rect whose centre is `(center_x, center_y)`.
+    pub fn from_center(center_x: f32, center_y: f32, width: f32, depth: f32) -> Self {
+        let half_width = width * 0.5;
+        let half_depth = depth * 0.5;
+        Self {
+            min_x: center_x - half_width,
+            max_x: center_x + half_width,
+            min_y: center_y - half_depth,
+            max_y: center_y + half_depth,
+        }
+    }
+
+    pub fn center(&self) -> [f32; 2] {
+        [
+            (self.min_x + self.max_x) * 0.5,
+            (self.min_y + self.max_y) * 0.5,
+        ]
+    }
+
+    pub fn width(&self) -> f32 {
+        self.max_x - self.min_x
+    }
+
+    pub fn depth(&self) -> f32 {
+        self.max_y - self.min_y
+    }
+
+    /// `isRectInsidePlate` (`useSceneCollectionManager.ts:2577-2585`): every
+    /// edge of `rect` is within this rect.
+    pub fn contains(&self, rect: &Rect2D) -> bool {
+        rect.min_x >= self.min_x
+            && rect.max_x <= self.max_x
+            && rect.min_y >= self.min_y
+            && rect.max_y <= self.max_y
+    }
+
+    /// `intersectsRect` (`useSceneCollectionManager.ts:2556-2558`): touching
+    /// edges count, because the source negates the separated-axis test.
+    pub fn intersects(&self, rect: &Rect2D) -> bool {
+        !(rect.max_x < self.min_x
+            || rect.min_x > self.max_x
+            || rect.max_y < self.min_y
+            || rect.min_y > self.max_y)
+    }
+}
+
+/// `computeProjectedFootprintSize` (`src/utils/modelFootprint.ts:209-248`):
+/// the XY extents of the model's vertices after its own rotation and scale are
+/// applied about the bbox centre, never below the source's 2 mm minimum.
+///
+/// PORT DEVIATIONS: the source scans a strided sample of the vertex soup and
+/// takes the bounding box of a 2D convex hull; this scans every vertex, so the
+/// extents are exact. The source's geometry is centred at import, matching the
+/// `mesh.center` subtraction here.
+pub fn projected_footprint_size(
+    mesh: &MeshData,
+    rotation: [f32; 3],
+    scale: [f32; 3],
+) -> [f32; 2] {
+    let quaternion = rotation_quat(rotation);
+    let scale = Vec3::from_array(scale);
+    let mut min = Vec2::splat(f32::INFINITY);
+    let mut max = Vec2::splat(f32::NEG_INFINITY);
+    for vertex in &mesh.vertices {
+        let local = (Vec3::from_array(vertex.pos) - mesh.center) * scale;
+        let projected = quaternion * local;
+        min = min.min(Vec2::new(projected.x, projected.y));
+        max = max.max(Vec2::new(projected.x, projected.y));
+    }
+    if !min.is_finite() || !max.is_finite() {
+        return [2.0, 2.0];
+    }
+    [(max.x - min.x).max(2.0), (max.y - min.y).max(2.0)]
+}
+
+/// The source's `findFreeSpotCentersForModels` (`:2638-2806`) for one
+/// incoming model: the first free centre in ring order around the plate
+/// centre.
+///
+/// * `footprint` — the incoming model's `(width, depth)` from
+///   [`projected_footprint_size`] (the source's `placementOffsets`).
+/// * `blocked` — the world footprints already on the plate,
+///   [`Scene::visible_footprints`]. The source merges
+///   `estimateSupportBoundsForModel` into each of these; this build has no
+///   support-bounds estimate, so the mesh footprint is the whole rect.
+/// * `plate` — the active plate's build volume (`activePlateRect`,
+///   `:2560-2575`). The port has one plate and draws it centred on the
+///   origin, so `plate.center()` is `defaultImportCenterXY` (`:2536-2550`).
+///
+/// The numbers are the source's: `stepX = max(4, width + spacing)` and
+/// `stepY = max(4, depth + spacing)` (`:2659-2660`), rings outward from the
+/// centre sorted by squared distance (`:2692-2743`), a model larger than the
+/// plate centred (`:2758-2762`), and the fallback column to the right when the
+/// ring is exhausted (`:2796-2804`). The source then tries the scene's other
+/// beds (`:2773-2790`); this build has one plate, so that loop has no
+/// counterpart.
+pub fn find_free_spot_center(
+    footprint: [f32; 2],
+    blocked: &[Rect2D],
+    plate: Rect2D,
+    spacing_mm: f32,
+) -> [f32; 2] {
+    let [center_x, center_y] = plate.center();
+    let width = footprint[0].max(2.0);
+    let depth = footprint[1].max(2.0);
+
+    // Larger than the bed: centred on the plate being worked on, where it is
+    // on screen and one scale away from fitting (`:2758-2762`).
+    if width > plate.width() || depth > plate.depth() {
+        return [center_x, center_y];
+    }
+
+    let spacing = spacing_mm.max(0.0);
+    let step_x = (width + spacing).max(4.0);
+    let step_y = (depth + spacing).max(4.0);
+
+    // Enough rings to cross the plate on both axes plus the source's 12
+    // outside rings (`:2692-2698`).
+    let half_span_x = (center_x - plate.min_x)
+        .abs()
+        .max((plate.max_x - center_x).abs());
+    let half_span_y = (center_y - plate.min_y)
+        .abs()
+        .max((plate.max_y - center_y).abs());
+    let in_plate_ring_x = (half_span_x / step_x).ceil() as i32 + 2;
+    let in_plate_ring_y = (half_span_y / step_y).ceil() as i32 + 2;
+    let max_ring = in_plate_ring_x.max(in_plate_ring_y) + 12;
+
+    // Ring order before the sort; the source's `!==` guards in the two loops
+    // are always true for `ring > 0`.
+    let mut candidates: Vec<([f32; 2], f32)> = Vec::new();
+    for ring in 0..=max_ring {
+        if ring == 0 {
+            candidates.push(([center_x, center_y], 0.0));
+            continue;
+        }
+        let ring_f = ring as f32;
+        for gx in -ring..=ring {
+            let x = center_x + gx as f32 * step_x;
+            // The row above the centre, then the row below (`:2707-2722`).
+            let y_top = center_y + ring_f * step_y;
+            let (dx, dy) = (x - center_x, y_top - center_y);
+            candidates.push(([x, y_top], dx * dx + dy * dy));
+            let y_bottom = center_y - ring_f * step_y;
+            let (dx, dy) = (x - center_x, y_bottom - center_y);
+            candidates.push(([x, y_bottom], dx * dx + dy * dy));
+        }
+        for gy in -ring + 1..=ring - 1 {
+            let y = center_y + gy as f32 * step_y;
+            // The column right of the centre, then the column left
+            // (`:2724-2740`).
+            let x_right = center_x + ring_f * step_x;
+            let (dx, dy) = (x_right - center_x, y - center_y);
+            candidates.push(([x_right, y], dx * dx + dy * dy));
+            let x_left = center_x - ring_f * step_x;
+            let (dx, dy) = (x_left - center_x, y - center_y);
+            candidates.push(([x_left, y], dx * dx + dy * dy));
+        }
+    }
+
+    // `Array.prototype.sort((a, b) => a.distSq - b.distSq)` is stable; Rust's
+    // `sort_by` is too, so equal distances keep the ring order above.
+    candidates.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal));
+
+    for (candidate, _) in candidates {
+        let rect = Rect2D::from_center(candidate[0], candidate[1], width, depth);
+        if !plate.contains(&rect) {
+            continue;
+        }
+        if blocked.iter().any(|blocked| rect.intersects(blocked)) {
+            continue;
+        }
+        return candidate;
+    }
+
+    // The ring is exhausted: the source puts the model down beside the plate
+    // rather than refusing the import (`:2796-2804`). `maxRing + 2` clears the
+    // searched area and every blocked footprint shifts the column one step
+    // farther right.
+    let fallback_x = center_x + (max_ring as f32 + 2.0 + blocked.len() as f32) * step_x;
+    [fallback_x, center_y]
 }
 
 /// The plate's models, in import order, plus the active model.
@@ -203,6 +412,18 @@ impl Scene {
 
     pub fn models(&self) -> &[Model] {
         &self.models
+    }
+
+    /// The world footprints of the visible models — the source's
+    /// `blockedRects` (`useSceneCollectionManager.ts:2661-2688`), which
+    /// filters `model.visible` and merges support bounds. Hidden models block
+    /// nothing, matching the source.
+    pub fn visible_footprints(&self) -> Vec<Rect2D> {
+        self.models
+            .iter()
+            .filter(|model| model.visible)
+            .map(Model::footprint_rect)
+            .collect()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -396,5 +617,102 @@ mod tests {
             "raised hit at {raised_hit}"
         );
         assert!(raised_hit < low_hit);
+    }
+
+    /// The viewport's build volume (`viewport/construct.rs`'s
+    /// `BUILD_VOLUME_MM`), centred on the origin.
+    fn plate() -> Rect2D {
+        Rect2D::from_center(0.0, 0.0, 218.88, 122.88)
+    }
+
+    #[test]
+    fn first_import_lands_at_the_plate_centre() {
+        let footprint = projected_footprint_size(&mesh(), [0.0; 3], [1.0; 3]);
+        assert_eq!(
+            find_free_spot_center(footprint, &[], plate(), 5.0),
+            [0.0, 0.0]
+        );
+    }
+
+    #[test]
+    fn a_second_model_of_the_same_size_lands_one_step_away() {
+        let footprint = projected_footprint_size(&mesh(), [0.0; 3], [1.0; 3]);
+        let first = Rect2D::from_center(0.0, 0.0, footprint[0], footprint[1]);
+        let center = find_free_spot_center(footprint, &[first], plate(), 5.0);
+        // The fixture is 10 x 10 mm; `stepY = depth + spacing = 15` and the
+        // (0, 15) candidate sorts before every corner.
+        assert_eq!(center, [0.0, 15.0]);
+        let second = Rect2D::from_center(center[0], center[1], footprint[0], footprint[1]);
+        assert!(!second.intersects(&first), "footprints overlap");
+        assert!(plate().contains(&second), "second rect left the plate");
+    }
+
+    #[test]
+    fn a_model_larger_than_the_plate_is_centred() {
+        let oversized = [plate().width() + 1.0, 10.0];
+        assert_eq!(
+            find_free_spot_center(oversized, &[], plate(), 5.0),
+            [0.0, 0.0]
+        );
+    }
+
+    #[test]
+    fn the_ring_step_follows_each_footprint_axis() {
+        // stepX = 45, stepY = 15: the near Y candidate wins over the far X one.
+        let footprint = [40.0, 10.0];
+        let first = Rect2D::from_center(0.0, 0.0, footprint[0], footprint[1]);
+        let plate = Rect2D::from_center(0.0, 0.0, 400.0, 400.0);
+        assert_eq!(
+            find_free_spot_center(footprint, &[first], plate, 5.0),
+            [0.0, 15.0]
+        );
+    }
+
+    #[test]
+    fn an_exhausted_ring_falls_back_to_the_column_right_of_the_plate() {
+        // No ring-1 candidate fits this 20 x 20 mm plate, so the source's
+        // fallback is `center + (maxRing + 2 + blocked) * stepX`.
+        let plate = Rect2D::from_center(0.0, 0.0, 20.0, 20.0);
+        let footprint = [10.0, 10.0];
+        let blocked = Rect2D::from_center(0.0, 0.0, 10.0, 10.0);
+        // maxRing = ceil(10 / 15) + 2 + 12 = 15, blocked = 1, stepX = 15.
+        assert_eq!(
+            find_free_spot_center(footprint, &[blocked], plate, 5.0),
+            [270.0, 0.0]
+        );
+    }
+
+    #[test]
+    fn projected_footprint_follows_rotation_and_scale() {
+        assert_eq!(
+            projected_footprint_size(&mesh(), [0.0; 3], [1.0; 3]),
+            [10.0, 10.0]
+        );
+        assert_eq!(
+            projected_footprint_size(&mesh(), [0.0; 3], [2.0, 1.0, 1.0]),
+            [20.0, 10.0]
+        );
+        // The fixture is flat in XY: a quarter turn about X maps its Y extent
+        // onto Z, leaving depth at the source's 2 mm floor.
+        let [width, depth] = projected_footprint_size(
+            &mesh(),
+            [std::f32::consts::FRAC_PI_2, 0.0, 0.0],
+            [1.0; 3],
+        );
+        assert!((width - 10.0).abs() < 1e-4, "width {width}");
+        assert!((depth - 2.0).abs() < 1e-4, "depth {depth}");
+    }
+
+    #[test]
+    fn hidden_models_do_not_block_a_free_spot() {
+        let mut scene = scene_with(false);
+        let footprint = projected_footprint_size(&mesh(), [0.0; 3], [1.0; 3]);
+        assert_eq!(scene.visible_footprints().len(), 1);
+        scene.models[0].visible = false;
+        assert!(scene.visible_footprints().is_empty());
+        assert_eq!(
+            find_free_spot_center(footprint, &scene.visible_footprints(), plate(), 5.0),
+            [0.0, 0.0]
+        );
     }
 }
