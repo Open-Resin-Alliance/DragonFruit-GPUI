@@ -45,9 +45,9 @@ pub struct Drag {
     start_direction: Vec2,
     /// Scale: the per-axis scale the drag found at press.
     start_scale: Vec3,
-    /// Scale: the model's underside at press, in world Z, and its local minimum
-    /// Z, so `preserveModelBottom`'s rule can be restated here.
-    base_bottom: Option<(f32, f32)>,
+    /// Scale: the model's underside at press, in world Z, plus the pivot terms
+    /// (`center_z`, `min_z − center_z`) `preserveModelBottom`'s rule needs.
+    base_bottom: Option<(f32, f32, f32)>,
     /// Centre: the last world point on the drag plane.
     last_point: Option<Vec3>,
 }
@@ -56,15 +56,17 @@ impl Drag {
     /// Start a gesture, or `None` when this handle cannot start from a press
     /// here (a ring grabbed exactly edge-on, where the ray misses its plane).
     ///
-    /// `mesh_min_z` is the model's local minimum Z — the same `mesh_min_z` the
-    /// transform panel drops and lifts with — used to keep the model's underside
-    /// where it was while scaling.
+    /// `mesh_bounds` is the model's local `(min_z, center_z)`: the underside the
+    /// transform panel drops and lifts with, and the pivot the model matrix
+    /// turns and scales about. Together they give the world Z of the model's
+    /// bottom — `translate.z + center_z + scale.z · (min_z − center_z)` — which
+    /// is what `preserveModelBottom` holds still while scaling.
     pub fn begin(
         view: &View<'_>,
         pointer: Vec2,
         handle: Handle,
         base: Transform,
-        mesh_min_z: Option<f32>,
+        mesh_bounds: Option<(f32, f32)>,
     ) -> Option<Self> {
         let mut drag = Self {
             handle,
@@ -101,10 +103,11 @@ impl Drag {
                 } else {
                     Vec2::X
                 };
-                if let Some(min_z) = mesh_min_z {
+                if let Some((min_z, center_z)) = mesh_bounds {
                     drag.base_bottom = Some((
-                        base.translate.z + base.scale.z * min_z,
-                        min_z,
+                        base.translate.z + center_z + base.scale.z * (min_z - center_z),
+                        center_z,
+                        min_z - center_z,
                     ));
                 }
             }
@@ -191,10 +194,13 @@ impl Drag {
                 // component here instead, which is why the transform carries a
                 // vector rather than a scalar.
                 self.transform.scale = self.start_scale * ratio.max(0.0001);
-                if let Some((bottom, min_z)) = self.base_bottom {
+                if let Some((bottom, center_z, offset)) = self.base_bottom {
                     // `preserveModelBottom`: the model's underside stays put, so
                     // scaling does not sink it into the plate or lift it off.
-                    self.transform.translate.z = bottom - self.transform.scale.z * min_z;
+                    // The bottom sits at `translate.z + center_z + scale.z·offset`
+                    // under the pivot-corrected model matrix.
+                    self.transform.translate.z =
+                        bottom - center_z - self.transform.scale.z * offset;
                 }
             }
             Handle::Center => {

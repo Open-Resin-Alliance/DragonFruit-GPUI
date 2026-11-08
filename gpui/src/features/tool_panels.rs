@@ -162,6 +162,9 @@ struct PanelStore {
     /// The mesh's raw minimum Z (`center.z - size.z / 2`), before the model
     /// matrix. `Lift`/`Drop` need it to place the lowest world point.
     mesh_min_z: f32,
+    /// The model's bbox centre in Z: the pivot the viewport rotates and scales
+    /// about, so the world bottom depends on it.
+    mesh_center_z: f32,
     /// The mesh's raw bbox centre in X/Y, before the model matrix.
     /// `Center Selection` needs it to put the model on the plate origin.
     mesh_center: [f32; 2],
@@ -185,6 +188,7 @@ impl Default for PanelStore {
             support_count: 0,
             has_mesh: false,
             mesh_min_z: 0.0,
+            mesh_center_z: 0.0,
             mesh_center: [0.0; 2],
         }
     }
@@ -401,6 +405,7 @@ pub(crate) fn sync_from_entity(entity: &WeakEntity<DragonFruit>, cx: &mut App) {
                     store.transform.has_bbox = true;
                     store.transform.original_size = mesh.size;
                     store.mesh_min_z = mesh.center.z - mesh.size[2] * 0.5;
+                    store.mesh_center_z = mesh.center.z;
                     store.mesh_center = [mesh.center.x, mesh.center.y];
                     store.duplicate.active_model_name = Some(mesh.name.clone().into());
                 } else {
@@ -544,8 +549,11 @@ fn transform_actions(
     let on_lift = Rc::new(move || {
         with_store(|store| {
             if store.has_mesh {
-                let bottom =
-                    store.transform.position[2] + store.transform.scale[2] * store.mesh_min_z;
+                // The pivot is the bbox centre, so the world bottom is
+                // `pos + center + scale * (min - center)`.
+                let bottom = store.transform.position[2]
+                    + store.mesh_center_z
+                    + store.transform.scale[2] * (store.mesh_min_z - store.mesh_center_z);
                 store.transform.position[2] += store.transform.lift_distance - bottom;
             }
         });
@@ -556,8 +564,9 @@ fn transform_actions(
     let on_drop = Rc::new(move || {
         with_store(|store| {
             if store.has_mesh {
-                let bottom =
-                    store.transform.position[2] + store.transform.scale[2] * store.mesh_min_z;
+                let bottom = store.transform.position[2]
+                    + store.mesh_center_z
+                    + store.transform.scale[2] * (store.mesh_min_z - store.mesh_center_z);
                 store.transform.position[2] += PLATE_CLEARANCE_MM - bottom;
             }
         });

@@ -686,8 +686,29 @@ impl DragonFruit {
     }
 
     /// The model matrix the viewport, the hover raycast and the gizmo all use.
+    ///
+    /// The transform's rotation and scale turn the model about **its own bbox
+    /// centre**, not about the file origin: the source's loader normalises every
+    /// geometry so its bbox centre is the local origin
+    /// (`useStlGeometry.ts`: `geometry.translate(-preCenter.x, -preBBox.min.y,
+    /// -preCenter.z)`), so `group.rotation`/`group.scale` pivot there. This
+    /// port keeps the loader's vertices in file space, where the file origin can
+    /// be metres away, so the pivot has to be written into the matrix —
+    /// otherwise a rotation swings the model across the plate and leaves the
+    /// gizmo (whose centre is the model's centre, and which is locked during a
+    /// rotate/scale drag) standing where the model used to be.
+    ///
+    /// At identity this is exactly `T(translate)`, unchanged from before, so the
+    /// import placement, the panel's position rows and the session are
+    /// unaffected. Under a rotation the model's centre `translate + center` is
+    /// invariant — which is what makes `Drag::locked_center` correct.
     pub(crate) fn model_matrix(&self) -> glam::Mat4 {
-        self.transform().matrix()
+        let matrix = self.transform().matrix();
+        let Some(mesh) = &self.mesh else {
+            return matrix;
+        };
+        let pivot = mesh.center;
+        glam::Mat4::from_translation(pivot) * matrix * glam::Mat4::from_translation(-pivot)
     }
 
     /// Fold a finished gesture's draft into the committed fields.
@@ -756,12 +777,13 @@ impl DragonFruit {
         let Some(handle) = gizmo::pick(&view, pointer) else {
             return false;
         };
-        // The transform panel's `mesh_min_z`: the model's local underside.
-        let mesh_min_z = self
+        // The transform panel's `mesh_min_z` and the model matrix's pivot: the
+        // model's local underside and bbox centre.
+        let mesh_bounds = self
             .mesh
             .as_ref()
-            .map(|mesh| mesh.center.z - mesh.size[2] * 0.5);
-        let Some(drag) = gizmo::Drag::begin(&view, pointer, handle, self.transform(), mesh_min_z)
+            .map(|mesh| (mesh.center.z - mesh.size[2] * 0.5, mesh.center.z));
+        let Some(drag) = gizmo::Drag::begin(&view, pointer, handle, self.transform(), mesh_bounds)
         else {
             return false;
         };
