@@ -51,7 +51,10 @@ struct Tween {
 // `cameraFeelPreset = 'precise'`: rotateSpeed 0.72, panSpeed 0.82,
 // zoomSpeed 1.25, dampingFactor 0.15.
 const ROTATE_SPEED: f32 = 0.72 * SENSITIVITY;
-const PAN_SPEED: f32 = 0.82 * SENSITIVITY;
+// OrbitControls multiplies the pointer delta by `panSpeed` directly, so the
+// preset's 0.82 is the whole factor; the old 0.82 x 0.7 made panning 30%
+// slower than the source.
+const PAN_SPEED: f32 = 0.82;
 const ZOOM_SPEED: f32 = 1.25 * ZOOM_SENSITIVITY;
 // The preset's `dampingFactor 0.15` is not a constant here: OrbitControls applies
 // it per frame, so the port expresses it as the settle rate below, chosen to sum
