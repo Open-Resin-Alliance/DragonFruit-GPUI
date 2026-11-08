@@ -14,7 +14,7 @@ const TEXT: (u8, u8, u8) = (0xf8, 0xf8, 0xfb);
 const STROKE: (u8, u8, u8) = (0xba, 0xf7, 0x2e);
 /// The stroke lands at `mix(STROKE, black, 0.86)` — the on-screen value the
 /// source's tone-mapped renderer produces, measured against the TS widget.
-const STROKE_GAIN: f32 = 0.86;
+const STROKE_GAIN: f32 = 0.62;
 /// The source paints a 128x128 canvas; the atlas is 2x that so a face drawn at
 /// ~90 device pixels samples a 2px border with sub-texel coverage instead of
 /// aliasing a 1px one.
