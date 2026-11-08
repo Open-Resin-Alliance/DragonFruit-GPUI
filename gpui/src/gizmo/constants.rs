@@ -127,7 +127,7 @@ pub const RING_FRONT_ARC: f32 = std::f32::consts::FRAC_PI_2;
 /// the user's request** — they compared the running app against the TS widget,
 /// found the converted arc still too present, and asked for it halved. Do not
 /// "correct" this back to 0.11; it is an eye-tuned value, not a derived one.
-pub const RING_BACK_ALPHA: f32 = 0.055;
+pub const RING_BACK_ALPHA: f32 = 0.028;
 
 /// Every handle material in the source is `transparent` with its own opacity.
 /// These are the `baseOpacity` values the components use, carried per vertex so
