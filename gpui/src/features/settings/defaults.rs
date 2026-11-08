@@ -6,21 +6,11 @@ pub(crate) const CARD_MAX_WIDTH: f32 = 1152.0;
 pub(crate) const BACKDROP_PADDING: f32 = 20.0;
 pub(crate) const CONTROL_WIDTH: f32 = 144.0;
 
-// `DEFAULT_*` constants from the React sources.
-pub(crate) const DEFAULT_MESH_COLOR: &str = "#a3a3a3";
-pub(crate) const DEFAULT_HEATMAP_MIN_ANGLE: f32 = 0.0;
-pub(crate) const DEFAULT_HEATMAP_MAX_ANGLE: f32 = 45.0;
-pub(crate) const DEFAULT_AMBIENT_INTENSITY: f32 = 0.28;
-pub(crate) const DEFAULT_DIRECTIONAL_INTENSITY: f32 = 1.12;
-pub(crate) const DEFAULT_MATERIAL_ROUGHNESS: f32 = 0.55;
-pub(crate) const DEFAULT_XRAY_OPACITY: f32 = 0.25;
-pub(crate) const DEFAULT_HOVER_TINT_STRENGTH: f32 = 0.5;
-pub(crate) const DEFAULT_SELECTED_TINT_STRENGTH: f32 = 0.70;
-pub(crate) const DEFAULT_HEATMAP_COLORS: [&str; 5] = ["#E55959", "#E5A559", "#D9D959", "#73D973", "#666666"];
-pub(crate) const DEFAULT_FOV: f32 = 50.0;
+// The `DEFAULT_*` values these tabs render now come from `gpui_store::Settings`
+// (one per field, with the React module cited beside it there). What stays here
+// is the control geometry and the ranges the source's own steppers use.
 pub(crate) const FOV_MIN: f32 = 15.0;
 pub(crate) const FOV_MAX: f32 = 120.0;
-pub(crate) const DEFAULT_UI_SCALE: f32 = 1.0;
 pub(crate) const MIN_UI_SCALE: f32 = 0.25;
 pub(crate) const MAX_UI_SCALE: f32 = 4.0;
 pub(crate) const UI_SCALE_PRESETS: [f32; 6] = [0.75, 0.9, 1.0, 1.1, 1.25, 1.5];
@@ -116,28 +106,8 @@ pub(crate) const WHITE: u32 = 0xffffff;
 /// `#000000` — the base of the `color-mix(..., black N%)` recipes.
 pub(crate) const BLACK: u32 = 0x000000;
 
-// `view3dPreferences.ts` / `DEFAULT_VIEW3D_SETTINGS`.
-pub(crate) const DEFAULT_VIEW3D_WIDTH_MM: f32 = 218.0;
-pub(crate) const DEFAULT_VIEW3D_DEPTH_MM: f32 = 123.0;
-pub(crate) const DEFAULT_VIEW3D_MAX_Z_MM: f32 = 250.0;
-pub(crate) const DEFAULT_VIEW3D_SCREEN_WIDTH_PX: f32 = 2560.0;
-pub(crate) const DEFAULT_VIEW3D_SCREEN_HEIGHT_PX: f32 = 1440.0;
-
 // `plateCascade.ts`.
-pub(crate) const DEFAULT_FIXED_PLATE_COLUMNS: f32 = 3.0;
 pub(crate) const MAX_FIXED_PLATE_COLUMNS: f32 = 12.0;
-
-// `spacemousePreferences.ts` / `DEFAULT_SPACEMOUSE_SETTINGS`.
-pub(crate) const DEFAULT_SPACEMOUSE_SENSITIVITY: f32 = 2.3;
-pub(crate) const DEFAULT_SPACEMOUSE_DEADZONE: f32 = 0.03;
-
-// `sceneAutosavePreferences.ts` / `DEFAULT_SCENE_AUTOSAVE_SETTINGS`.
-pub(crate) const DEFAULT_AUTOSAVE_DEBOUNCE_MS: f32 = 45_000.0;
-pub(crate) const DEFAULT_AUTOSAVE_COOLDOWN_MS: f32 = 180_000.0;
-pub(crate) const DEFAULT_AUTOSAVE_CAP_MS: f32 = 300_000.0;
-
-// `LocalBackupsSettingsTab.tsx` defaults.
-pub(crate) const DEFAULT_AUTO_SYNC_MINUTES: f32 = 15.0;
 
 // `LoggingSettingsTab.tsx`.
 pub(crate) const LOG_LEVEL_OPTIONS: [(&str, &str, &str, u32); 5] = [

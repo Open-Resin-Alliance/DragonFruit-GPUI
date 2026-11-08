@@ -146,11 +146,16 @@ pub(crate) fn ui_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>) -> 
                             )
                             .on_click(move |_, _, cx| {
                                 edit_and_notify(&reset_entity, cx, |draft| {
+                                    // `DEFAULT_THEME_CUSTOM_COLORS`, the store's
+                                    // own defaults.
+                                    let defaults = gpui_store::ThemeColors::default();
                                     for section in THEME_COLOR_SECTIONS.iter() {
                                         for row in section.rows {
-                                            draft
-                                                .theme_colors
-                                                .insert(row.key, row.placeholder.to_owned());
+                                            if let Some(value) = defaults.get(row.key) {
+                                                draft
+                                                    .theme_colors
+                                                    .insert(row.key, value.to_owned());
+                                            }
                                         }
                                     }
                                 });
@@ -230,12 +235,7 @@ pub(crate) fn ui_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>) -> 
                     );
                 let mut rows = div().flex().flex_col().gap(px(6.));
                 for row in section.rows {
-                    let value = state
-                        .theme_colors
-                        .get(row.key)
-                        .cloned()
-                        .unwrap_or_else(|| row.placeholder.to_owned());
-                    rows = rows.child(color_row(row, value));
+                    rows = rows.child(color_row(row, theme_color(state, row.key)));
                 }
                 card = card.child(rows);
                 grid = grid.child(card);
@@ -270,12 +270,7 @@ pub(crate) fn ui_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>) -> 
                 );
             let mut grid = div().grid().grid_cols(2).gap(px(6.));
             for row in MESH_HIGHLIGHT_COLOR_FIELDS.iter() {
-                let value = state
-                    .theme_colors
-                    .get(row.key)
-                    .cloned()
-                    .unwrap_or_else(|| row.placeholder.to_owned());
-                grid = grid.child(color_row(row, value));
+                grid = grid.child(color_row(row, theme_color(state, row.key)));
             }
             card = card.child(grid);
             root.child(card)
@@ -444,12 +439,7 @@ pub(crate) fn color_field(
                             // A native colour picker is not available; cycling the
                             // stored value keeps the control live.
                             edit_and_notify(&entity, cx, |draft| {
-                                let current = draft
-                                    .theme_colors
-                                    .get(key)
-                                    .cloned()
-                                    .unwrap_or_else(|| "#ec2a77".to_owned());
-                                let next = next_theme_color(&current);
+                                let next = next_theme_color(&theme_color(draft, key));
                                 draft.theme_colors.insert(key, next);
                             });
                         }),

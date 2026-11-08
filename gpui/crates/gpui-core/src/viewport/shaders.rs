@@ -115,6 +115,57 @@ fn fs_main(in: DecalOut) -> @location(0) vec4<f32> {
 }
 "#;
 
+/// The supports' flat material.
+///
+/// `SupportProxyMeshLayer` draws with `meshBasicMaterial` — no lighting, one
+/// colour. The vertex stage carries each instance's transform and taper: the
+/// unit cylinder spans `y = -0.5..0.5` at radius `0.5`, so `taper` narrows the
+/// `+y` (the `to`) end without a second mesh. Nodes and disks share the material
+/// and pass `1.0`.
+pub(super) const SUPPORT_SHADER: &str = r#"
+struct Uniforms {
+    view_proj: mat4x4<f32>,
+    inv_proj: mat4x4<f32>,
+    camera_pos: vec3<f32>,
+    base_color: vec3<f32>,
+    resolution: vec2<f32>,
+    headlight_dir: vec3<f32>,
+};
+struct SupportColor {
+    color: vec3<f32>,
+    opacity: f32,
+};
+@group(0) @binding(0) var<uniform> uniforms: Uniforms;
+@group(1) @binding(0) var<uniform> support: SupportColor;
+
+struct VertexOut {
+    @builtin(position) position: vec4<f32>,
+};
+
+@vertex
+fn vs_main(
+    @location(0) position: vec3<f32>,
+    @location(1) column0: vec4<f32>,
+    @location(2) column1: vec4<f32>,
+    @location(3) column2: vec4<f32>,
+    @location(4) column3: vec4<f32>,
+    @location(5) taper: f32,
+) -> VertexOut {
+    let instance = mat4x4<f32>(column0, column1, column2, column3);
+    let height = clamp(position.y + 0.5, 0.0, 1.0);
+    let width = mix(1.0, taper, height);
+    let local = vec3<f32>(position.x * width, position.y, position.z * width);
+    var out: VertexOut;
+    out.position = uniforms.view_proj * instance * vec4<f32>(local, 1.0);
+    return out;
+}
+
+@fragment
+fn fs_main() -> @location(0) vec4<f32> {
+    return vec4<f32>(support.color, support.opacity);
+}
+"#;
+
 pub(super) const MESH_SHADER: &str = r#"
 
 struct Uniforms {

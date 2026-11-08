@@ -43,6 +43,9 @@ pub(crate) fn mesh_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>) -
                     if let Some(index) = SHADER_VALUES.iter().position(|shader| *shader == value) {
                         edit_and_notify(&shader_entity, cx, |draft| {
                             draft.shader = index;
+                            // The user chose a type the tab lists, so the
+                            // pass-through value no longer applies.
+                            draft.unlisted_shader = None;
                             if draft.shader == 1
                                 && draft.active_color_index >= draft.heatmap_colors.len() + 1
                             {
@@ -101,7 +104,7 @@ pub(crate) fn mesh_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>) -
             .heatmap_colors
             .get(active_index - 1)
             .cloned()
-            .unwrap_or_else(|| DEFAULT_MESH_COLOR.to_owned())
+            .unwrap_or_else(|| state.mesh_color.clone())
     };
     let color_label = if active_index == 0 {
         "Mesh Color".to_owned()
@@ -315,12 +318,8 @@ pub(crate) fn mesh_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>) -
                         .child(icon("rotate-ccw", 12., TEXT_STRONG))
                         .on_click(move |_, _, cx| {
                             edit_and_notify(&selection_entity, cx, |draft| {
-                                let accent = THEME_COLOR_SECTIONS
-                                    .iter()
-                                    .flat_map(|section| section.rows)
-                                    .find(|row| row.key == "meshSelectionColor")
-                                    .map(|row| row.placeholder.to_owned())
-                                    .unwrap_or_else(|| "#ec2a77".to_owned());
+                                let accent =
+                                    gpui_store::ThemeColors::default().mesh_selection_color;
                                 draft
                                     .theme_colors
                                     .insert("meshSelectionColor", accent.clone());
@@ -336,22 +335,14 @@ pub(crate) fn mesh_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>) -
                 .gap(px(8.))
                 .child(color_field(
                     "Selection Color",
-                    state
-                        .theme_colors
-                        .get("meshSelectionColor")
-                        .cloned()
-                        .unwrap_or_else(|| "#ec2a77".to_owned()),
+                    theme_color(state, "meshSelectionColor"),
                     "settings-selection-color",
                     entity.clone(),
                     "meshSelectionColor",
                 ))
                 .child(color_field(
                     "Hover Color",
-                    state
-                        .theme_colors
-                        .get("meshHoverColor")
-                        .cloned()
-                        .unwrap_or_else(|| "#ec2a77".to_owned()),
+                    theme_color(state, "meshHoverColor"),
                     "settings-hover-color",
                     hover_entity,
                     "meshHoverColor",
@@ -400,25 +391,13 @@ pub(crate) fn mesh_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>) -
     };
     let preview_tint = if state.preview_selected {
         mix(
-            hex_color(
-                state
-                    .theme_colors
-                    .get("meshSelectionColor")
-                    .map(String::as_str)
-                    .unwrap_or("#ec2a77"),
-            ),
+            hex_color(&theme_color(state, "meshSelectionColor")),
             SURFACE_0,
             state.selected_tint_strength,
         )
     } else {
         mix(
-            hex_color(
-                state
-                    .theme_colors
-                    .get("meshHoverColor")
-                    .map(String::as_str)
-                    .unwrap_or("#ec2a77"),
-            ),
+            hex_color(&theme_color(state, "meshHoverColor")),
             SURFACE_0,
             state.hover_tint_strength,
         )

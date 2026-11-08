@@ -57,6 +57,19 @@ pub(super) struct ModelUniform {
     pub(super) stripe: [f32; 4],
 }
 
+/// One support instance: the unit mesh's transform plus its taper ratio.
+///
+/// The source keeps the taper in the tapered batch's mesh and buckets shafts by
+/// it (`taperBuckets` in `InstancedShaftGroup.tsx`); the port carries it on the
+/// instance so every tapered shaft — whatever its ratio — is one draw. The
+/// straight, node and disk batches write `1.0`.
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub(super) struct SupportInstance {
+    pub(super) matrix: [[f32; 4]; 4],
+    pub(super) taper: f32,
+}
+
 pub(super) struct GpuMesh {
     pub(super) vertex_buffer: wgpu::Buffer,
     pub(super) vertex_count: u32,

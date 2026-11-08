@@ -97,6 +97,11 @@ use self::uniforms::GpuMesh;
 
 const SAMPLE_COUNT: u32 = 4;
 
+/// `DEFAULT_SUPPORT_COLOR` in `src/supports/SupportProxyMeshLayer.tsx` — the
+/// proxy layer's base grey, the colour `meshBasicMaterial` paints a support
+/// with when nothing is selected or hovered.
+pub const SUPPORT_COLOR: u32 = 0x9a9a9a;
+
 #[derive(Clone, Copy)]
 pub struct ViewLayers {
     pub grid: bool,
@@ -175,9 +180,28 @@ pub struct Viewport {
     mesh_ptr: usize,
     /// The transform the footprint hull was baked through.
     mesh_matrix: glam::Mat4,
-    support_buffer: wgpu::Buffer,
-    support_vertex_count: u32,
-    support_ptr: usize,
+    support: wgpu::RenderPipeline,
+    support_uniform: wgpu::Buffer,
+    support_bind: wgpu::BindGroup,
+    /// Unit meshes: the cylinder the shaft batches scale, the sphere the nodes
+    /// scale, the disk the contact pads scale.
+    support_cylinder: wgpu::Buffer,
+    support_cylinder_count: u32,
+    support_sphere: wgpu::Buffer,
+    support_sphere_count: u32,
+    support_disk: wgpu::Buffer,
+    support_disk_count: u32,
+    support_straight_instances: Option<wgpu::Buffer>,
+    support_straight_count: u32,
+    support_tapered_instances: Option<wgpu::Buffer>,
+    support_tapered_count: u32,
+    support_node_instances: Option<wgpu::Buffer>,
+    support_node_count: u32,
+    support_disk_instances: Option<wgpu::Buffer>,
+    support_disk_instance_count: u32,
+    /// Identity of the support set whose instances are uploaded, so a frame
+    /// that draws the same set pays no buffer rebuild — the mesh's trick.
+    supports_ptr: usize,
     model_uniform: wgpu::Buffer,
     model_bind: wgpu::BindGroup,
     gizmo_buffer: wgpu::Buffer,

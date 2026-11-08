@@ -753,6 +753,129 @@ impl Viewport {
             true,
             SAMPLE_COUNT,
         );
+        // Supports: one instanced pass per batch, `meshBasicMaterial`'s flat
+        // colour. The three unit meshes are the source's instanced ones — a
+        // 1×1 cylinder (radius 0.5, `y = -0.5..0.5`), a 1-radius sphere and a
+        // 1-radius disk — so every millimetre dimension rides the instance
+        // matrix.
+        let support_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("viewport supports"),
+            source: wgpu::ShaderSource::Wgsl(SUPPORT_SHADER.into()),
+        });
+        let support_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("viewport supports"),
+                bind_group_layouts: &[Some(&uniform_layout), Some(&decal_layout)],
+                immediate_size: 0,
+            });
+        let support_uniform = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("viewport support colour"),
+            size: std::mem::size_of::<ColorUniform>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let support_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("viewport support colour"),
+            layout: &decal_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: support_uniform.as_entire_binding(),
+            }],
+        });
+        // `DEFAULT_SUPPORT_COLOR` is an sRGB hex; the scene target is sRGB.
+        queue.write_buffer(
+            &support_uniform,
+            0,
+            bytemuck::bytes_of(&ColorUniform {
+                color: super::mesh::srgb_linear(SUPPORT_COLOR),
+                opacity: 1.0,
+            }),
+        );
+        let support_vertex_layout = wgpu::VertexBufferLayout {
+            array_stride: 12,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &[wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32x3,
+                offset: 0,
+                shader_location: 0,
+            }],
+        };
+        let support_instance_layout = wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<SupportInstance>() as u64,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: &[
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x4,
+                    offset: 0,
+                    shader_location: 1,
+                },
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x4,
+                    offset: 16,
+                    shader_location: 2,
+                },
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x4,
+                    offset: 32,
+                    shader_location: 3,
+                },
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x4,
+                    offset: 48,
+                    shader_location: 4,
+                },
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32,
+                    offset: 64,
+                    shader_location: 5,
+                },
+            ],
+        };
+        // `meshBasicMaterial`'s default is `FrontSide`, but the generated caps
+        // close both ends; culling none keeps a plate-level view solid.
+        let support = pipeline(
+            device,
+            &support_pipeline_layout,
+            &support_shader,
+            &[Some(support_vertex_layout), Some(support_instance_layout)],
+            wgpu::PrimitiveTopology::TriangleList,
+            None,
+            true,
+            wgpu::CompareFunction::LessEqual,
+            WgpuSurface::DEFAULT_FORMAT,
+            true,
+            true,
+            SAMPLE_COUNT,
+        );
+        let support_mesh = |label: &str, vertices: &[[f32; 3]]| {
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(label),
+                contents: bytemuck::cast_slice(vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            })
+        };
+        let support_cylinder_vertices = gpui_supports::primitives::cylinder(
+            glam::Vec3::new(0.0, -0.5, 0.0),
+            glam::Vec3::new(0.0, 0.5, 0.0),
+            0.5,
+            0.5,
+            gpui_supports::RADIAL_SEGMENTS,
+        );
+        let support_sphere_vertices = gpui_supports::primitives::sphere(
+            glam::Vec3::ZERO,
+            1.0,
+            gpui_supports::RADIAL_SEGMENTS,
+            gpui_supports::SPHERE_RINGS,
+        );
+        // `ContactDisk`: a `CircleGeometry` with 24 segments.
+        let support_disk_vertices =
+            gpui_supports::primitives::disk(glam::Vec3::ZERO, glam::Vec3::Z, 1.0, 24);
+        let support_cylinder = support_mesh("viewport support cylinder", &support_cylinder_vertices);
+        let support_sphere = support_mesh("viewport support sphere", &support_sphere_vertices);
+        let support_disk = support_mesh("viewport support disk", &support_disk_vertices);
+        let support_cylinder_count = support_cylinder_vertices.len() as u32;
+        let support_sphere_count = support_sphere_vertices.len() as u32;
+        let support_disk_count = support_disk_vertices.len() as u32;
         // The VOXL profile's build volume (`profiles/printers/generic`), centred
         // origin (`originMode: 'center'`). The app takes these from the active
         // printer profile; this viewport has no profile store yet.

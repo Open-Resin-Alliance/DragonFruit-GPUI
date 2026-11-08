@@ -32,6 +32,19 @@ impl ShaftInstance {
         }
     }
 
+    /// The `to`-end width as a fraction of the `from`-end width.
+    ///
+    /// The source encodes this ratio in the unit cone's geometry and buckets
+    /// tapered shafts by it (`taperBuckets` in `InstancedShaftGroup.tsx`); the
+    /// port keeps one unit cylinder and carries the ratio as an instance
+    /// attribute, so every tapered shaft stays in one draw.
+    pub fn taper(&self) -> f32 {
+        match self.diameter_end {
+            Some(end) if self.diameter > 0.0 && end.is_finite() => (end / self.diameter).max(0.0),
+            _ => 1.0,
+        }
+    }
+
     /// `(translation, rotation, scale)` for the unit cylinder, which spans
     /// `y = -0.5..0.5` with a radius of 0.5 — three.js's `CylinderGeometry`.
     pub fn matrix(&self) -> Mat4 {

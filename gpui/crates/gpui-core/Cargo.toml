@@ -15,6 +15,7 @@ anyhow = "1"
 raw-window-handle = "0.6"
 rfd = "0.15"
 dragonfruit-mesh-core = { path = "../../../rust/dragonfruit-mesh-core" }
+gpui-supports = { path = "../gpui-supports" }
 resvg = "0.45"
 fontdue = "0.9"
 declarative-gpui = "0.3"

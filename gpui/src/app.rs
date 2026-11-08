@@ -18,9 +18,46 @@ use crate::chrome::{app_bar, overlays, rail};
 use crate::panels::empty_scene;
 use crate::{features, panels};
 
+use anyhow::Result;
 use gpui_core::{camera, icons, stl, viewport};
 use gpui_ui::{panel_fields, ui};
 use gpui_core::theme::*;
+
+// The loader lives at `src/scene/mod.rs` (a sibling of this file), not in the
+// `src/app/` submodule directory, so name the path explicitly.
+#[path = "scene/mod.rs"]
+mod scene;
+
+/// A file the drop/launch path can open: a plain mesh or a VOXL scene.
+enum Loaded {
+    Mesh(stl::MeshData),
+    Scene(scene::Imported),
+}
+
+/// The single entry point both the background load and the launch path use.
+/// `is_scene_file` already claims `.voxl`/`.lys`, so those go to the VOXL
+/// reader and everything else keeps the existing STL path.
+fn load_file(path: &Path) -> Result<Loaded> {
+    if is_scene_file(path) {
+        scene::load(path).map(Loaded::Scene)
+    } else {
+        stl::load_stl(path).map(Loaded::Mesh)
+    }
+}
+
+/// The toast for a failed import. VOXL's own errors are worth surfacing; a
+/// `.lys` is a Lychee scene, which this build has no importer for.
+fn load_failure_text(path: &Path, error: &anyhow::Error) -> String {
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    match file_extension(path).as_str() {
+        "voxl" => format!("VOXL import failed: {error:#}"),
+        "lys" => format!("Unsupported scene file: {name}"),
+        _ => format!("Could not import {name}: {error:#}"),
+    }
+}
 
 /// `useSlicingManager`'s uncontrolled default: 50 microns.
 const LAYER_HEIGHT_MM: f32 = 0.05;
@@ -75,6 +112,10 @@ pub struct Toast {
 
 pub(crate) struct DragonFruit {
     pub(crate) mesh: Option<Arc<stl::MeshData>>,
+    /// The parsed VOXL container when the last load was a scene: `SUPP` and
+    /// every model's `MODL` entry. `mesh`/`translate`/`rotate_z`/`scale` stay
+    /// the single-model view the viewport draws.
+    pub(crate) scene: Option<gpui_voxl::Scene>,
     /// Time of the last frame, for the camera's real delta. The source drives
     /// every tween from `requestAnimationFrame`'s timestamp, so the port must
     /// not advance at a fixed step: a 144Hz window would finish a tween 2.4x
@@ -172,6 +213,7 @@ impl DragonFruit {
 
         let mut app = Self {
             mesh: None,
+            scene: None,
             last_frame: None,
             camera: Rc::new(RefCell::new(Camera::parked(glam::Vec3::new(0.0, 0.0, 110.0)))),
             viewport: Rc::new(RefCell::new(None)),
@@ -229,16 +271,72 @@ impl DragonFruit {
             scale_logged: false,
         };
         if let Some(path) = path {
-            match stl::load_stl(&path) {
-                Ok(mesh) => app.set_mesh(mesh),
-                // The source logs a failed mesh load to the console only.
-                Err(error) => eprintln!("{error:#}"),
+            match load_file(&path) {
+                Ok(loaded) => app.apply_loaded(loaded),
+                Err(error) => {
+                    eprintln!("{error:#}");
+                    let text = load_failure_text(&path, &error);
+                    app.show_toast(text, ui::ToastTone::Error, cx);
+                }
             }
         }
         app
     }
 
+    /// Install a finished load. A plain mesh keeps the identity transform; a
+    /// VOXL scene also installs the first model's placement and keeps the
+    /// parsed container for the support panel.
+    fn apply_loaded(&mut self, loaded: Loaded) {
+        match loaded {
+            Loaded::Mesh(mesh) => {
+                self.scene = None;
+                self.translate = [0.0; 3];
+                self.rotate_z = 0.0;
+                self.scale = 1.0;
+                self.set_mesh(mesh);
+            }
+            Loaded::Scene(import) => {
+                self.translate = import.translate;
+                self.rotate_z = import.rotate_z;
+                self.scale = import.scale;
+                if self.smoke {
+                    let models = import.scene.models.len();
+                    let meshes = import.scene.meshes.len();
+                    eprintln!(
+                        "smoke: VOXL v{} with {models} model(s), {meshes} MESH chunk(s); \
+                         translate [{:.2}, {:.2}, {:.2}], rotate_z {:.3} rad, scale {:.3}",
+                        import.scene.version,
+                        self.translate[0],
+                        self.translate[1],
+                        self.translate[2],
+                        self.rotate_z,
+                        self.scale,
+                    );
+                }
+                self.scene = Some(import.scene);
+                self.set_mesh(import.mesh);
+            }
+        }
+    }
+
     pub(crate) fn set_mesh(&mut self, mesh: stl::MeshData) {
+        if self.smoke {
+            // The gate reads these lines to check a load produced real
+            // geometry: triangle count and millimetre bounding box.
+            eprintln!(
+                "smoke: mesh '{}': {} triangles, size {:.2} x {:.2} x {:.2} mm, \
+                 center ({:.2}, {:.2}, {:.2}), radius {:.2} mm",
+                mesh.name,
+                mesh.triangles,
+                mesh.size[0],
+                mesh.size[1],
+                mesh.size[2],
+                mesh.center.x,
+                mesh.center.y,
+                mesh.center.z,
+                mesh.radius,
+            );
+        }
         let mesh = Arc::new(mesh);
         // The intro animates from wherever the camera is (the parked home pose
         // in a fresh scene) to the model's framing.
@@ -255,8 +353,8 @@ impl DragonFruit {
         self.mesh = Some(mesh);
     }
 
-    /// Load a mesh file off the UI thread. Mirrors `open_stl`'s background
-    /// load; the source's blocking import overlay is not ported.
+    /// Load a mesh or scene file off the UI thread. Mirrors `open_stl`'s
+    /// background load; the source's blocking import overlay is not ported.
     pub(crate) fn load_path(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         self.loading = true;
         // The empty scene's blocking-import card: label plus the file name.
@@ -267,15 +365,22 @@ impl DragonFruit {
             .and_then(|name| name.to_str())
             .map(|name| name.to_owned().into());
         cx.notify();
+        let load_path = path.clone();
+        let toast_path = path;
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
-                .spawn(async move { stl::load_stl(&path) })
+                .spawn(async move { load_file(&load_path) })
                 .await;
-            this.update(cx, |this, cx| {
+            this.update(cx, move |this, cx| {
                 match result {
-                    Ok(mesh) => this.set_mesh(mesh),
-                    Err(error) => eprintln!("{error:#}"),
+                    Ok(loaded) => this.apply_loaded(loaded),
+                    Err(error) => {
+                        eprintln!("{error:#}");
+                        // A failed import leaves the current scene untouched.
+                        let text = load_failure_text(&toast_path, &error);
+                        this.show_toast(text, ui::ToastTone::Error, cx);
+                    }
                 }
                 this.loading = false;
                 this.empty_scene.loading = false;
@@ -291,6 +396,9 @@ impl DragonFruit {
     pub(crate) fn open_stl(&mut self, cx: &mut Context<Self>) {
         let Some(path) = rfd::FileDialog::new()
             .add_filter("STL", &["stl"])
+            // `.lys` has no importer here; selecting it raises the unsupported
+            // scene file toast after the loader rejects the container.
+            .add_filter("VOXL scene", &["voxl", "lys"])
             .pick_file()
         else {
             return;
@@ -303,6 +411,7 @@ impl DragonFruit {
     /// history store; this build has no undo, so the removal is final.
     pub(crate) fn delete_model(&mut self) {
         self.mesh = None;
+        self.scene = None;
         self.supports.borrow_mut().clear();
         self.selected.set(false);
         self.num_layers = 0;
@@ -335,8 +444,8 @@ impl DragonFruit {
         .detach();
     }
 
-    /// `handleDroppedPrepareFiles`: scene files take the import path, mesh
-    /// files the load path.
+    /// `handleDroppedPrepareFiles`: a scene file takes the import path, a mesh
+    /// file the load path; both run through [`Self::load_path`].
     pub(crate) fn handle_dropped_paths(&mut self, paths: Vec<PathBuf>, cx: &mut Context<Self>) {
         if self.mode != Mode::Prepare {
             return;
@@ -349,19 +458,11 @@ impl DragonFruit {
             return;
         }
 
-        if let Some(scene) = supported.iter().find(|path| is_scene_file(path)) {
-            // No scene importer exists in this build, so the source's
-            // `reportUnsupportedSceneFile` is the truthful outcome.
-            let name = scene
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or_default()
-                .to_owned();
-            self.show_toast(
-                format!("Unsupported scene file: {name}"),
-                ui::ToastTone::Error,
-                cx,
-            );
+        if let Some(scene_file) = supported.iter().find(|path| is_scene_file(path)) {
+            // Scene files (`.voxl`, `.lys`) go through the same loader as the
+            // launch path; a `.lys` has no importer and the loader's error
+            // raises `reportUnsupportedSceneFile`.
+            self.load_path(scene_file.clone(), cx);
             return;
         }
 

@@ -1883,7 +1883,10 @@ dependencies = [
  "fontdue",
  "glam",
  "gpui-core",
+ "gpui-locale",
+ "gpui-store",
  "gpui-ui",
+ "gpui-voxl",
  "gpui_interop",
  "raw-window-handle",
  "resvg 0.45.1",
@@ -2532,6 +2535,7 @@ dependencies = [
  "dragonfruit-mesh-core",
  "fontdue",
  "glam",
+ "gpui-supports",
  "gpui_interop",
  "raw-window-handle",
  "resvg 0.45.1",
@@ -2564,6 +2568,7 @@ name = "gpui-supports"
 version = "0.0.0"
 dependencies = [
  "glam",
+ "serde_json",
 ]
 
 [[package]]

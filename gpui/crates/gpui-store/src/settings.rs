@@ -59,6 +59,8 @@ pub struct Settings {
     #[serde(default)]
     pub workspaces: WorkspaceCameraSettings,
     #[serde(default)]
+    pub view3d: View3dSettings,
+    #[serde(default)]
     pub multi_plate: MultiPlateSettings,
     #[serde(default)]
     pub mesh: MeshSettings,
@@ -68,6 +70,8 @@ pub struct Settings {
     pub space_mouse: SpaceMouseSettings,
     #[serde(default)]
     pub plugins: PluginsSettings,
+    #[serde(default)]
+    pub experiments: ExperimentsSettings,
     #[serde(default)]
     pub scene_autosave: SceneAutosaveSettings,
     #[serde(default)]
@@ -80,6 +84,8 @@ pub struct Settings {
     pub hotkeys: HotkeySettings,
     #[serde(default)]
     pub logging: LoggingSettings,
+    #[serde(default)]
+    pub updates: UpdateSettings,
 }
 
 impl Default for Settings {
@@ -89,17 +95,20 @@ impl Default for Settings {
             general: GeneralSettings::default(),
             camera: CameraSettings::default(),
             workspaces: WorkspaceCameraSettings::default(),
+            view3d: View3dSettings::default(),
             multi_plate: MultiPlateSettings::default(),
             mesh: MeshSettings::default(),
             performance: PerformanceSettings::default(),
             space_mouse: SpaceMouseSettings::default(),
             plugins: PluginsSettings::default(),
+            experiments: ExperimentsSettings::default(),
             scene_autosave: SceneAutosaveSettings::default(),
             backups: BackupsSettings::default(),
             uvtools: UvToolsSettings::default(),
             ui: UiSettings::default(),
             hotkeys: HotkeySettings::default(),
             logging: LoggingSettings::default(),
+            updates: UpdateSettings::default(),
         }
     }
 }
@@ -432,6 +441,113 @@ pub enum SelectionHighlightMode {
     None,
 }
 
+// --- 3D view (Workspace tab) ---------------------------------------------
+
+/// Workspace tab's 3D View section: `view3dPreferences.ts`'s
+/// `DEFAULT_VIEW3D_SETTINGS`, stored under `app-3d-view-settings`.
+///
+/// The tab's number fields round and clamp exactly as the source's
+/// `normalizeView3DSettings` does (10–2000 mm wide/deep, 10–3000 mm tall,
+/// 320–16384 × 200–16384 px screens); the store keeps the raw value so a hand
+/// edited file is not silently rewritten on load.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct View3dSettings {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_view3d_width_mm")]
+    pub width_mm: f32,
+    #[serde(default = "default_view3d_depth_mm")]
+    pub depth_mm: f32,
+    #[serde(default = "default_view3d_max_z_mm")]
+    pub max_z_mm: f32,
+    #[serde(default, deserialize_with = "de::enum_or_default")]
+    pub origin_mode: View3dOriginMode,
+    #[serde(default = "default_view3d_screen_width_px")]
+    pub screen_width_px: u32,
+    #[serde(default = "default_view3d_screen_height_px")]
+    pub screen_height_px: u32,
+    #[serde(default = "default_true")]
+    pub show_violation_warning: bool,
+    #[serde(default)]
+    pub show_model_bounding_boxes: bool,
+    /// The source's `showSliceSatBoundingMesh`.
+    #[serde(default)]
+    pub show_slice_sat: bool,
+    /// The source's `showSliceSatBoundingMeshForAllModels`.
+    #[serde(default)]
+    pub sat_all_models: bool,
+    /// The source's `sliceSatBoundingMeshMode`.
+    #[serde(default, deserialize_with = "de::enum_or_default")]
+    pub sat_mode: SliceSatMode,
+    /// The source's `experimentalSliceSatBoundingMeshRenderMode`.
+    #[serde(default, deserialize_with = "de::enum_or_default")]
+    pub sat_render: SliceSatRender,
+}
+
+fn default_view3d_width_mm() -> f32 {
+    218.0
+}
+fn default_view3d_depth_mm() -> f32 {
+    123.0
+}
+fn default_view3d_max_z_mm() -> f32 {
+    250.0
+}
+fn default_view3d_screen_width_px() -> u32 {
+    2560
+}
+fn default_view3d_screen_height_px() -> u32 {
+    1440
+}
+
+impl Default for View3dSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            width_mm: default_view3d_width_mm(),
+            depth_mm: default_view3d_depth_mm(),
+            max_z_mm: default_view3d_max_z_mm(),
+            origin_mode: View3dOriginMode::default(),
+            screen_width_px: default_view3d_screen_width_px(),
+            screen_height_px: default_view3d_screen_height_px(),
+            show_violation_warning: true,
+            show_model_bounding_boxes: false,
+            show_slice_sat: false,
+            sat_all_models: false,
+            sat_mode: SliceSatMode::default(),
+            sat_render: SliceSatRender::default(),
+        }
+    }
+}
+
+/// `View3DSettings['originMode']` — `'center' | 'front_left'`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum View3dOriginMode {
+    #[default]
+    Center,
+    FrontLeft,
+}
+
+/// `sliceSatBoundingMeshMode` — `'accurate_hull' | 'experimental_slice'`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SliceSatMode {
+    #[default]
+    AccurateHull,
+    ExperimentalSlice,
+}
+
+/// `experimentalSliceSatBoundingMeshRenderMode` — `'shaded' | 'wireframe'`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SliceSatRender {
+    #[default]
+    Shaded,
+    Wireframe,
+}
+
 // --- Multi-plate ---------------------------------------------------------
 
 /// Multi-Plate tab: `multiPlatePreferences.ts` and
@@ -608,6 +724,9 @@ pub struct PerformanceSettings {
     pub png_compression_strategy: PngCompressionStrategy,
     #[serde(default)]
     pub aa_on_supports_experimental: bool,
+    /// The Slicing tab's Thumbnail Rendering section.
+    #[serde(default)]
+    pub thumbnail: ThumbnailRenderSettings,
 }
 
 impl Default for PerformanceSettings {
@@ -615,6 +734,38 @@ impl Default for PerformanceSettings {
         Self {
             png_compression_strategy: PngCompressionStrategy::Auto,
             aa_on_supports_experimental: false,
+            thumbnail: ThumbnailRenderSettings::default(),
+        }
+    }
+}
+
+/// Thumbnail Rendering: `SettingsModal.tsx`'s
+/// `DEFAULT_SLICING_THUMBNAIL_RENDER_SETTINGS` (`includeGradient`,
+/// `includeBuildPlate`, `includeGrid`) plus `centerOnModel` from
+/// `DEFAULT_EXPORT_THUMBNAIL_RENDER_OPTIONS` in
+/// `src/features/export/exportThumbnailOptions.ts`, whose storage key is
+/// `dragonfruit.slicing.thumbnailRenderOptions`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThumbnailRenderSettings {
+    #[serde(default)]
+    pub include_gradient: bool,
+    #[serde(default)]
+    pub include_build_plate: bool,
+    #[serde(default)]
+    pub include_grid: bool,
+    /// The export path centres the model unless told otherwise.
+    #[serde(default = "default_true")]
+    pub center_on_model: bool,
+}
+
+impl Default for ThumbnailRenderSettings {
+    fn default() -> Self {
+        Self {
+            include_gradient: false,
+            include_build_plate: false,
+            include_grid: false,
+            center_on_model: true,
         }
     }
 }
@@ -717,6 +868,23 @@ pub enum SpaceMousePivotMode {
 pub struct PluginsSettings {
     #[serde(default)]
     pub allow_sideloaded_complex_plugins: bool,
+}
+
+// --- Experiments ---------------------------------------------------------
+
+/// Experiments tab: `src/features/experiments/experimentsRegistry.ts`
+/// (`EXPERIMENTS_ENABLED_STORAGE_KEY`, `EXPERIMENT_DEFINITIONS` from
+/// `src/config/experiments.json`).
+///
+/// Only experiments whose state differs from their registry default are
+/// stored; a missing id means "use `defaultEnabled`". The source also keeps an
+/// opt-out marker for default-enabled experiments; a plain `false` here is that
+/// same decision, because the GPUI slice carries no promotion history.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExperimentsSettings {
+    #[serde(default)]
+    pub enabled: BTreeMap<String, bool>,
 }
 
 // --- Scene autosave ------------------------------------------------------
@@ -1010,6 +1178,78 @@ impl Default for ThemeColors {
     }
 }
 
+impl ThemeColors {
+    /// Read one colour by its document key — the camelCase names in
+    /// `themeCustomizations.ts`'s `ThemeCustomColors`, which are also the keys
+    /// of the Settings → UI & Theme colour tables.
+    pub fn get(&self, key: &str) -> Option<&str> {
+        Some(match key {
+            "background" => &self.background,
+            "foreground" => &self.foreground,
+            "surface0" => &self.surface0,
+            "surface1" => &self.surface1,
+            "surface2" => &self.surface2,
+            "textStrong" => &self.text_strong,
+            "textMuted" => &self.text_muted,
+            "indicator" => &self.indicator,
+            "borderSubtle" => &self.border_subtle,
+            "borderStrong" => &self.border_strong,
+            "accent" => &self.accent,
+            "accentHover" => &self.accent_hover,
+            "primaryButtonSurface" => &self.primary_button_surface,
+            "accentContrast" => &self.accent_contrast,
+            "accentSecondary" => &self.accent_secondary,
+            "accentSecondaryHover" => &self.accent_secondary_hover,
+            "secondaryButtonSurface" => &self.secondary_button_surface,
+            "accentSecondaryContrast" => &self.accent_secondary_contrast,
+            "topbarAccent" => &self.topbar_accent,
+            "sceneGradientRadial" => &self.scene_gradient_radial,
+            "sceneGradientLinearStart" => &self.scene_gradient_linear_start,
+            "sceneGradientLinearMid" => &self.scene_gradient_linear_mid,
+            "meshSelectionColor" => &self.mesh_selection_color,
+            "meshHoverColor" => &self.mesh_hover_color,
+            "danger" => &self.danger,
+            "success" => &self.success,
+            _ => return None,
+        })
+    }
+
+    /// Write one colour by its document key. Returns `false` for a key no
+    /// field carries, leaving the struct untouched.
+    pub fn set(&mut self, key: &str, value: impl Into<String>) -> bool {
+        match key {
+            "background" => self.background = value.into(),
+            "foreground" => self.foreground = value.into(),
+            "surface0" => self.surface0 = value.into(),
+            "surface1" => self.surface1 = value.into(),
+            "surface2" => self.surface2 = value.into(),
+            "textStrong" => self.text_strong = value.into(),
+            "textMuted" => self.text_muted = value.into(),
+            "indicator" => self.indicator = value.into(),
+            "borderSubtle" => self.border_subtle = value.into(),
+            "borderStrong" => self.border_strong = value.into(),
+            "accent" => self.accent = value.into(),
+            "accentHover" => self.accent_hover = value.into(),
+            "primaryButtonSurface" => self.primary_button_surface = value.into(),
+            "accentContrast" => self.accent_contrast = value.into(),
+            "accentSecondary" => self.accent_secondary = value.into(),
+            "accentSecondaryHover" => self.accent_secondary_hover = value.into(),
+            "secondaryButtonSurface" => self.secondary_button_surface = value.into(),
+            "accentSecondaryContrast" => self.accent_secondary_contrast = value.into(),
+            "topbarAccent" => self.topbar_accent = value.into(),
+            "sceneGradientRadial" => self.scene_gradient_radial = value.into(),
+            "sceneGradientLinearStart" => self.scene_gradient_linear_start = value.into(),
+            "sceneGradientLinearMid" => self.scene_gradient_linear_mid = value.into(),
+            "meshSelectionColor" => self.mesh_selection_color = value.into(),
+            "meshHoverColor" => self.mesh_hover_color = value.into(),
+            "danger" => self.danger = value.into(),
+            "success" => self.success = value.into(),
+            _ => return false,
+        }
+        true
+    }
+}
+
 // --- Hotkeys -------------------------------------------------------------
 
 /// Hotkeys tab: `HotkeyContext.tsx`'s `app-hotkeys-config`.
@@ -1057,4 +1297,35 @@ pub enum LogLevel {
     Info,
     Debug,
     Trace,
+}
+
+// --- Updates -------------------------------------------------------------
+
+/// Updates tab's Release Channel dialog: the preference `get_saved_update_channel`
+/// reads from `update-channel.txt` in the app data dir
+/// (`src-tauri/src/updater_channel.rs`). It ships as its own document today;
+/// the store keeps it beside the rest so one save writes both.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateSettings {
+    #[serde(default, deserialize_with = "de::enum_or_default")]
+    pub channel: UpdateChannel,
+}
+
+impl Default for UpdateSettings {
+    fn default() -> Self {
+        Self {
+            channel: UpdateChannel::default(),
+        }
+    }
+}
+
+/// `UpdateChannel` — `src/features/updater/updateBridge.ts`; anything but
+/// `'dev'` reads as `'stable'`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum UpdateChannel {
+    #[default]
+    Stable,
+    Dev,
 }

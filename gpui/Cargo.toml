@@ -24,6 +24,9 @@ rfd = "0.15"
 dragonfruit-mesh-core = { path = "../rust/dragonfruit-mesh-core" }
 gpui-core = { path = "crates/gpui-core" }
 gpui-ui = { path = "crates/gpui-ui" }
+gpui-store = { path = "crates/gpui-store" }
+gpui-voxl = { path = "crates/gpui-voxl" }
+gpui-locale = { path = "crates/gpui-locale" }
 resvg = "0.45"
 fontdue = "0.9"
 declarative-gpui = "0.3"

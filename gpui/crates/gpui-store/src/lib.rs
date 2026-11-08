@@ -50,11 +50,13 @@ pub use session::{CameraPose, FloatPoint, PanelDock, PanelPlacement, Session, Se
 pub use settings::{
     BackupsSettings, CameraFeel, CameraFeelPreset, CameraModeDefaults, CameraProjection,
     CameraScopeMode, CameraSettings, CameraTrackpadModifierKey, CameraTrackpadPrimaryAction,
-    CameraTrackpadSettings, GeneralSettings, HotkeyBinding, HotkeySettings, ImportDefaults,
-    LogLevel, LoggingSettings, MatcapVariant, MeshSettings, MeshShaderType, MultiPlateSettings,
-    PerformanceSettings, PlateOrderingMode, PluginsSettings, PngCompressionStrategy,
-    RaftBottomMode, SceneAutosaveSettings, SelectionHighlightDefaults, SelectionHighlightMode,
-    Settings, SpaceMousePivotMode, SpaceMouseSettings, ThemeColors, ThemePreference, ToolLayout,
-    UiSettings, UvToolsSettings, WorkspaceCameraSettings, SETTINGS_SCHEMA_VERSION,
+    CameraTrackpadSettings, ExperimentsSettings, GeneralSettings, HotkeyBinding, HotkeySettings,
+    ImportDefaults, LogLevel, LoggingSettings, MatcapVariant, MeshSettings, MeshShaderType,
+    MultiPlateSettings, PerformanceSettings, PlateOrderingMode, PluginsSettings,
+    PngCompressionStrategy, RaftBottomMode, SceneAutosaveSettings, SelectionHighlightDefaults,
+    SelectionHighlightMode, Settings, SliceSatMode, SliceSatRender, SpaceMousePivotMode,
+    SpaceMouseSettings, ThemeColors, ThemePreference, ThumbnailRenderSettings, ToolLayout,
+    UiSettings, UpdateChannel, UpdateSettings, UvToolsSettings, View3dOriginMode, View3dSettings,
+    WorkspaceCameraSettings, SETTINGS_SCHEMA_VERSION,
 };
 pub use store::{Store, APP_DIR_NAME};

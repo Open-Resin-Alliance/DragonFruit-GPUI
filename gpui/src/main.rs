@@ -78,11 +78,12 @@
 //!   `handlePrepareDrop`. Supported names are `.stl`, `.obj`, `.3mf`, `.voxl`,
 //!   `.lys` (`PREPARE_DROP_EXTENSIONS`); the overlay strings and colours come
 //!   from `page.tsx`.
-//! * Only STL can actually load (`stl.rs`). OBJ/3MF importers are not ported,
-//!   so those drops are accepted by the overlay and then do nothing.
-//! * Scene files (`.voxl`, `.lys`) have no importer, so they raise the
-//!   source's `Unsupported scene file: {name}` toast
-//!   (`reportUnsupportedSceneFile`).
+//! * Only STL and VOXL can load (`stl.rs`, `scene/`). OBJ/3MF importers are not
+//!   ported, so those drops are accepted by the overlay and then do nothing.
+//! * `.lys` has no importer and raises the source's
+//!   `Unsupported scene file: {name}` toast (`reportUnsupportedSceneFile`).
+//! * A VOXL model carries a full XYZ rotation; the port's viewport has a Z
+//!   angle only, so `rotation.x`/`.y` are dropped when a scene is opened.
 //! * The source tracks drag depth and hides the overlay when the pointer leaves
 //!   `#scene-root`; GPUI dispatches `on_drag_move` for the whole window, so the
 //!   overlay follows the canvas bounds only.

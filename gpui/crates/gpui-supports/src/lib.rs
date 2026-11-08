@@ -22,13 +22,23 @@
 //!   in the binary with the rest of the picking code.
 //! - **Colour is not baked.** the source writes per-instance colours through
 //!   `instanceColorWriter.ts`; the viewport applies its own material.
+//! - **[`parse`] decodes the `SUPP` chunk.** The JSON document is the same
+//!   `DragonfruitImportFormat` the codec writes (`codec-v2.ts`'s
+//!   `JSON.stringify(input.supports)`): one array per support type plus the
+//!   shared `roots` and `knots`. It walks the same recipes the proxy layer
+//!   registers per type (`src/supports/SupportTypes/*/…ProxyGeometry.ts`) and
+//!   fills [`SupportBatches`] with the same primitives those recipes push. A
+//!   curved (bezier) shaft is decoded as its straight chord: the port has no
+//!   tube generator yet (see the truncation note above).
 
 pub mod instance;
 pub mod mesh;
+pub mod parse;
 pub mod primitives;
 
 pub use instance::{DiskInstance, NodeInstance, ShaftInstance, SupportBatches};
 pub use mesh::{SupportMesh, SupportNode, SupportShaft};
+pub use parse::{ParseError, parse};
 pub use primitives::{cone, cylinder, disk, sphere};
 
 /// `radialSegments` in `InstancedShaftGroup.tsx` — twelve around a shaft.
