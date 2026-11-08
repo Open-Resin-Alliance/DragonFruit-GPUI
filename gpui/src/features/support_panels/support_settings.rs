@@ -2,10 +2,11 @@
 //! strip over the auto-support knobs `AutoSupportSettingsBody.tsx` renders
 //! (Density & Sizing, Stability) and its Delete / Reset / Save footer.
 //!
-//! The values are not the panel's: they come from `support-presets.json`
-//! ([`super::studio_presets`]), so the strip keeps the record the user selected
-//! across a restart and every control shows that record's numbers instead of a
-//! default of its own.
+//! The strip's collection and the selected record come from
+//! `support-presets.json` ([`super::studio_presets`]); the knobs edit the *live*
+//! auto-support block that module holds, seeded once from the selected record.
+//! A preset selection changes neither block (`setActivePreset` preserves
+//! `autoSupport`) nor `DragonFruit::support_angle`.
 //!
 //! # PORT DEVIATIONS
 //!
@@ -17,16 +18,27 @@
 //!    quick-select (`light` / `medium` / `heavy`) the first port put here: the
 //!    store crate models the studio collection, and that is what the Support
 //!    Studio's strip shows.
-//! 3. A built-in profile locks every knob (`presetLocked`), and `Save` stays
-//!    disabled until `Duplicate` has made a custom record — the source's way out
-//!    of a locked profile, and the point where an edit becomes persistable.
+//! 3. The lock is the active record's own `isBuiltIn` flag, never its id
+//!    (`presets.ts:146-153,210-217,239-246` ship all three factory records with
+//!    `isBuiltIn: false`, and `:779` states there is no built-in lock), which is
+//!    the same source `AutoSupportPanel.tsx:125` derives `presetLocked` from.
+//!    A record that *does* set the flag locks every knob and gates `Save` on
+//!    `Duplicate`, as at the source.
 //! 4. `Rename` / `Export` / `Import` are inert: the source's rename needs a text
 //!    field and export/import need the Tauri file bridge, neither of which this
-//!    slice has. Their buttons render the source's enabled recipe.
+//!    slice has. Their buttons render the source's enabled recipe; `Rename` is
+//!    gated on the record's own `isBuiltIn`, as `PresetSelector.tsx:543-544`
+//!    gates it.
 //! 5. `overhangSelfSupportAngleDeg` is wired to `DragonFruit::support_angle`, the
 //!    value `stl::overhang_points` classifies with; the other knobs have no
-//!    consumer until W6 ports `autoSupport`.
-//! 6. No text entry: `labeled_number_field`'s chevrons are the way to change a
+//!    consumer until W6 ports `autoSupport`. The angle is applied when the field
+//!    is edited, on `Reset` and on `Save` — never when a preset is selected
+//!    (`setActivePreset` preserves the live block, `presets.ts:683-693`).
+//! 6. The knobs edit the *live* auto-support block, not the selected record's:
+//!    the source keeps `autoSupport: { ...current.autoSupport }` on selection and
+//!    restores the record's own block on `Save` (`presets.ts:723-731`). Selecting
+//!    a preset therefore changes none of these values.
+//! 7. No text entry: `labeled_number_field`'s chevrons are the way to change a
 //!    value. No range inputs, no CSS transitions and no `tabular-nums`.
 
 use gpui::{
@@ -58,8 +70,10 @@ pub fn support_settings_body(entity: WeakEntity<DragonFruit>) -> impl IntoElemen
     let preset_menu_open = studio_presets::menu_open();
     let active_name =
         studio_presets::active_name().unwrap_or_else(|| NO_ACTIVE_PRESET_LABEL.to_string());
-    // Every factory profile is locked: an edit made here could never be kept.
-    let locked = studio_presets::is_built_in(&active_id);
+    // The lock is the record's own `isBuiltIn`, never the id: all three factory
+    // records ship `isBuiltIn: false` (`presets.ts:146-153,210-217,239-246`),
+    // and `presets.ts:779` states there is no built-in lock.
+    let locked = studio_presets::active_locked();
 
     // ── Preset strip ────────────────────────────────────────────────────────
     let trigger_label: SharedString = if modified {
@@ -69,11 +83,7 @@ pub fn support_settings_body(entity: WeakEntity<DragonFruit>) -> impl IntoElemen
     };
     let options: Vec<SelectOption> = rows
         .iter()
-        .map(|(id, name, built_in)| {
-            let mut option = SelectOption::new(id.clone(), name.clone());
-            option.right = Some(if *built_in { "Built-in" } else { "Custom" }.into());
-            option
-        })
+        .map(|(id, name, _)| SelectOption::new(id.clone(), name.clone()))
         .collect();
 
     let toggle_entity = entity.clone();
@@ -90,8 +100,10 @@ pub fn support_settings_body(entity: WeakEntity<DragonFruit>) -> impl IntoElemen
         },
         move |index, _, cx| {
             if let Some((id, _, _)) = rows.get(index) {
+                // `setActivePreset` preserves the live auto-support block
+                // (`presets.ts:683-693`): the selection must not move a knob or
+                // the angle the app classifies with.
                 studio_presets::select(id);
-                apply_angle(&select_entity, cx);
             }
             notify(&select_entity, cx);
         },
@@ -164,7 +176,10 @@ pub fn support_settings_body(entity: WeakEntity<DragonFruit>) -> impl IntoElemen
                 .items_center()
                 .gap(px(8.0))
                 .child(div().flex_1().min_w(px(0.0)).child(selector))
-                .child(strip_button("support-preset-rename", "pen-line", "Rename", false))
+                // `PresetSelector.tsx:543-544` refuses rename only when the
+                // selected record is `isBuiltIn`; the click is inert until the
+                // slice gains text entry (deviation 5 in `studio_presets`).
+                .child(strip_button("support-preset-rename", "pen-line", "Rename", !locked))
                 .child(duplicate)
                 .child(strip_button("support-preset-export", "download", "Export", true))
                 .child(strip_button("support-preset-import", "upload", "Import", true)),

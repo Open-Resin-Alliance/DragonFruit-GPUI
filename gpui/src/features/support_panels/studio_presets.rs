@@ -17,31 +17,37 @@
 //!
 //! # PORT DEVIATIONS
 //!
-//! 1. **The block a preset shows here.** A studio preset owns the geometry tree
-//!    (`tip` / `shaft` / `roots` / `baseFlare` / `joint` / `grid`), and
-//!    `setActivePreset` *preserves* the live `autoSupport` block on selection —
-//!    "auto-support density is owned by the Auto Support panel, never by the
-//!    trunk-preset dropdown". The port's Manual panel is the auto-support knob
-//!    editor, so this module shows and edits the record's
-//!    `settings.autoSupport` block, which every studio record carries. Every
-//!    other key of a stored record round-trips untouched.
-//! 2. **Built-ins are code with one block.** `DETAIL_PRESET` /
-//!    `STRUCTURE_PRESET` / `ANCHOR_PRESET` carry their identity and a complete
-//!    `autoSupport` block (`createDefaultAutoSupportSettings()` with the
-//!    preset's pinned area and sizing band). Their geometry tree is not
-//!    reproduced: no ported UI reads it, and a record the React build wrote
-//!    keeps its own tree, because [`commit_values`] merges into
-//!    `settings.autoSupport` and writes the rest of `settings` back as-is.
-//! 3. **Committed, not live.** The source persists the live settings on every
-//!    edit and the preset on `Save`; the port has one document, so an edit
-//!    stages in the draft and `Save` commits it into the active custom record.
-//!    A selection, a duplicate, a delete and a rename are written immediately.
+//! 1. **The live auto-support block is not the preset's.** `setActivePreset`
+//!    *preserves* the live `autoSupport` block on selection — "Trunk presets
+//!    are sizing/geometry profiles; auto-support density is owned by the Auto
+//!    Support panel ... never by the trunk-preset dropdown" (`presets.ts:683-693`)
+//!    — and `savePreset` restores the record's own block rather than writing
+//!    the live one into it (`presets.ts:723-731`). This module therefore holds
+//!    the panel's knobs in its own live block ([`StudioPresets::draft`]),
+//!    seeded once from the selected record at load and never re-seeded by a
+//!    selection nor written back by `Save`. (Persisting that block is the Auto
+//!    Support module's own job — `autoSupportPresets.ts`'s `writeStoredState` —
+//!    and is not ported in this slice; the dialog's copy is still memory-only.)
+//! 2. **Factory records are ordinary editable records, not a lock.** All three
+//!    ship `isBuiltIn: false` (`presets.ts:146-153,210-217,239-246`) and
+//!    `presets.ts:779` states "All presets are now editable (no built-in
+//!    lock)". Their ids only identify the code-owned records the document never
+//!    stores; the panel's lock is [`active_locked`], the record's own flag.
+//!    Their complete `autoSupport` block is the seed for the live block on
+//!    load; their geometry tree is not reproduced, because no ported UI reads
+//!    it and every other key of a stored record round-trips untouched.
+//! 3. **Save acknowledges the live block.** The source persists the live
+//!    settings on every edit and the preset on `Save`; the port's `Save` marks
+//!    the live block as acknowledged (clearing the dirty star) and leaves the
+//!    record's `autoSupport` alone, as `savePreset` does. A selection, a
+//!    duplicate, a delete and a rename are written to the document immediately.
 //! 4. **No drag, no pinning, no bulk delete.** `PresetSelector`'s drag reorder,
 //!    the four quick-access slots and the bulk-delete dialog are not ported;
 //!    `pinnedSlot` is carried through a stored record but never edited.
 //! 5. **No rename.** The source opens a name dialog with a text field; this
-//!    slice has no text entry, so the panel keeps `Rename` disabled (the
-//!    dialog's own note records the same gap).
+//!    slice has no text entry, so `Rename` is gated the way the source gates it
+//!    (`selectedPreset.isBuiltIn`, `PresetSelector.tsx:543-544`) and is inert
+//!    once enabled.
 
 use std::sync::{LazyLock, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -54,7 +60,8 @@ use serde_json::{Map, Value};
 pub const DEFAULT_PRESET_ID: &str = "structure";
 
 /// The factory records `presets.ts` re-derives on every launch. They are code,
-/// never written to the document (the store crate's own rule).
+/// never written to the document (the store crate's own rule). This is
+/// *identity*, not a lock: all three ship `isBuiltIn: false`.
 const BUILT_IN_IDS: [&str; 3] = ["detail", "structure", "anchor"];
 
 /// The document's in-memory state.
@@ -66,10 +73,11 @@ struct StudioPresets {
     presets: Vec<SupportPreset>,
     /// `activePresetId`.
     active: String,
-    /// What the panel shows: seeded from the active record and staged until
-    /// `Save`.
+    /// The live auto-support block the panel edits (`getSettings().autoSupport`).
+    /// Seeded once from the selected record at load; a selection never re-seeds
+    /// it. `Save` acknowledges the block, `Reset` restores the acknowledgement.
     draft: SupportSettingsValues,
-    /// The active record's stored values; `Reset` restores them.
+    /// The block as last acknowledged by `Save`; `Reset` restores it.
     baseline: SupportSettingsValues,
     /// The strip's dropdown.
     menu_open: bool,
@@ -115,10 +123,6 @@ impl StudioPresets {
     fn active_record(&self) -> Option<&SupportPreset> {
         self.presets.iter().find(|preset| preset.id == self.active)
     }
-
-    fn active_values(&self) -> SupportSettingsValues {
-        values_of(&self.presets, &self.active)
-    }
 }
 
 static PRESETS: LazyLock<Mutex<StudioPresets>> = LazyLock::new(|| Mutex::new(StudioPresets::load()));
@@ -134,17 +138,24 @@ fn with<R>(f: impl FnOnce(&mut StudioPresets) -> R) -> R {
     }
 }
 
-/// `isBuiltIn` in `presets.ts`: the three ids the code owns.
+/// The three ids `presets.ts` owns as code (`isBuiltIn`'s *name* is misleading
+/// here): the document never stores them, so they are filtered out on both
+/// load and save.
+///
+/// This is identity, **not** a lock. All three factory records ship
+/// `isBuiltIn: false` (`presets.ts:146-153,210-217,239-246`); the panel's lock
+/// is [`active_locked`].
 pub fn is_built_in(id: &str) -> bool {
     BUILT_IN_IDS.contains(&id)
 }
 
 // ── Reads ───────────────────────────────────────────────────────────────────
 
-/// The strip's rows — `(id, name, is built-in)` — in rail order.
+/// The strip's rows — `(id, name, is factory record)` — in rail order.
 ///
 /// Only the identity, so a panel redraw does not clone every record's
-/// `settings` tree.
+/// `settings` tree. The flag marks the three records `presets.ts` owns as code
+/// (the sizing bands the Auto Support dialog lists); it does not imply a lock.
 pub fn preset_rows() -> Vec<(String, String, bool)> {
     with(|state| {
         state
@@ -166,6 +177,20 @@ pub fn active_id() -> String {
     with(|state| state.active.clone())
 }
 
+/// The panel's lock: the *record's own* `isBuiltIn` flag, never its id.
+///
+/// `presets.ts` ships every factory record with `isBuiltIn: false`
+/// (`:146-153`, `:210-217`, `:239-246`) and states "All presets are now
+/// editable (no built-in lock)" (`:779`); `AutoSupportPanel.tsx:125` derives
+/// its `presetLocked` from the same flag.
+pub fn active_locked() -> bool {
+    with(|state| {
+        state
+            .active_record()
+            .map_or(false, |preset| preset.is_built_in)
+    })
+}
+
 /// The active record's name, or `None` when the collection lost it.
 pub fn active_name() -> Option<String> {
     with(|state| state.active_record().map(|preset| preset.name.clone()))
@@ -176,12 +201,12 @@ pub fn active_preset() -> Option<SupportPreset> {
     with(|state| state.active_record().cloned())
 }
 
-/// The values the panel's controls show.
+/// The live auto-support block the panel's controls show.
 pub fn values() -> SupportSettingsValues {
     with(|state| state.draft)
 }
 
-/// Whether the draft differs from the active record (`isPresetDirty`).
+/// Whether the live block differs from the last `Save` (`isPresetDirty`).
 pub fn is_modified() -> bool {
     with(|state| !same_values(&state.draft, &state.baseline))
 }
@@ -205,59 +230,58 @@ pub fn close_menu() {
     with(|state| state.menu_open = false);
 }
 
-/// `setActivePreset`: the record becomes the selection and its block becomes
-/// the panel's values. Written at once — this is the fact that must survive a
-/// restart.
+/// `setActivePreset`: the record becomes the selection, written at once — this
+/// is the fact that must survive a restart.
+///
+/// The live auto-support block is deliberately **not** re-seeded. The source
+/// keeps `autoSupport: { ...current.autoSupport }` (`presets.ts:683-693`), so
+/// switching profile must not change a single knob of the live block (nor the
+/// angle the app classifies with); the preset's own stored block is never read
+/// into the live settings.
 pub fn select(id: &str) -> bool {
     with(|state| {
         if !state.presets.iter().any(|preset| preset.id == id) {
             return false;
         }
         state.active = id.to_string();
-        let values = state.active_values();
-        state.draft = values;
-        state.baseline = values;
         state.menu_open = false;
         save(state);
         true
     })
 }
 
-/// `Revert` / the footer's Reset: the active record's stored values again.
+/// `Revert` / the footer's Reset: the live block as `Save` last left it.
 pub fn reset() -> SupportSettingsValues {
     with(|state| {
-        let values = state.active_values();
-        state.draft = values;
-        state.baseline = values;
-        values
+        state.draft = state.baseline;
+        state.baseline
     })
 }
 
-/// The footer's Save: writes the draft into the active record.
+/// The footer's Save: acknowledges the live block.
 ///
-/// A built-in is refused, matching the source's disabled Save — Duplicate
-/// first, which is the way out of a locked profile.
+/// The draft is **not** merged into the active record: `savePreset` restores
+/// the record's own `autoSupport` block (`presets.ts:723-731`), so a preset is
+/// never polluted with the live one. A record whose own `isBuiltIn` is set
+/// refuses the save, exactly as `PresetSelector.tsx`'s save gate does (every
+/// factory record in `presets.ts` is `isBuiltIn: false`).
 pub fn save_active() -> Option<SupportSettingsValues> {
     with(|state| {
-        let draft = state.draft;
-        let active = state.active.clone();
-        if is_built_in(&active) {
+        if state
+            .active_record()
+            .map_or(true, |preset| preset.is_built_in)
+        {
             return None;
         }
-        let preset = state
-            .presets
-            .iter_mut()
-            .find(|preset| preset.id == active)?;
-        preset.updated_at = Some(now_millis());
-        commit_values(preset, &draft);
+        let draft = state.draft;
         state.baseline = draft;
-        save(state);
         Some(draft)
     })
 }
 
 /// `duplicatePreset`: a custom copy of the active record, made the selection.
-/// This is the source's way out of a locked built-in, and it persists.
+/// This is the source's way out of a locked record, it persists, and it leaves
+/// the live auto-support block where it was (`setActivePreset` preserves it).
 pub fn duplicate_active() -> Option<String> {
     with(|state| {
         let source = state.active_record()?.clone();
@@ -278,21 +302,22 @@ pub fn duplicate_active() -> Option<String> {
 
         state.presets.push(copy);
         state.active = id.clone();
-        let values = state.active_values();
-        state.draft = values;
-        state.baseline = values;
         state.menu_open = false;
         save(state);
         Some(id)
     })
 }
 
-/// `deletePreset`: a built-in is refused; the selection falls back to the first
-/// record, as the source's does.
+/// `deletePreset`: a record whose own `isBuiltIn` is set is refused; the
+/// selection falls back to the first record, as the source's does. The live
+/// auto-support block is untouched.
 pub fn delete_active() -> bool {
     with(|state| {
         let id = state.active.clone();
-        if is_built_in(&id) {
+        if state
+            .active_record()
+            .map_or(true, |preset| preset.is_built_in)
+        {
             return false;
         }
         let before = state.presets.len();
@@ -305,19 +330,21 @@ pub fn delete_active() -> bool {
             .first()
             .map(|preset| preset.id.clone())
             .unwrap_or_else(|| DEFAULT_PRESET_ID.to_string());
-        let values = state.active_values();
-        state.draft = values;
-        state.baseline = values;
         save(state);
         true
     })
 }
 
-/// `renamePreset`: the name is made unique across the collection.
+/// `renamePreset`: the name is made unique across the collection. Gated on the
+/// record's own `isBuiltIn`, as `PresetSelector.tsx:543-544` gates inline
+/// rename; the live auto-support block is untouched.
 pub fn rename_active(name: &str) -> bool {
     with(|state| {
         let active = state.active.clone();
-        if is_built_in(&active) {
+        if state
+            .active_record()
+            .map_or(true, |preset| preset.is_built_in)
+        {
             return false;
         }
         let desired = match name.trim() {
@@ -365,6 +392,11 @@ fn save(state: &StudioPresets) {
 
 // ── The `autoSupport` block ─────────────────────────────────────────────────
 
+/// The live block's initial seed: the selected record's stored
+/// `settings.autoSupport`.
+///
+/// This is the one moment a record's block is read; a later selection never
+/// re-seeds the live block (`setActivePreset` preserves it).
 fn values_of(presets: &[SupportPreset], id: &str) -> SupportSettingsValues {
     presets
         .iter()
@@ -418,60 +450,6 @@ fn values_from_settings(settings: &Value) -> SupportSettingsValues {
             defaults.minima_reinforcement_enabled,
         ),
     }
-}
-
-/// Merge the nine knobs into a record's `settings.autoSupport`, leaving every
-/// other key of `settings` untouched so a record written by the React build
-/// keeps its geometry tree.
-fn commit_values(preset: &mut SupportPreset, values: &SupportSettingsValues) {
-    if !preset.settings.is_object() {
-        preset.settings = Value::Object(Map::new());
-    }
-    let Value::Object(root) = &mut preset.settings else {
-        return;
-    };
-    let block = root
-        .entry("autoSupport".to_string())
-        .or_insert_with(|| Value::Object(Map::new()));
-    if !block.is_object() {
-        *block = Value::Object(Map::new());
-    }
-    let Value::Object(block) = block else {
-        return;
-    };
-    block.insert(
-        "areaPerSupportMm2".to_string(),
-        Value::from(values.area_per_support_mm2 as f64),
-    );
-    block.insert("sizeScale".to_string(), Value::from(values.size_scale as f64));
-    block.insert(
-        "gridAreaThresholdMm2".to_string(),
-        Value::from(values.grid_area_threshold_mm2 as f64),
-    );
-    block.insert(
-        "flatDensityBoost".to_string(),
-        Value::from(values.flat_density_boost as f64),
-    );
-    block.insert(
-        "slopeRelaxFactor".to_string(),
-        Value::from(values.slope_relax_factor as f64),
-    );
-    block.insert(
-        "suctionAreaExponent".to_string(),
-        Value::from(values.suction_area_exponent as f64),
-    );
-    block.insert(
-        "overhangSelfSupportAngleDeg".to_string(),
-        Value::from(values.self_support_angle_deg as f64),
-    );
-    block.insert(
-        "stabilizationEnabled".to_string(),
-        Value::Bool(values.stabilization_enabled),
-    );
-    block.insert(
-        "minimaReinforcementEnabled".to_string(),
-        Value::Bool(values.minima_reinforcement_enabled),
-    );
 }
 
 fn number(block: &Map<String, Value>, key: &str, fallback: f32) -> f32 {

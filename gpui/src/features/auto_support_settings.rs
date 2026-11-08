@@ -46,13 +46,38 @@
 //!     become an open id, which the auto-support block does not model yet.
 //! 10. `Debug Mode` and `Simplified` are the dialog's own flags; the panel's
 //!     debug report (`AutoSupportRunDiagnostics`) is not ported.
+//! 11. **Persistence.** The source keeps the collection in
+//!     `auto-support-presets-v1`, the selection in
+//!     `auto-support-active-preset-id-v1` and the live block inside the
+//!     `support-settings` document (`saveSettingsToLocalStorage`). The port's
+//!     store crate exposes three documents and none is any of those, so this
+//!     module writes all four facts to one file, `auto-support-presets.json`,
+//!     in the [`gpui_store::Store`] data directory. The write is the crate's
+//!     own rule restated — `<file>.tmp` then a rename, an unreadable file moved
+//!     aside as `<file>.corrupt-<ts>`, and a higher `schemaVersion` read as
+//!     absent and never overwritten — because only the crate's three documents
+//!     get that machinery from the crate.
+//! 12. Every loaded field falls back to its default (`AutoSupportSettings`'s
+//!     own, `built_in_presets()` for the three factory records), which is the
+//!     crate's `#[serde(default)]` rule: a document written before a key
+//!     existed still loads. A stored built-in adopts only its settings — the
+//!     stored name, id and `builtIn` are ignored — as `readStoredState` does.
+//! 13. **Auto-Lift's home.** The source's flag is per model (`isModelAutoLifted`
+//!     in `page.tsx`, saved in the scene document) and is shared with the
+//!     Transform panel. The port has one model and no scene document, so the
+//!     one flag lives in this dialog's state beside the presets and is what the
+//!     Auto Supports panel's button reads and writes. The Transform panel's
+//!     `Auto` toggle still owns its own copy in `tool_panels::PanelStore`; it
+//!     should delegate to [`auto_lift`] / [`set_auto_lift`] so the two surfaces
+//!     cannot disagree.
 
 // The shell mounts this dialog once it reads `show_support_settings`; until then
 // every item but `auto_support_settings` is unreachable from `main`.
 #![allow(dead_code)]
 
+use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use gpui::{
     AnyElement, App, ClickEvent, Div, ElementId, FontWeight, IntoElement, MouseButton, SharedString,
@@ -68,6 +93,8 @@ use gpui_ui::ui::{
     SelectOptionTone, ToggleSize, button_with, icon_button, input_box, labeled_number_field,
     select_dropdown, toggle_sized, tooltip,
 };
+use serde_json::{Map, Value, json};
+
 use crate::DragonFruit;
 
 // ── Constants ───────────────────────────────────────────────────────────────
@@ -803,6 +830,224 @@ fn unique_preset_name(presets: &[Preset], desired: &str, exclude: Option<&str>) 
     name
 }
 
+// ── The document ────────────────────────────────────────────────────────────
+
+/// The document this module owns. The source splits the same four facts across
+/// `auto-support-presets-v1` (`{ byId, allIds }`),
+/// `auto-support-active-preset-id-v1` (the selection) and the live block inside
+/// the `support-settings` document; a file has room for all of them, so they are
+/// four fields of one document here.
+const DOCUMENT_FILE: &str = "auto-support-presets.json";
+/// Version this module writes. A file carrying a higher one is read as absent
+/// and never overwritten — `gpui_store`'s `schemaVersion` rule.
+const DOCUMENT_SCHEMA_VERSION: u32 = 1;
+
+/// The block under the source's own key names (`AutoSupportSettings` in
+/// `src/supports/autoSupport/settings.ts`), every key present.
+fn settings_to_value(settings: &AutoSupportSettings) -> Value {
+    json!({
+        "enabled": settings.enabled,
+        "minIslandAreaMm2": settings.min_island_area_mm2,
+        "tipInfluenceRadiusMm": settings.tip_influence_radius_mm,
+        "prioritizeIntersection": settings.prioritize_intersection,
+        "maxAttachmentsPerTrunk": settings.max_attachments_per_trunk,
+        "areaPerSupportMm2": settings.area_per_support_mm2,
+        "gridAreaThresholdMm2": settings.grid_area_threshold_mm2,
+        "overhangSelfSupportAngleDeg": settings.overhang_self_support_angle_deg,
+        "sizeScale": settings.size_scale,
+        "flatDensityBoost": settings.flat_density_boost,
+        "slopeRelaxFactor": settings.slope_relax_factor,
+        "suctionAreaExponent": settings.suction_area_exponent,
+        "coverageTargetPercent": settings.coverage_target_percent,
+        "sizingPreset": settings.sizing_preset.id(),
+        "leafFanRadiusMm": settings.leaf_fan_radius_mm,
+        "leafFanMaxAngleDeg": settings.leaf_fan_max_angle_deg,
+        "tipContactMarginScale": settings.tip_contact_margin_scale,
+        "memberHostShaftRatio": settings.member_host_shaft_ratio,
+        "modelScaleEnabled": settings.model_scale_enabled,
+        "modelSizeFactorCap": settings.model_size_factor_cap,
+        "modelLoadFactorCap": settings.model_load_factor_cap,
+        "heightFactorCap": settings.height_factor_cap,
+        "debugSupportOriginColors": settings.debug_support_origin_colors,
+        "debugSkipAutoBracing": settings.debug_skip_auto_bracing,
+        "stabilizationEnabled": settings.stabilization_enabled,
+        "minimaReinforcementEnabled": settings.minima_reinforcement_enabled,
+    })
+}
+
+/// The inverse, with every missing or mistyped key taking
+/// `AutoSupportSettings::default()`'s value. `sizingPreset` is an open id in the
+/// source; this slice models the three factory bands, so a value that does not
+/// name one falls back to the default band rather than failing the load.
+fn settings_from_value(value: &Value) -> AutoSupportSettings {
+    let defaults = AutoSupportSettings::default();
+    let number = |key: &str, fallback: f32| {
+        value
+            .get(key)
+            .and_then(Value::as_f64)
+            .map(|stored| stored as f32)
+            .filter(|stored| stored.is_finite())
+            .unwrap_or(fallback)
+    };
+    let flag = |key: &str, fallback: bool| {
+        value
+            .get(key)
+            .and_then(Value::as_bool)
+            .unwrap_or(fallback)
+    };
+    AutoSupportSettings {
+        enabled: flag("enabled", defaults.enabled),
+        min_island_area_mm2: number("minIslandAreaMm2", defaults.min_island_area_mm2),
+        tip_influence_radius_mm: number(
+            "tipInfluenceRadiusMm",
+            defaults.tip_influence_radius_mm,
+        ),
+        prioritize_intersection: flag("prioritizeIntersection", defaults.prioritize_intersection),
+        max_attachments_per_trunk: number(
+            "maxAttachmentsPerTrunk",
+            defaults.max_attachments_per_trunk,
+        ),
+        area_per_support_mm2: number("areaPerSupportMm2", defaults.area_per_support_mm2),
+        grid_area_threshold_mm2: number(
+            "gridAreaThresholdMm2",
+            defaults.grid_area_threshold_mm2,
+        ),
+        overhang_self_support_angle_deg: number(
+            "overhangSelfSupportAngleDeg",
+            defaults.overhang_self_support_angle_deg,
+        ),
+        size_scale: number("sizeScale", defaults.size_scale),
+        flat_density_boost: number("flatDensityBoost", defaults.flat_density_boost),
+        slope_relax_factor: number("slopeRelaxFactor", defaults.slope_relax_factor),
+        suction_area_exponent: number("suctionAreaExponent", defaults.suction_area_exponent),
+        coverage_target_percent: number(
+            "coverageTargetPercent",
+            defaults.coverage_target_percent,
+        ),
+        sizing_preset: value
+            .get("sizingPreset")
+            .and_then(Value::as_str)
+            .and_then(SizingTier::from_id)
+            .unwrap_or(defaults.sizing_preset),
+        leaf_fan_radius_mm: number("leafFanRadiusMm", defaults.leaf_fan_radius_mm),
+        leaf_fan_max_angle_deg: number("leafFanMaxAngleDeg", defaults.leaf_fan_max_angle_deg),
+        tip_contact_margin_scale: number(
+            "tipContactMarginScale",
+            defaults.tip_contact_margin_scale,
+        ),
+        member_host_shaft_ratio: number("memberHostShaftRatio", defaults.member_host_shaft_ratio),
+        model_scale_enabled: flag("modelScaleEnabled", defaults.model_scale_enabled),
+        model_size_factor_cap: number("modelSizeFactorCap", defaults.model_size_factor_cap),
+        model_load_factor_cap: number("modelLoadFactorCap", defaults.model_load_factor_cap),
+        height_factor_cap: number("heightFactorCap", defaults.height_factor_cap),
+        debug_support_origin_colors: flag(
+            "debugSupportOriginColors",
+            defaults.debug_support_origin_colors,
+        ),
+        debug_skip_auto_bracing: flag("debugSkipAutoBracing", defaults.debug_skip_auto_bracing),
+        stabilization_enabled: flag("stabilizationEnabled", defaults.stabilization_enabled),
+        minima_reinforcement_enabled: flag(
+            "minimaReinforcementEnabled",
+            defaults.minima_reinforcement_enabled,
+        ),
+    }
+}
+
+/// One stored record. `builtIn` is written for round-tripping, but a stored
+/// built-in record's identity is never adopted on load.
+fn preset_to_value(preset: &Preset) -> Value {
+    json!({
+        "id": preset.id.to_string(),
+        "name": preset.name.to_string(),
+        "builtIn": preset.built_in,
+        "settings": settings_to_value(&preset.settings),
+    })
+}
+
+/// The whole document, in the source's order: the collection, the selection, the
+/// live block and the Auto-Lift flag.
+fn document_to_value(state: &DialogState) -> Value {
+    json!({
+        "schemaVersion": DOCUMENT_SCHEMA_VERSION,
+        "activePresetId": state.active.as_ref().map(|id| id.to_string()),
+        "autoLift": state.auto_lift,
+        "live": settings_to_value(&state.live),
+        "presets": state.presets.iter().map(preset_to_value).collect::<Vec<_>>(),
+    })
+}
+
+/// The data directory `settings.json` lives in, or `None` when the platform has
+/// none — the collection then lives for the session only.
+fn store_root() -> Option<PathBuf> {
+    gpui_store::Store::open()
+        .ok()
+        .map(|store| store.root().to_path_buf())
+}
+
+fn document_path(root: &Path) -> PathBuf {
+    root.join(DOCUMENT_FILE)
+}
+
+/// Read the document, moving an unreadable one aside instead of overwriting it
+/// (`gpui_store::file`'s quarantine rule). A newer `schemaVersion` reads as
+/// absent and makes every later write a no-op.
+///
+/// Returns the document and whether it is read-only.
+fn read_document(root: &Path) -> (Option<Value>, bool) {
+    let path = document_path(root);
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return (None, false);
+    };
+    let Ok(value) = serde_json::from_str::<Value>(&text) else {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_secs())
+            .unwrap_or(0);
+        for attempt in 0..100 {
+            let suffix = if attempt == 0 {
+                format!("{DOCUMENT_FILE}.corrupt-{stamp}")
+            } else {
+                format!("{DOCUMENT_FILE}.corrupt-{stamp}-{attempt}")
+            };
+            let target = root.join(suffix);
+            if target.exists() {
+                continue;
+            }
+            let _ = std::fs::rename(&path, target);
+            break;
+        }
+        return (None, false);
+    };
+    let version = value
+        .get("schemaVersion")
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as u32;
+    if version > DOCUMENT_SCHEMA_VERSION {
+        return (None, true);
+    }
+    (Some(value), false)
+}
+
+/// `<file>.tmp`, then a rename over the target: a crash leaves either the old
+/// document or the new one, never a half-written one.
+fn write_document(root: &Path, value: &Value) {
+    if std::fs::create_dir_all(root).is_err() {
+        return;
+    }
+    let path = document_path(root);
+    let temp = root.join(format!("{DOCUMENT_FILE}.tmp"));
+    let Ok(mut text) = serde_json::to_string_pretty(value) else {
+        return;
+    };
+    text.push('\n');
+    if std::fs::write(&temp, text).is_err() {
+        return;
+    }
+    if std::fs::rename(&temp, &path).is_err() {
+        let _ = std::fs::remove_file(&temp);
+    }
+}
+
 // ── Dialog state ────────────────────────────────────────────────────────────
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -825,6 +1070,18 @@ struct DialogState {
     active: Option<SharedString>,
     preset_menu_open: bool,
     sizing_menu_open: bool,
+    /// The Auto Supports panel's own preset dropdown (`AutoSupportPresetSelect`).
+    /// Kept beside the dialog's so the panel's row is state the shell already
+    /// has; it is view state and is not persisted.
+    row_menu_open: bool,
+    /// The Auto-Lift flag the panel's button reads (`AutoSupportPresetRow`'s
+    /// `autoLift`). The source keeps it per model; see PORT DEVIATION 13.
+    auto_lift: bool,
+    /// The store's data directory. `None` when the platform has none: the
+    /// collection then lives for the session and nothing is persisted.
+    root: Option<PathBuf>,
+    /// A document written by a newer build: read, but never overwritten.
+    read_only: bool,
     /// The store-backed diagnostics: they apply the moment they are flipped.
     origin_colors: bool,
     skip_auto_bracing: bool,
@@ -839,6 +1096,9 @@ struct DialogState {
 }
 
 impl Default for DialogState {
+    /// The in-memory defaults: `createDefaultAutoSupportSettings()`, the three
+    /// factory records and nothing selected. [`DialogState::load`] is what the
+    /// process actually starts with.
     fn default() -> Self {
         let live = AutoSupportSettings::default();
         Self {
@@ -848,8 +1108,12 @@ impl Default for DialogState {
             active: None,
             preset_menu_open: false,
             sizing_menu_open: false,
-            origin_colors: false,
-            skip_auto_bracing: false,
+            row_menu_open: false,
+            auto_lift: false,
+            root: None,
+            read_only: false,
+            origin_colors: live.debug_support_origin_colors,
+            skip_auto_bracing: live.debug_skip_auto_bracing,
             debug_simple_render: false,
             debug_mode: false,
             pending_delete: false,
@@ -861,6 +1125,115 @@ impl Default for DialogState {
 }
 
 impl DialogState {
+    /// `readStoredState` over the persisted document: the factory records are
+    /// code, a stored built-in adopts only the block saved over it, and the
+    /// user's own records keep their stored order. `activePresetId` is honoured
+    /// only when it still names a record — the source never infers a selection
+    /// from the live block.
+    fn load() -> Self {
+        let root = store_root();
+        let (document, read_only) = match root.as_deref() {
+            Some(root) => read_document(root),
+            None => (None, false),
+        };
+
+        let mut presets = built_in_presets();
+        let mut active = None;
+        let mut auto_lift = false;
+        let mut live = AutoSupportSettings::default();
+
+        if let Some(document) = document.as_ref() {
+            if let Some(stored) = document.get("presets").and_then(Value::as_array) {
+                for record in stored {
+                    let Some(id) = record.get("id").and_then(Value::as_str) else {
+                        continue;
+                    };
+                    if let Some(factory) = presets.iter_mut().find(|preset| preset.id == id) {
+                        if let Some(settings) = record.get("settings") {
+                            factory.settings = settings_from_value(settings);
+                        }
+                        continue;
+                    }
+                    if presets.iter().any(|preset| preset.id == id) {
+                        continue;
+                    }
+                    let name = record
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|name| !name.is_empty())
+                        .unwrap_or(DEFAULT_PRESET_NAME);
+                    let settings = match record.get("settings") {
+                        Some(settings) => settings_from_value(settings),
+                        None => AutoSupportSettings::default(),
+                    };
+                    presets.push(Preset {
+                        id: id.into(),
+                        name: name.into(),
+                        built_in: false,
+                        settings,
+                    });
+                }
+            }
+
+            active = document
+                .get("activePresetId")
+                .and_then(Value::as_str)
+                .filter(|id| presets.iter().any(|preset| preset.id == *id))
+                .map(SharedString::from);
+            if let Some(stored_live) = document.get("live") {
+                live = settings_from_value(stored_live);
+            }
+            auto_lift = document
+                .get("autoLift")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+        }
+
+        // A new record's id must not collide with one the document already
+        // holds: `next_custom` continues past the highest `asp-<n>` seen.
+        let next_custom = presets
+            .iter()
+            .filter_map(|preset| preset.id.strip_prefix("asp-"))
+            .filter_map(|suffix| suffix.parse::<u32>().ok())
+            .max()
+            .unwrap_or(0);
+
+        Self {
+            draft: live,
+            live,
+            presets,
+            active,
+            preset_menu_open: false,
+            sizing_menu_open: false,
+            row_menu_open: false,
+            auto_lift,
+            root,
+            read_only,
+            origin_colors: live.debug_support_origin_colors,
+            skip_auto_bracing: live.debug_skip_auto_bracing,
+            debug_simple_render: false,
+            debug_mode: false,
+            pending_delete: false,
+            name_dialog: None,
+            saved: false,
+            next_custom,
+        }
+    }
+
+    /// Write the collection, the selection, the live block and the Auto-Lift
+    /// flag. Every domain mutation calls this; a menu or a dialog opening does
+    /// not, because those are not stored.
+    fn persist(&self) {
+        if self.read_only {
+            return;
+        }
+        let Some(root) = self.root.as_deref() else {
+            return;
+        };
+        write_document(root, &document_to_value(self));
+    }
+
     fn active_preset(&self) -> Option<&Preset> {
         let active = self.active.as_ref()?;
         self.presets.iter().find(|preset| preset.id == *active)

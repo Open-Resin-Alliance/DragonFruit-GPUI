@@ -10,6 +10,10 @@ publish = false
 
 [workspace]
 members = ["crates/*"]
+# `gpui-backend` needs the lumen plugin submodule (`plugins/lumen`) through
+# dragonfruit-slicing-engine; keep it out of the members list so a checkout
+# without that submodule still builds the app.
+exclude = ["backend"]
 
 [dependencies]
 gpui = { package = "bite-gpui", version = "1.25", default-features = false, features = ["platform"] }

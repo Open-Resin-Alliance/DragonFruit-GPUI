@@ -101,21 +101,28 @@
 //!     `Rename` / `Export` / `Import` are still inert (no text entry, no Tauri
 //!     file bridge), and the selector's `New preset…` footer entry does not
 //!     exist.
-//! 19a. The source locks every policy field while a built-in is active
-//!     (`presetLocked`). That lock is reproduced; `Duplicate` is the escape, as
-//!     at the source, and it is what makes an edit persistable.
+//! 19a. The source locks every policy field while a record whose own
+//!     `isBuiltIn` is set is active (`presetLocked`, `AutoSupportPanel.tsx:125`).
+//!     That lock is reproduced from the record's flag — every factory record
+//!     ships `isBuiltIn: false` (`presets.ts:146-153,210-217,239-246`), so a
+//!     fresh profile is fully interactive — and `Duplicate` is the escape for a
+//!     record that does set it.
 //! 20. No `AutoSupportSizingTierField` in this panel: the sizing band it edits
 //!     lives in the record's `settings.autoSupport.sizingPreset`, which the
 //!     dialog's own tier field (not ported here) reads.
 //! 21. `overhangSelfSupportAngleDeg` is wired to `DragonFruit::support_angle`,
-//!     the value `stl::overhang_points` classifies with. The panel's other knobs
-//!     live in the active record: nothing in the app consumes them yet, and
-//!     `DragonFruit::support_density` (a 0.05–1.0 count multiplier) is a
-//!     different quantity from `areaPerSupportMm2`, so it is not bound here.
-//! 22. Save merges the draft into the active custom record's
-//!     `settings.autoSupport` and writes the document; a staged edit that is
-//!     never saved is dropped, where the source also persists the live settings
-//!     continuously.
+//!     the value `stl::overhang_points` classifies with; the panel's other knobs
+//!     live in the live auto-support block: nothing in the app consumes them yet,
+//!     and `DragonFruit::support_density` (a 0.05–1.0 count multiplier) is a
+//!     different quantity from `areaPerSupportMm2`, so it is not bound here. The
+//!     angle follows an edit, `Reset` and `Save` — never a preset selection.
+//! 22. Selecting a preset preserves the live block (`setActivePreset`:
+//!     `presets.ts:683-693`), so it changes neither a knob nor `support_angle`.
+//!     `Save` acknowledges the live block and does not write it into the record's
+//!     `settings.autoSupport` (`savePreset` restores the record's own block,
+//!     `presets.ts:723-731`). The live block is still memory-only in this slice:
+//!     persisting it is the Auto Support module's own job
+//!     (`autoSupportPresets.ts`'s `writeStoredState`), which is not ported.
 //!
 //! ## Hollowing — `HollowingPanel.tsx`
 //!

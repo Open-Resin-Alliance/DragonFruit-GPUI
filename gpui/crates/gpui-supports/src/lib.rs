@@ -30,12 +30,19 @@
 //!   fills [`SupportBatches`] with the same primitives those recipes push. A
 //!   curved (bezier) shaft is decoded as its straight chord: the port has no
 //!   tube generator yet (see the truncation note above).
+//! - **[`generate`] places auto-support contacts.** The run's first stage,
+//!   ported from `src/supports/autoSupport/` and the backend's overhang
+//!   classifier: [`generate::place`] turns a mesh into the contact points
+//!   (`position`, `normal`, support type) the placement engine will carry to
+//!   the plate.
 
+pub mod generate;
 pub mod instance;
 pub mod mesh;
 pub mod parse;
 pub mod primitives;
 
+pub use generate::{Contact, ContactSupportType, MeshTriangles, SupportSettings, place};
 pub use instance::{DiskInstance, NodeInstance, ShaftInstance, SupportBatches};
 pub use mesh::{SupportMesh, SupportNode, SupportShaft};
 pub use parse::{ParseError, parse};

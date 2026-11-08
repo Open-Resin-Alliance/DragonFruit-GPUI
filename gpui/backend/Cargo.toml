@@ -1,0 +1,35 @@
+[package]
+name = "gpui-backend"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Tauri-free command surface for DragonFruit's GPUI desktop app: the operations the Tauri shell exposed over IPC, as plain Rust."
+publish = false
+
+# A package with no ancestor workspace manifest is its own workspace, so this
+# crate checks standalone from `gpui/crates/gpui-backend` and joins the GPUI
+# workspace unchanged once `gpui/Cargo.toml` lists its members.
+[dependencies]
+# The engines. Every operation below is an adapter over one of these; nothing in
+# this crate re-implements an algorithm.
+dragonfruit-ao-gpu = { path = "../../../rust/dragonfruit-ao-gpu" }
+dragonfruit-islands = { path = "../../../rust/dragonfruit-islands" }
+dragonfruit-mesh-core = { path = "../../../rust/dragonfruit-mesh-core" }
+dragonfruit-mesh-repair = { path = "../../../rust/dragonfruit-mesh-repair", features = ["manifold"] }
+dragonfruit-organic-cut = { path = "../../../rust/dragonfruit-organic-cut", features = ["manifold"] }
+dragonfruit-plugin-package = { path = "../../../rust/dragonfruit-plugin-package" }
+dragonfruit-rtsp-relay = { path = "../../../rust/dragonfruit-rtsp-relay" }
+dragonfruit-slicing-engine = { path = "../../../rust/dragonfruit-slicing-engine" }
+
+base64 = "0.22"
+bytemuck = "1"
+flate2 = "1"
+log = "0.4"
+rayon = "1.10"
+# `blocking` because every entry point in this crate is synchronous — see the
+# crate docs on why the Tauri `async` wrappers are not carried over.
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+url = "2"
+zip = { version = "9.0.5", default-features = false, features = ["deflate"] }
