@@ -299,8 +299,8 @@ fn arrow(
     );
 }
 
-/// `GizmoRotation`: the bright 90° arc, the faint 180° back arc, and the
-/// double-cone diamond handle, all in the ring's own plane.
+/// `GizmoRotation`: the bright 90° arc, the faint remainder of the circle, and
+/// the double-cone diamond handle, all in the ring's own plane.
 ///
 /// The handle and the bright arc ride the camera's azimuth within the ring
 /// (`getCameraAlignedAngle`), so the readable quarter of the ring is always the
@@ -370,13 +370,13 @@ fn ring(
     );
 
     // `handleScale * 1.08` while the handle is hovered or held. The handle sits
-    // on the ring's own radius even while the active arc grows by 1.02.
+    // on the ring's own radius even while the active arc grows by 1.02, and its
+    // anchor is [`View::ring_handle`] — the same point the pick sphere uses.
     let highlight = if hovered == Some(handle) || held { 1.08 } else { 1.0 };
     let diamond = RING_DIAMOND_RADIUS * scale * highlight;
     let (u, v) = axis.ring_basis();
-    let radial = u * angle.cos() + v * angle.sin();
     let tangent = -u * angle.sin() + v * angle.cos();
-    let center = view.center + radial * (RING_MAJOR_RADIUS * scale);
+    let center = view.ring_handle(axis);
 
     let primary = if dimmed {
         linear(DIMMED)

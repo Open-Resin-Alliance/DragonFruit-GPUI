@@ -6,21 +6,20 @@
 //! hit when the pointer is within its own pixel threshold. Pixel thresholds are
 //! what make a handle as easy to grab at 20mm as at 200mm, because the handles
 //! themselves are drawn the same size on screen at both.
+//!
+//! The `GizmoRotation` arc is *not* one of those targets, exactly as in the
+//! source: only the double-cone diamond carries a pointer handler and a
+//! registered pick mesh, so a rotation starts and hovers on the diamond. The
+//! ring itself is decoration — a full circle of it is a much easier thing to hit
+//! by accident than to grab on purpose, especially where it crosses the arrows.
 
 use glam::Vec2;
 
 use super::constants::{
-    ARROW_PICK_RADIUS, CENTER_PICK_PX, RING_TUBE_RADIUS, SCALE_HEXAGON_RADIUS,
+    ARROW_PICK_RADIUS, CENTER_PICK_PX, DIAMOND_PICK_RADIUS, SCALE_HEXAGON_RADIUS,
 };
-use super::layout::{distance_to_segment, View};
+use super::layout::View;
 use super::types::{Axis, Handle};
-
-/// A ring is a 0.016-unit tube; a pick radius three times the drawn thickness is
-/// still under 3px, so the band is never below 6px — an edge-on ring stays
-/// grabbable, and the whole circumference answers rather than only the diamond.
-fn ring_pick_px(pixels_per_unit: f32) -> f32 {
-    (RING_TUBE_RADIUS * 3.0 * pixels_per_unit).max(6.0)
-}
 
 /// `GizmoScale`'s proxy box is `scaleHexagonRadius * 2.3` across; half of that
 /// is the distance from its centre to its face, which is the sensible pixel
@@ -31,7 +30,7 @@ fn scale_pick_px(pixels_per_unit: f32) -> f32 {
 
 /// The handle under `pointer`, or `None` when the pointer is off the gizmo.
 ///
-/// Ties are resolved by distance, so where an arrow crosses its own ring the
+/// Ties are resolved by distance, so where a diamond overlaps an arrow the
 /// nearer one wins. The centre nub is tested too: it is an opaque disc in front
 /// of everything else, exactly as the source's disc and pick sphere are.
 pub fn pick(view: &View<'_>, pointer: Vec2) -> Option<Handle> {
@@ -75,26 +74,17 @@ pub fn pick(view: &View<'_>, pointer: Vec2) -> Option<Handle> {
             );
         }
 
-        // Rotation rings: distance to the projected circle, sampled as a
-        // polyline. The source picks only the diamond handle; the whole
-        // circumference is a far larger and steadier target, and each ring is
-        // its own plane so the three do not compete except where they cross.
-        let ring_threshold = ring_pick_px(pixels_per_unit);
-        const RING_SEGMENTS: usize = 48;
-        let ring: Vec<Vec2> = (0..RING_SEGMENTS)
-            .filter_map(|index| {
-                let angle = index as f32 / RING_SEGMENTS as f32 * std::f32::consts::TAU;
-                view.project(view.ring_point(axis, angle))
-            })
-            .collect();
-        if ring.len() > 1 {
-            let mut nearest = f32::INFINITY;
-            for index in 0..ring.len() {
-                let a = ring[index];
-                let b = ring[(index + 1) % ring.len()];
-                nearest = nearest.min(distance_to_segment(pointer, a, b));
-            }
-            consider(Handle::Ring(axis), nearest, ring_threshold);
+        // Rotation rings: the source's pick sphere sits on the diamond, radius
+        // `max(0.18, ringDiamondRadius · 0.9)`. At the reference viewport that is
+        // ~19px around a diamond drawn ~9px across, so it is already generous;
+        // one pixel is added because the drawn cones run ~2px past the sphere at
+        // each tip.
+        if let Some(diamond_px) = view.project(view.ring_handle(axis)) {
+            consider(
+                Handle::Ring(axis),
+                pointer.distance(diamond_px),
+                DIAMOND_PICK_RADIUS * pixels_per_unit + 1.0,
+            );
         }
     }
 

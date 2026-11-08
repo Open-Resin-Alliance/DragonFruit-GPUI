@@ -33,6 +33,10 @@ gpui-store = { path = "crates/gpui-store" }
 # crate that owns it), so the support studio's preset editor reads and writes it
 # here. Already in the workspace graph through `gpui-store`.
 serde_json = "1"
+# `features::printer_picker` models the source's `PrinterPreset` with derives so
+# the built-in catalogue JSON keeps its shape; already in the graph through
+# `gpui-store`.
+serde = { version = "1", features = ["derive"] }
 gpui-voxl = { path = "crates/gpui-voxl" }
 gpui-locale = { path = "crates/gpui-locale" }
 resvg = "0.45"

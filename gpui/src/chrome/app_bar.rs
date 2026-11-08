@@ -53,10 +53,15 @@
 //!     the window width each frame and uses the 130px steady-state threshold.
 //!     The right group is capped at `max-w-[430px]`, so the trigger's own width
 //!     never feeds the measurement the asymmetry compensates for.
-//! 15. `activePrinterProfile` / the profile store — [`PrinterBadge`] defaults to
-//!     the source's empty-store rendering (`Printer` / `Select printer`) with no
-//!     thumbnail and no fleet, so the printer button opens profile settings
-//!     instead of the quick menu, exactly as `hasTopbarFleetUnits` does.
+//! 15. `activePrinterProfile` / the profile store — [`PrinterBadge`] comes from
+//!     `features::printer_picker` (`badge()`). A fresh port has no printer, so
+//!     it renders the source's empty-store label (`Printer` / `Select printer`)
+//!     with no thumbnail and no fleet; the button therefore never takes the
+//!     quick-menu branch, exactly as `hasTopbarFleetUnits` does. Where the
+//!     source opens `ProfileSettingsModal`'s printer tab
+//!     (`requestOpenProfileSettings('printer')`), the port opens the printer
+//!     picker (`features::printer_picker`): the Printer Library and the
+//!     `Initial Setup` variant dialog.
 //! 16. `hasPrintingData` — passed in by the parent. The GPUI app has no slicing
 //!     pipeline yet, so Printing stays locked as it does in a fresh source
 //!     session.
@@ -233,7 +238,6 @@ pub struct AppBarState {
     pub view_type: MeshShaderType,
     /// `overhangViewActive`.
     pub overhang: bool,
-    pub show_settings: bool,
     pub show_printer_menu: bool,
     pub show_app_menu: bool,
     /// The `SelectDropdown` menu under the view-mode trigger.
@@ -256,7 +260,6 @@ impl Default for AppBarState {
             has_printing_data: false,
             view_type: MeshShaderType::SoftClay,
             overhang: false,
-            show_settings: false,
             show_printer_menu: false,
             show_app_menu: false,
             show_view_menu: false,
@@ -297,9 +300,6 @@ pub fn app_bar(state: AppBarState, entity: WeakEntity<DragonFruit>) -> impl Into
         has_printing_data,
         view_type,
         overhang,
-        // Write-only: the bar opens the modal, the parent renders it, and the
-        // source's `isSettingsOpen` never styles the trigger.
-        show_settings: _,
         show_printer_menu,
         show_app_menu,
         show_view_menu,
@@ -407,8 +407,13 @@ pub fn app_bar(state: AppBarState, entity: WeakEntity<DragonFruit>) -> impl Into
                 if actions_disabled {
                     return;
                 }
-                // `hasTopbarFleetUnits` decides between the quick menu and the
-                // printer profile settings.
+                // `hasTopbarFleetUnits` decides between the fleet quick menu
+                // and the printer profile flow; the profile flow is the
+                // printer picker (`Printer Library` + `Initial Setup`), which
+                // is what `requestOpenProfileSettings('printer')` leads to.
+                if !has_fleet_units {
+                    crate::features::printer_picker::begin();
+                }
                 printer_entity
                     .update(cx, |this, cx| {
                         if has_fleet_units {
@@ -419,7 +424,7 @@ pub fn app_bar(state: AppBarState, entity: WeakEntity<DragonFruit>) -> impl Into
                             this.show_printer_menu = false;
                             this.show_app_menu = false;
                             this.show_view_menu = false;
-                            this.show_settings = true;
+                            this.show_printer_picker = true;
                         }
                         cx.notify();
                     })

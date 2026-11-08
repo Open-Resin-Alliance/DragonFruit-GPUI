@@ -92,6 +92,14 @@ pub const ARROW_SHAFT_RADIUS: f32 = 0.02;
 /// The arrow's invisible pick sphere: `Math.max(0.14, headRadius * 2.35)`.
 pub const ARROW_PICK_RADIUS: f32 = 0.564;
 
+/// The ring's one pick target: `GizmoRotation`'s
+/// `getCachedSphereGeometry(Math.max(0.18, ringDiamondRadius * 0.9 * handleScale), 16, 16)`
+/// — a sphere on the diamond, `max(0.18, 0.48 · 0.9) = 0.432` gizmo units in
+/// radius. The arc is decoration: it carries no pointer handler and is not
+/// registered with the picking system, so neither a click nor a hover lands on
+/// it in the source.
+pub const DIAMOND_PICK_RADIUS: f32 = 0.432;
+
 /// `getCachedRotationArcGeometry`'s tube radius, passed as a literal to
 /// `TubeGeometry(curve, segments, 0.016, 16, false)`. `GIZMO_SIZES.ringMinorRadius`
 /// (0.12) is declared but never used by the source's ring — a tube seven times
@@ -113,10 +121,13 @@ pub const RING_FRONT_ARC: f32 = std::f32::consts::FRAC_PI_2;
 /// Solving the same composite in linear space — `a·C + (1−a)·D` for
 /// `C ≈ 1.0` (a saturated ring colour) over the plate/grid, `D ≈ 0.03` linear
 /// (encoded 0.2) — gives `a = 0.11`, which reproduces the source's encoded
-/// result exactly on that backdrop (0.407 vs 0.408). Over a mid-tone model the
-/// same 0.11 comes out a notch fainter than three (encoded 0.62 vs 0.67), which
-/// is the side to err on for an element this quiet.
-pub const RING_BACK_ALPHA: f32 = 0.11;
+/// result exactly on that backdrop (0.407 vs 0.408).
+///
+/// The value in use is **half that, `0.055`: deliberately fainter than parity at
+/// the user's request** — they compared the running app against the TS widget,
+/// found the converted arc still too present, and asked for it halved. Do not
+/// "correct" this back to 0.11; it is an eye-tuned value, not a derived one.
+pub const RING_BACK_ALPHA: f32 = 0.055;
 
 /// Every handle material in the source is `transparent` with its own opacity.
 /// These are the `baseOpacity` values the components use, carried per vertex so

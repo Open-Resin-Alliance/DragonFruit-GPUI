@@ -120,8 +120,15 @@ impl<'a> View<'a> {
             + axis.unit() * (self.axis_sign(axis) * SCALE_LINE_LENGTH * self.scale())
     }
 
-    /// A point on the rotation ring at `angle`, in the ring's local frame.
-    pub fn ring_point(&self, axis: Axis, angle: f32) -> Vec3 {
+    /// The diamond's centre in world space: `RING_MAJOR_RADIUS` out from the
+    /// gizmo along the ring-local angle the camera sits at
+    /// (`getCameraAlignedAngle`), which is where the source parks the
+    /// double-arrow handle and centres the bright arc.
+    ///
+    /// Both the drawn diamond and its pick sphere come from here, so the handle
+    /// cannot drift away from the thing the pointer hits.
+    pub fn ring_handle(&self, axis: Axis) -> Vec3 {
+        let angle = self.camera_aligned_angle(axis);
         let (u, v) = axis.ring_basis();
         self.center + (u * angle.cos() + v * angle.sin()) * (RING_MAJOR_RADIUS * self.scale())
     }
@@ -209,16 +216,4 @@ pub fn axis_param(origin: Vec3, direction: Vec3, ray_origin: Vec3, ray_direction
         return axis_dot_axis_to_ray;
     }
     ((axis_dot_ray * ray_dot_axis_to_ray) - axis_dot_axis_to_ray) / denom
-}
-
-/// Distance from a point to a line segment, in whatever space the points live
-/// in — used in pixels for handle picking.
-pub fn distance_to_segment(point: Vec2, a: Vec2, b: Vec2) -> f32 {
-    let ab = b - a;
-    let length_sq = ab.length_squared();
-    if length_sq < 1e-6 {
-        return point.distance(a);
-    }
-    let t = ((point - a).dot(ab) / length_sq).clamp(0.0, 1.0);
-    point.distance(a + ab * t)
 }

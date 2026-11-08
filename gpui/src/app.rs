@@ -260,6 +260,10 @@ pub(crate) struct DragonFruit {
     pub(crate) focus: FocusHandle,
     pub(crate) focused: bool,
     pub(crate) show_printer_menu: bool,
+    /// The bar's "Select printer" surface (`features::printer_picker`): the
+    /// Printer Library, then the `Initial Setup` variant dialog. Set by
+    /// `printer-menu-button` when the profile has no fleet units to quick-switch.
+    pub(crate) show_printer_picker: bool,
     /// The Auto Supports settings dialog (`AutoSupportSettingsBody`). Set by the
     /// Auto panel's header gear (`tool_panels::supports_settings_gear`) and
     /// cleared by Escape or by the dialog's own close tile.
@@ -389,6 +393,7 @@ impl DragonFruit {
             focus: cx.focus_handle(),
             focused: false,
             show_printer_menu: false,
+            show_printer_picker: false,
             show_support_settings: false,
             show_app_menu: false,
             show_view_menu: false,
@@ -1526,6 +1531,15 @@ impl Render for DragonFruit {
                                 this.show_printer_menu = false;
                                 changed = true;
                             }
+                            // The printer picker (`useEscapeToClose` in both
+                            // the library and `PrinterVariantPickerModal`):
+                            // the nested setup dialog closes first.
+                            if this.show_printer_picker {
+                                if !features::printer_picker::escape() {
+                                    this.show_printer_picker = false;
+                                }
+                                changed = true;
+                            }
                             if this.show_view_menu {
                                 this.show_view_menu = false;
                                 changed = true;
@@ -1561,8 +1575,9 @@ impl Render for DragonFruit {
 
                         // The settings dialog owns the keyboard while open; GPUI
                         // has no "focused input" query to test instead. The Auto
-                        // Supports settings dialog takes the same hold.
-                        if this.show_settings || this.show_support_settings {
+                        // Supports settings dialog and the printer picker take
+                        // the same hold.
+                        if this.show_settings || this.show_support_settings || this.show_printer_picker {
                             return;
                         }
 
@@ -1870,14 +1885,13 @@ impl Render for DragonFruit {
                     has_printing_data: false,
                     view_type: self.view_type,
                     overhang: self.overhang_view,
-                    show_settings,
                     show_printer_menu: self.show_printer_menu,
                     show_app_menu: self.show_app_menu,
                     show_view_menu: self.show_view_menu,
                     logo: self.logo.clone(),
                     window_width: self.window_width,
                     maximized: window.is_maximized(),
-                    printer: Default::default(),
+                    printer: features::printer_picker::badge(),
                     monitor: Default::default(),
                 },
                 entity.clone(),
@@ -1889,6 +1903,12 @@ impl Render for DragonFruit {
             ))
             .child(features::auto_support_settings::auto_support_settings(
                 self.show_support_settings,
+                entity.clone(),
+            ))
+            // The bar's printer picker: the library sheet and the nested
+            // `Initial Setup` dialog, painted over the settings modal.
+            .child(features::printer_picker::printer_picker(
+                self.show_printer_picker,
                 entity.clone(),
             ))
             .when(self.toast.is_some(), |this| {
