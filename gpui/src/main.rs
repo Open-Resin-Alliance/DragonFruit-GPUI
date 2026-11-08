@@ -120,6 +120,7 @@
 mod app;
 mod chrome;
 mod features;
+mod gizmo;
 mod panels;
 mod widgets;
 

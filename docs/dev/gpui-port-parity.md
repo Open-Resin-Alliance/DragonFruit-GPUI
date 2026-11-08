@@ -61,6 +61,7 @@ provenance are in `gpui/assets/icons/LICENSE`.
 | `panel_content` | `controls/ModelManagerPanel.tsx`, `controls/AutoSupportPanel.tsx`, `ExportPanelStack.tsx`, `PrintingPanelStack.tsx` | ported |
 | `support_panels` | `IslandsPanel`, `IslandListCard`, `AutoSupportSettingsBody`, `HollowingPanel`, `HolePunchPanel` | ported |
 | `transform_panel`, `arrange_panels`, `smoothing_panel`, `organic_cut_panel` | the matching Prepare panels | ported |
+| `gizmo` | `components/gizmo/TransformGizmo.tsx`, `ScreenSpaceGizmo.tsx`, `move/`, `rotate/`, `scale/`, `constants.ts`, `rotationDialModel.ts` | ported: constant screen size, arrows/centre/ring/hexagons, screen-space picking. Z ring only (the entity rotates about Z), uniform scale only, no protractor dial, no handle lighting — see the module's port-deviations block |
 | `prepare_stack` | `PreparePanelStack.tsx` | ported |
 | `plate_widgets` | `PlateNameLabel.tsx`, `PlateSideButtons.tsx` | ported |
 | `empty_scene` | `EmptySceneState.tsx`, `ModelStatsCard.tsx` | ported |

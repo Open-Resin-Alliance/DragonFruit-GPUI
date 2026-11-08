@@ -60,7 +60,7 @@ pub(super) fn notify(entity: &WeakEntity<DragonFruit>, cx: &mut App) {
 /// `ui::tooltip` is not reused because its popover is `left-0 right-0` on the
 /// trigger; these triggers are icon tiles and narrow buttons, and the label
 /// would wrap into their width.
-pub(super) fn hint(
+pub(crate) fn hint(
     id: impl Into<SharedString>,
     trigger: impl IntoElement,
     text: impl Into<SharedString>,

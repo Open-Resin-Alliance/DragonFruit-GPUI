@@ -39,9 +39,11 @@
 //! 8. `!h-8` on the preset trigger is not applied — the trigger keeps
 //!    `ui::select_dropdown`'s 36px `.ui-input`; the strip and footer buttons do
 //!    carry their own heights.
-//! 9. The Support Studio preset collection is the three factory tiers
-//!    (`detail` / `structure` / `anchor`): the app has no Support Studio store,
-//!    so a custom tier cannot appear in the Sizing Tier select.
+//! 9.  The Sizing Tier select lists the factory bands from
+//!     `support-presets.json` (`detail` / `structure` / `anchor`), so it cannot
+//!     drift from the Support Studio's own strip. `SizingTier` is a closed set,
+//!     so a custom record is not listed: storing one needs `sizingPreset` to
+//!     become an open id, which the auto-support block does not model yet.
 //! 10. `Debug Mode` and `Simplified` are the dialog's own flags; the panel's
 //!     debug report (`AutoSupportRunDiagnostics`) is not ported.
 
@@ -701,6 +703,16 @@ pub enum SizingTier {
 
 impl SizingTier {
     const ALL: [SizingTier; 3] = [Self::Detail, Self::Structure, Self::Anchor];
+
+    /// The stored value for a studio record id. A record the three factory
+    /// bands do not name cannot be stored in the block yet — `sizingPreset`
+    /// would have to be an open id — so it resolves to `None` and the caller
+    /// keeps the current band.
+    fn from_id(id: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|tier| tier.id() == id)
+    }
 
     fn id(self) -> &'static str {
         match self {
@@ -1375,11 +1387,18 @@ fn sizing_tier_field(
     entity: &WeakEntity<DragonFruit>,
 ) -> AnyElement {
     let hint = if locked { LOCKED_PROFILE_HINT } else { SIZING_TIER_HINT };
-    let options: Vec<SelectOption> = SizingTier::ALL
+    // The collection is `support-presets.json`'s, so the menu cannot drift from
+    // the Support Studio's own strip. Only the three factory bands are
+    // representable (`SizingTier`); a custom record is not listed until
+    // `sizingPreset` becomes an open id.
+    let tiers: Vec<(String, String)> = crate::features::support_panels::studio_presets::preset_rows()
+        .into_iter()
+        .filter(|(_, _, built_in)| *built_in)
+        .map(|(id, name, _)| (id, name))
+        .collect();
+    let options: Vec<SelectOption> = tiers
         .iter()
-        .map(|tier| {
-            SelectOption::new(tier.id(), tier.label()).with_right("Built-in")
-        })
+        .map(|(id, name)| SelectOption::new(id.clone(), name.clone()).with_right("Built-in"))
         .collect();
 
     let toggle_entity = entity.clone();
@@ -1390,7 +1409,10 @@ fn sizing_tier_field(
     };
     let select_entity = entity.clone();
     let on_select = move |index: usize, _: &mut Window, cx: &mut App| {
-        let Some(tier) = SizingTier::ALL.get(index).copied() else {
+        let Some((id, _)) = tiers.get(index) else {
+            return;
+        };
+        let Some(tier) = SizingTier::from_id(id) else {
             return;
         };
         edit_and_notify(&select_entity, cx, |state| {
@@ -2019,9 +2041,11 @@ fn dialog_header(entity: &WeakEntity<DragonFruit>) -> Div {
 
 /// The Auto Supports settings dialog.
 ///
-/// `open` mirrors the shell's `show_support_settings` (the panel's gear sets it);
-/// the close tile and the backdrop clear it. Escape is the shell's key listener,
-/// which does not know this flag yet.
+/// `open` mirrors the shell's `show_support_settings`. The Auto Supports panel's
+/// header gear ([`crate::features::tool_panels::supports_settings_gear`], chained
+/// onto that panel's `PanelDef` with `header_right`) sets the flag; the close
+/// tile and the backdrop clear it. Escape is the shell's key listener, which
+/// must clear the same flag beside the other dialogs it closes.
 pub fn auto_support_settings(open: bool, entity: WeakEntity<DragonFruit>) -> impl IntoElement {
     if !open {
         return div();

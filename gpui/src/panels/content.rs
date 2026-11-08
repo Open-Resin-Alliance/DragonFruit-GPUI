@@ -597,7 +597,8 @@ fn models_context_menu() -> Div {
 /// and the load-a-model hint.
 ///
 /// PORT GAP: the header's settings gear has no destination — the full-screen
-/// `AutoSupportSettingsBody` dialog is not ported — so it is not rendered.
+/// `AutoSupportSettingsBody` is opened by the panel's header gear
+/// (`tool_panels::supports_settings_gear`), which sets `show_support_settings`.
 pub fn supports_body(count: usize, entity: WeakEntity<DragonFruit>) -> impl IntoElement {
     let generate_entity = entity.clone();
 

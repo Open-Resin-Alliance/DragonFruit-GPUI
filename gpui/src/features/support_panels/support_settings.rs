@@ -1,8 +1,39 @@
+//! Support settings — the Support Studio's panel, `SupportSidebar.tsx`'s preset
+//! strip over the auto-support knobs `AutoSupportSettingsBody.tsx` renders
+//! (Density & Sizing, Stability) and its Delete / Reset / Save footer.
+//!
+//! The values are not the panel's: they come from `support-presets.json`
+//! ([`super::studio_presets`]), so the strip keeps the record the user selected
+//! across a restart and every control shows that record's numbers instead of a
+//! default of its own.
+//!
+//! # PORT DEVIATIONS
+//!
+//! 1. Only the sections this panel is named for are ported: the preset strip,
+//!    Density & Sizing, Stability and the footer. Detection, Distribution,
+//!    Post-processing, Diagnostics and Advanced (calibration) are not rendered.
+//! 2. The strip lists the studio collection (`detail` / `structure` / `anchor`
+//!    plus the user's records, from `presets.ts`) rather than the auto-support
+//!    quick-select (`light` / `medium` / `heavy`) the first port put here: the
+//!    store crate models the studio collection, and that is what the Support
+//!    Studio's strip shows.
+//! 3. A built-in profile locks every knob (`presetLocked`), and `Save` stays
+//!    disabled until `Duplicate` has made a custom record — the source's way out
+//!    of a locked profile, and the point where an edit becomes persistable.
+//! 4. `Rename` / `Export` / `Import` are inert: the source's rename needs a text
+//!    field and export/import need the Tauri file bridge, neither of which this
+//!    slice has. Their buttons render the source's enabled recipe.
+//! 5. `overhangSelfSupportAngleDeg` is wired to `DragonFruit::support_angle`, the
+//!    value `stl::overhang_points` classifies with; the other knobs have no
+//!    consumer until W6 ports `autoSupport`.
+//! 6. No text entry: `labeled_number_field`'s chevrons are the way to change a
+//!    value. No range inputs, no CSS transitions and no `tabular-nums`.
+
 use gpui::{
-    Div, FontWeight, IntoElement, SharedString, WeakEntity, div, prelude::*, px, rgb, rgba,
+    App, Div, FontWeight, IntoElement, SharedString, WeakEntity, div, prelude::*, px, rgb, rgba,
 };
 
-use gpui_core::support_state::{NO_ACTIVE_PRESET_LABEL, field_help_text, *};
+use gpui_core::support_state::{NO_ACTIVE_PRESET_LABEL, field_help_text};
 use gpui_core::theme::*;
 use gpui_ui::panel_fields::with_alpha;
 use gpui_ui::ui::{
@@ -13,85 +44,61 @@ use super::shared::{
     accent_secondary_action_bg, accent_secondary_action_border, field_help,
     labeled_number_field, normalize_value, notify,
 };
+use super::studio_presets;
 use crate::DragonFruit;
 
 // ---------------------------------------------------------------------------
 // Support settings — `AutoSupportSettingsBody.tsx`
 // ---------------------------------------------------------------------------
-/// Duplicate / Export / Import have no store behind them.
-pub fn support_settings_body(
-    state: &SupportSettingsState,
-    entity: WeakEntity<DragonFruit>,
-) -> impl IntoElement {
-    let model = state.model();
-    let draft = model.draft;
-    let preset = model.preset;
-    let modified = model.modified;
-    let preset_menu_open = model.preset_menu_open;
-    drop(model);
-    // Every preset this shell ships is a built-in, so selecting one locks the
-    // policy fields: an edit made here could never be kept.
-    let locked = preset.is_some();
+pub fn support_settings_body(entity: WeakEntity<DragonFruit>) -> impl IntoElement {
+    let rows = studio_presets::preset_rows();
+    let active_id = studio_presets::active_id();
+    let draft = studio_presets::values();
+    let modified = studio_presets::is_modified();
+    let preset_menu_open = studio_presets::menu_open();
+    let active_name =
+        studio_presets::active_name().unwrap_or_else(|| NO_ACTIVE_PRESET_LABEL.to_string());
+    // Every factory profile is locked: an edit made here could never be kept.
+    let locked = studio_presets::is_built_in(&active_id);
 
     // ── Preset strip ────────────────────────────────────────────────────────
-    let trigger_label: SharedString = match preset {
-        Some(preset) => {
-            if modified {
-                format!("{} *", preset.label()).into()
-            } else {
-                preset.label().into()
-            }
-        }
-        None => NO_ACTIVE_PRESET_LABEL.into(),
+    let trigger_label: SharedString = if modified {
+        format!("{active_name} *").into()
+    } else {
+        active_name.clone().into()
     };
-    let options: Vec<SelectOption> = [AutoSupportPreset::Light, AutoSupportPreset::Medium, AutoSupportPreset::Heavy]
-        .into_iter()
-        .map(|preset| {
-            let mut option = SelectOption::new(preset.id(), preset.label());
-            option.right = Some(format!("{} · Built-in", preset.tier()).into());
+    let options: Vec<SelectOption> = rows
+        .iter()
+        .map(|(id, name, built_in)| {
+            let mut option = SelectOption::new(id.clone(), name.clone());
+            option.right = Some(if *built_in { "Built-in" } else { "Custom" }.into());
             option
         })
         .collect();
-    let current_id: SharedString = match preset {
-        Some(preset) => preset.id().into(),
-        None => "".into(),
-    };
 
-    let menu_state = state.clone();
-    let menu_entity = entity.clone();
     let toggle_entity = entity.clone();
-    let toggle_state = state.clone();
+    let select_entity = entity.clone();
     let selector = select_dropdown(
         "support-preset-select",
         &options,
-        current_id.as_ref(),
+        active_id.as_str(),
         preset_menu_open,
         false,
         move |_, _, cx| {
-            let open = toggle_state.model().preset_menu_open;
-            toggle_state.model_mut().preset_menu_open = !open;
+            studio_presets::toggle_menu();
             notify(&toggle_entity, cx);
         },
         move |index, _, cx| {
-            let preset = [AutoSupportPreset::Light, AutoSupportPreset::Medium, AutoSupportPreset::Heavy]
-                .get(index)
-                .copied();
-            let mut model = menu_state.model_mut();
-            model.preset_menu_open = false;
-            if let Some(preset) = preset {
-                let values = preset.values();
-                model.draft = values;
-                model.baseline = values;
-                model.preset = Some(preset);
-                model.modified = false;
+            if let Some((id, _, _)) = rows.get(index) {
+                studio_presets::select(id);
+                apply_angle(&select_entity, cx);
             }
-            drop(model);
-            notify(&menu_entity, cx);
+            notify(&select_entity, cx);
         },
     );
     // The trigger's label is the preset name; `select_dropdown` derives it from
-    // the option list, so an unselected state needs its own label.
-    let selector = if preset.is_none() {
+    // the option list, so the modified marker needs its own overlay.
+    let selector = if modified {
         div()
             .relative()
             .w_full()
@@ -126,38 +133,22 @@ pub fn support_settings_body(
         }
         ui::button_with(id, label, &spec)
     };
-    let has_preset = preset.is_some();
     // `Duplicate` is the way out of a locked built-in: the copy is a custom
     // profile, so the policy fields unlock and Save can write it.
-    let duplicate_state = state.clone();
     let duplicate_entity = entity.clone();
-    let mut duplicate_spec = ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Sm)
-        .padding_x(10.0)
-        .padding_y(0.0, 0.0)
-        .gap(4.0)
-        .icon(
-            "copy",
-            14.0,
-            if has_preset {
-                TEXT_STRONG
-            } else {
-                TEXT_MUTED
-            },
-        );
-    if !has_preset {
-        duplicate_spec = duplicate_spec.disabled();
-    }
-    let mut duplicate = ui::button_with("support-preset-duplicate", "Duplicate", &duplicate_spec);
-    if has_preset {
-        duplicate = duplicate.on_click(move |_, _, cx| {
-            let mut model = duplicate_state.model_mut();
-            model.preset = None;
-            model.baseline = model.draft;
-            model.modified = false;
-            drop(model);
-            notify(&duplicate_entity, cx);
-        });
-    }
+    let duplicate = ui::button_with(
+        "support-preset-duplicate",
+        "Duplicate",
+        &ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Sm)
+            .padding_x(10.0)
+            .padding_y(0.0, 0.0)
+            .gap(4.0)
+            .icon("copy", 14.0, TEXT_STRONG),
+    )
+    .on_click(move |_, _, cx| {
+        studio_presets::duplicate_active();
+        notify(&duplicate_entity, cx);
+    });
     let strip = div()
         .rounded(px(ROUNDED_XL))
         .border_1()
@@ -175,7 +166,7 @@ pub fn support_settings_body(
                 .child(div().flex_1().min_w(px(0.0)).child(selector))
                 .child(strip_button("support-preset-rename", "pen-line", "Rename", false))
                 .child(duplicate)
-                .child(strip_button("support-preset-export", "download", "Export", has_preset))
+                .child(strip_button("support-preset-export", "download", "Export", true))
                 .child(strip_button("support-preset-import", "upload", "Import", true)),
         );
 
@@ -195,13 +186,11 @@ pub fn support_settings_body(
                 30.0,
                 locked,
                 {
-                    let state = state.clone();
                     let entity = entity.clone();
                     move |next, _, cx| {
-                        let mut model = state.model_mut();
-                        model.draft.area_per_support_mm2 = normalize_value(next, 1.0, 30.0, 0.5);
-                        model.modified = true;
-                        drop(model);
+                        studio_presets::set_value(|values| {
+                            values.area_per_support_mm2 = normalize_value(next, 1.0, 30.0, 0.5);
+                        });
                         notify(&entity, cx);
                     }
                 },
@@ -217,13 +206,11 @@ pub fn support_settings_body(
                 2.0,
                 locked,
                 {
-                    let state = state.clone();
                     let entity = entity.clone();
                     move |next, _, cx| {
-                        let mut model = state.model_mut();
-                        model.draft.size_scale = normalize_value(next, 0.5, 2.0, 0.05);
-                        model.modified = true;
-                        drop(model);
+                        studio_presets::set_value(|values| {
+                            values.size_scale = normalize_value(next, 0.5, 2.0, 0.05);
+                        });
                         notify(&entity, cx);
                     }
                 },
@@ -239,13 +226,12 @@ pub fn support_settings_body(
                 200.0,
                 locked,
                 {
-                    let state = state.clone();
                     let entity = entity.clone();
                     move |next, _, cx| {
-                        let mut model = state.model_mut();
-                        model.draft.grid_area_threshold_mm2 = normalize_value(next, 5.0, 200.0, 5.0);
-                        model.modified = true;
-                        drop(model);
+                        studio_presets::set_value(|values| {
+                            values.grid_area_threshold_mm2 =
+                                normalize_value(next, 5.0, 200.0, 5.0);
+                        });
                         notify(&entity, cx);
                     }
                 },
@@ -261,13 +247,11 @@ pub fn support_settings_body(
                 1.0,
                 locked,
                 {
-                    let state = state.clone();
                     let entity = entity.clone();
                     move |next, _, cx| {
-                        let mut model = state.model_mut();
-                        model.draft.flat_density_boost = normalize_value(next, 0.5, 1.0, 0.05);
-                        model.modified = true;
-                        drop(model);
+                        studio_presets::set_value(|values| {
+                            values.flat_density_boost = normalize_value(next, 0.5, 1.0, 0.05);
+                        });
                         notify(&entity, cx);
                     }
                 },
@@ -283,13 +267,11 @@ pub fn support_settings_body(
                 2.0,
                 locked,
                 {
-                    let state = state.clone();
                     let entity = entity.clone();
                     move |next, _, cx| {
-                        let mut model = state.model_mut();
-                        model.draft.slope_relax_factor = normalize_value(next, 1.0, 2.0, 0.1);
-                        model.modified = true;
-                        drop(model);
+                        studio_presets::set_value(|values| {
+                            values.slope_relax_factor = normalize_value(next, 1.0, 2.0, 0.1);
+                        });
                         notify(&entity, cx);
                     }
                 },
@@ -305,13 +287,12 @@ pub fn support_settings_body(
                 0.4,
                 locked,
                 {
-                    let state = state.clone();
                     let entity = entity.clone();
                     move |next, _, cx| {
-                        let mut model = state.model_mut();
-                        model.draft.suction_area_exponent = normalize_value(next, 0.0, 0.4, 0.05);
-                        model.modified = true;
-                        drop(model);
+                        studio_presets::set_value(|values| {
+                            values.suction_area_exponent =
+                                normalize_value(next, 0.0, 0.4, 0.05);
+                        });
                         notify(&entity, cx);
                     }
                 },
@@ -335,19 +316,15 @@ pub fn support_settings_body(
                 75.0,
                 locked,
                 {
-                    let state = state.clone();
                     let entity = entity.clone();
                     move |next, _, cx| {
-                        let angle = normalize_value(next, 20.0, 75.0, 5.0);
-                        state.model_mut().draft.self_support_angle_deg = angle;
-                        state.model_mut().modified = true;
+                        studio_presets::set_value(|values| {
+                            values.self_support_angle_deg =
+                                normalize_value(next, 20.0, 75.0, 5.0);
+                        });
                         // Wired: the app classifies overhangs with this value.
-                        entity
-                            .update(cx, |this, cx| {
-                                this.support_angle = angle;
-                                cx.notify();
-                            })
-                            .ok();
+                        apply_angle(&entity, cx);
+                        notify(&entity, cx);
                     }
                 },
             ),
@@ -362,13 +339,11 @@ pub fn support_settings_body(
                 draft.stabilization_enabled,
                 locked,
                 {
-                    let state = state.clone();
                     let entity = entity.clone();
                     move |next, _, cx| {
-                        let mut model = state.model_mut();
-                        model.draft.stabilization_enabled = next;
-                        model.modified = true;
-                        drop(model);
+                        studio_presets::set_value(|values| {
+                            values.stabilization_enabled = next;
+                        });
                         notify(&entity, cx);
                     }
                 },
@@ -384,13 +359,11 @@ pub fn support_settings_body(
                 draft.minima_reinforcement_enabled,
                 locked,
                 {
-                    let state = state.clone();
                     let entity = entity.clone();
                     move |next, _, cx| {
-                        let mut model = state.model_mut();
-                        model.draft.minima_reinforcement_enabled = next;
-                        model.modified = true;
-                        drop(model);
+                        studio_presets::set_value(|values| {
+                            values.minima_reinforcement_enabled = next;
+                        });
                         notify(&entity, cx);
                     }
                 },
@@ -401,58 +374,69 @@ pub fn support_settings_body(
     // ── Footer ──────────────────────────────────────────────────────────────
     // `Button variant="tinted-danger" size="md"`: the `.ui-button-tint-danger`
     // fill, with the trash glyph before the label.
-    let delete_spec = ButtonSpec::new(ButtonVariant::TintedDanger, ButtonSize::Md)
+    let delete_enabled = !locked;
+    let mut delete_spec = ButtonSpec::new(ButtonVariant::TintedDanger, ButtonSize::Md)
         .gap(6.0)
-        .icon("trash-2", 14.0, DANGER)
-        // `disabled={!activePreset || isBuiltIn}`: every preset here is a
-        // built-in, so Delete is always greyed.
-        .disabled();
+        .icon("trash-2", 14.0, DANGER);
+    if !delete_enabled {
+        delete_spec = delete_spec.disabled();
+    }
     let delete = ui::button_with("support-preset-delete", "Delete", &delete_spec);
+    let delete = if delete_enabled {
+        let delete_entity = entity.clone();
+        delete.on_click(move |_, _, cx| {
+            studio_presets::delete_active();
+            notify(&delete_entity, cx);
+        })
+    } else {
+        delete
+    };
 
-    let reset_state = state.clone();
+    let reset_state_enabled = modified;
     let reset_entity = entity.clone();
     let mut reset_spec = ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Md)
         .gap(6.0)
         .icon("rotate-ccw", 14.0, TEXT_STRONG);
-    if !modified {
+    if !reset_state_enabled {
         reset_spec = reset_spec.disabled();
     }
-    let mut reset = ui::button_with("support-preset-reset", "Reset", &reset_spec);
-    if modified {
-        reset = reset.on_click(move |_, _, cx| {
-            let mut model = reset_state.model_mut();
-            model.draft = model.baseline;
-            model.modified = false;
-            drop(model);
+    let reset = ui::button_with("support-preset-reset", "Reset", &reset_spec);
+    let reset = if reset_state_enabled {
+        reset.on_click(move |_, _, cx| {
+            studio_presets::reset();
+            apply_angle(&reset_entity, cx);
             notify(&reset_entity, cx);
-        });
-    }
+        })
+    } else {
+        reset
+    };
 
-    let save_state = state.clone();
     let save_entity = entity.clone();
     // `SAVE_STYLE`: the accent-secondary action token, filled; its inline
     // `style` also pins the hover fill.
-    let mut save_spec = ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Md)
-        .gap(6.0)
-        .fill(
-            accent_secondary_action_bg(),
-            accent_secondary_action_border(),
-            ACCENT_SECONDARY,
-        );
-    let save_enabled = modified && !has_preset;
-    if !save_enabled {
+    let mut save_spec = ButtonSpec::new(ButtonVariant::Secondary, ButtonSize::Md).gap(6.0);
+    let save_enabled = modified && !locked;
+    if save_enabled {
+        save_spec = save_spec
+            .fill(
+                accent_secondary_action_bg(),
+                accent_secondary_action_border(),
+                ACCENT_SECONDARY,
+            )
+            .icon("save", 14.0, ACCENT_SECONDARY);
+    } else {
         save_spec = save_spec.disabled();
     }
-    let mut save = ui::button_with("support-preset-save", "Save", &save_spec);
-    if save_enabled {
-        save = save.on_click(move |_, _, cx| {
-            let mut model = save_state.model_mut();
-            model.baseline = model.draft;
-            model.modified = false;
-            drop(model);
+    let save = ui::button_with("support-preset-save", "Save", &save_spec);
+    let save = if save_enabled {
+        save.on_click(move |_, _, cx| {
+            studio_presets::save_active();
+            apply_angle(&save_entity, cx);
             notify(&save_entity, cx);
-        });
-    }
+        })
+    } else {
+        save
+    };
 
     let footer = div()
         .flex()
@@ -483,6 +467,18 @@ pub fn support_settings_body(
                 .child(stability_card),
         )
         .child(footer)
+}
+
+/// The one knob the app consumes: `DragonFruit::support_angle` is what
+/// `stl::overhang_points` classifies with.
+fn apply_angle(entity: &WeakEntity<DragonFruit>, cx: &mut App) {
+    let angle = studio_presets::values().self_support_angle_deg;
+    entity
+        .update(cx, |this, cx| {
+            this.support_angle = angle;
+            cx.notify();
+        })
+        .ok();
 }
 
 /// A `FieldCard`: `rounded-xl border p-3` on `--surface-2`, the uppercase header,

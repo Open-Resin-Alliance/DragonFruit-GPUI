@@ -216,9 +216,14 @@ pub struct Viewport {
     supports_ptr: usize,
     model_uniform: wgpu::Buffer,
     model_bind: wgpu::BindGroup,
+    /// The transform gizmo: unlit, depth-test-always, drawn after the model so
+    /// no handle can hide behind it (the source's `depthTest: false`).
+    gizmo: wgpu::RenderPipeline,
     gizmo_buffer: wgpu::Buffer,
     gizmo_vertex_count: u32,
-    gizmo_origin: [f32; 3],
+    /// The vertices the buffer holds, so a frame the gizmo did not move pays no
+    /// rebuild — the mesh's and the supports' caching trick.
+    gizmo_vertices: Vec<[f32; 6]>,
 }
 
 impl Viewport {

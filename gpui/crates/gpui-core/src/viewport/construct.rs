@@ -753,6 +753,24 @@ impl Viewport {
             true,
             SAMPLE_COUNT,
         );
+        // The transform gizmo: the axes' unlit vertex-colour shader on triangles,
+        // with the depth test disabled and no depth write. That is exactly the
+        // source's `depthTest: false` / `depthWrite: false` on every handle
+        // material — a handle is never hidden behind the model.
+        let gizmo = pipeline(
+            device,
+            &uniform_pipeline_layout,
+            &axis_shader,
+            &[Some(axis_layout.clone())],
+            wgpu::PrimitiveTopology::TriangleList,
+            None,
+            false,
+            wgpu::CompareFunction::Always,
+            WgpuSurface::DEFAULT_FORMAT,
+            true,
+            true,
+            SAMPLE_COUNT,
+        );
         // Supports: one instanced pass per batch, `meshBasicMaterial`'s flat
         // colour. The three unit meshes are the source's instanced ones — a
         // 1×1 cylinder (radius 0.5, `y = -0.5..0.5`), a 1-radius sphere and a
@@ -1238,14 +1256,17 @@ impl Viewport {
             supports_ptr: 0,
             model_uniform,
             model_bind,
+            gizmo,
             gizmo_buffer: device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("viewport gizmo"),
+                // One vertex worth of room until the first frame fills it; the
+                // buffer is only ever read for `gizmo_vertex_count` vertices.
                 size: 24,
                 usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             }),
             gizmo_vertex_count: 0,
-            gizmo_origin: [f32::NAN; 3],
+            gizmo_vertices: Vec::new(),
         })
     }
 }

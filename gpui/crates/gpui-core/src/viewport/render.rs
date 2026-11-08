@@ -31,7 +31,7 @@ impl Viewport {
         layers: ViewLayers,
         model: glam::Mat4,
         clip_z: f32,
-        gizmo: Option<[f32; 3]>,
+        gizmo: Option<&[[f32; 6]]>,
         camera: &Camera,
         base_color: [f32; 3],
         width: u32,
@@ -229,39 +229,22 @@ impl Viewport {
                 },
             }),
         );
-        match gizmo {
-            Some(origin) if origin != self.gizmo_origin => {
-                self.gizmo_origin = origin;
-                let length = 25.0;
-                let axes = [
-                    ([1.0, 0.0, 0.0], [1.0, 0.05, 0.05]),
-                    ([0.0, 1.0, 0.0], [0.05, 1.0, 0.05]),
-                    ([0.0, 0.0, 1.0], [0.05, 0.2, 1.0]),
-                ];
-                let mut vertices = Vec::new();
-                for (dir, color) in axes {
-                    vertices.push([origin[0], origin[1], origin[2], color[0], color[1], color[2]]);
-                    vertices.push([
-                        origin[0] + dir[0] * length,
-                        origin[1] + dir[1] * length,
-                        origin[2] + dir[2] * length,
-                        color[0],
-                        color[1],
-                        color[2],
-                    ]);
-                }
+        // The caller builds the gizmo's triangles from the camera and the handle
+        // state, so the buffer is rebuilt only when they actually changed. The
+        // caller memoises the build itself; the compare here is the last line of
+        // defence against an upload every frame.
+        let gizmo_vertices = gizmo.unwrap_or_default();
+        if gizmo_vertices != self.gizmo_vertices.as_slice() {
+            self.gizmo_vertex_count = gizmo_vertices.len() as u32;
+            if !gizmo_vertices.is_empty() {
                 self.gizmo_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("viewport gizmo"),
-                    contents: bytemuck::cast_slice(&vertices),
+                    contents: bytemuck::cast_slice(gizmo_vertices),
                     usage: wgpu::BufferUsages::VERTEX,
                 });
-                self.gizmo_vertex_count = vertices.len() as u32;
             }
-            None => {
-                self.gizmo_origin = [f32::NAN; 3];
-                self.gizmo_vertex_count = 0;
-            }
-            _ => {}
+            self.gizmo_vertices.clear();
+            self.gizmo_vertices.extend_from_slice(gizmo_vertices);
         }
         // Supports upload only when the set itself changes; a frame that draws
         // the same `SupportBatches` reuses every buffer, exactly as the mesh
@@ -451,11 +434,6 @@ impl Viewport {
                     pass.draw(0..self.support_disk_count, 0..self.support_disk_instance_count);
                 }
             }
-            if self.gizmo_vertex_count > 0 {
-                pass.set_pipeline(&self.axis);
-                pass.set_vertex_buffer(0, self.gizmo_buffer.slice(..));
-                pass.draw(0..self.gizmo_vertex_count, 0..1);
-            }
             if let Some(mesh) = &self.mesh {
                 if !below_plate && mesh.footprint_vertex_count > 0 {
                     pass.set_pipeline(&self.footprint);
@@ -466,6 +444,15 @@ impl Viewport {
                 pass.set_bind_group(1, &self.model_bind, &[]);
                 pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
                 pass.draw(0..mesh.vertex_count, 0..1);
+            }
+            // The gizmo last, so its depth-test-always handles land on top of
+            // the model rather than being punched through by it. The source
+            // gives its handles `renderOrder: 1_000_000` and `depthTest: false`
+            // for the same reason.
+            if self.gizmo_vertex_count > 0 {
+                pass.set_pipeline(&self.gizmo);
+                pass.set_vertex_buffer(0, self.gizmo_buffer.slice(..));
+                pass.draw(0..self.gizmo_vertex_count, 0..1);
             }
         }
 

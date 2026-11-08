@@ -15,6 +15,7 @@ use gpui_wgpu::{ImportedTextureExt as _, WgpuRenderer};
 use viewport::Viewport;
 
 use crate::chrome::{app_bar, overlays, rail};
+use crate::gizmo;
 use crate::panels::empty_scene;
 use crate::{features, panels};
 
@@ -243,9 +244,9 @@ pub(crate) struct DragonFruit {
     pub(crate) focus: FocusHandle,
     pub(crate) focused: bool,
     pub(crate) show_printer_menu: bool,
-    /// Set by `panel_content`'s Auto Supports gear; the real dialog is not
-    /// ported, so nothing renders it.
-    #[allow(dead_code)]
+    /// The Auto Supports settings dialog (`AutoSupportSettingsBody`). Set by the
+    /// Auto panel's header gear (`tool_panels::supports_settings_gear`) and
+    /// cleared by Escape or by the dialog's own close tile.
     pub(crate) show_support_settings: bool,
     pub(crate) show_app_menu: bool,
     /// `TopBar`'s view-mode dropdown (`SelectDropdown` under the trigger).
@@ -282,6 +283,24 @@ pub(crate) struct DragonFruit {
     /// The dragged paths contain no supported extension
     /// (`isPrepareDragUnsupported`).
     pub(crate) drag_unsupported: bool,
+    /// The editor context menu's window-space position. Set by a right mouse-up
+    /// that did not travel (`EditorContextMenu`); `chrome::editor_menu` reads and
+    /// clears it, and a left press or Escape clears it here.
+    pub(crate) editor_menu: Option<(f32, f32)>,
+    /// The right button's press position, so its release can tell a menu click
+    /// from an orbit — a right drag is the camera.
+    right_press: Option<(f32, f32)>,
+    /// Whether the current right gesture travelled past the click slop at any
+    /// point. Set from the move handler, so an orbit that returns to where it
+    /// started still counts as an orbit.
+    right_dragged: bool,
+    /// The gizmo handle under the pointer (`TransformGizmo`'s `hoveredPart`).
+    pub(crate) gizmo_hover: Option<gizmo::Handle>,
+    /// The running gizmo gesture. A handle owns the pointer while this is set.
+    pub(crate) gizmo_drag: Option<gizmo::Drag>,
+    /// The gizmo's triangles, rebuilt only when the pose or the handle state
+    /// changes (`GeometryCache`).
+    gizmo_cache: Option<gizmo::GeometryCache>,
     pub(crate) toast: Option<Toast>,
     pub(crate) toast_seq: u64,
     /// The window scale factor is logged on the first frame.
@@ -369,6 +388,12 @@ impl DragonFruit {
             window_width: 0.0,
             drag_active: false,
             drag_unsupported: false,
+            editor_menu: None,
+            right_press: None,
+            right_dragged: false,
+            gizmo_hover: None,
+            gizmo_drag: None,
+            gizmo_cache: None,
             toast: None,
             toast_seq: 0,
             scale_logged: false,
@@ -598,6 +623,9 @@ impl DragonFruit {
         self.scene = None;
         *self.supports.borrow_mut() = None;
         self.selected.set(false);
+        self.gizmo_drag = None;
+        self.gizmo_hover = None;
+        self.editor_menu = None;
         self.num_layers = 0;
         self.layer = 0.0;
         self.lower_layer = 0.0;
@@ -610,6 +638,128 @@ impl DragonFruit {
             .borrow_mut()
             .home(glam::Vec3::new(0.0, 0.0, 110.0));
         self.save_session();
+    }
+
+    /// The entity's three transform fields as the gizmo's own value type.
+    fn gizmo_transform(&self) -> gizmo::Transform {
+        gizmo::Transform {
+            translate: glam::Vec3::from_array(self.translate),
+            rotate_z: self.rotate_z,
+            scale: self.scale,
+        }
+    }
+
+    /// Whether the gizmo answers the pointer.
+    ///
+    /// `SceneCanvas` mounts `UnifiedGizmo` in Prepare, in the Transform tool,
+    /// with an active model — and the source's `enabled` gate is what makes a
+    /// handle with nothing to transform impossible. The same three conditions
+    /// are the gate here, with the port's selection standing in for
+    /// `activeModelId`.
+    fn gizmo_enabled(&self) -> bool {
+        self.mode == Mode::Prepare
+            && self.active_tool == 1
+            && self.mesh.is_some()
+            && self.selected.get()
+    }
+
+    /// Where the gizmo sits: the model's own centre through the transform the
+    /// viewport draws with, or the position a rotation/scale drag locked at
+    /// press (`ScreenSpaceGizmo`'s `lockedDragPosition`).
+    fn gizmo_center(&self) -> Option<glam::Vec3> {
+        if !self.gizmo_enabled() {
+            return None;
+        }
+        if let Some(center) = self.gizmo_drag.as_ref().and_then(gizmo::Drag::locked_center) {
+            return Some(center);
+        }
+        let mesh = self.mesh.as_ref()?;
+        Some(self.gizmo_transform().matrix().transform_point3(mesh.center))
+    }
+
+    /// Start a gesture if `pointer` is over a handle. Returns whether the press
+    /// was consumed, so the caller knows not to start a model grab.
+    fn begin_gizmo_drag(
+        &mut self,
+        pointer: glam::Vec2,
+        width: f32,
+        height: f32,
+        camera: &camera::Camera,
+    ) -> bool {
+        let Some(center) = self.gizmo_center() else {
+            return false;
+        };
+        let view = gizmo::View::new(camera, width / height, glam::Vec2::new(width, height), center);
+        let Some(handle) = gizmo::pick(&view, pointer) else {
+            return false;
+        };
+        // The transform panel's `mesh_min_z`: the model's local underside.
+        let mesh_min_z = self
+            .mesh
+            .as_ref()
+            .map(|mesh| mesh.center.z - mesh.size[2] * 0.5);
+        let Some(drag) = gizmo::Drag::begin(
+            &view,
+            pointer,
+            handle,
+            self.gizmo_transform(),
+            mesh_min_z,
+        ) else {
+            return false;
+        };
+        self.gizmo_drag = Some(drag);
+        self.gizmo_hover = Some(handle);
+        true
+    }
+
+    /// Feed one pointer sample to the running gesture and write the result back
+    /// into the entity. Returns whether the transform changed.
+    fn update_gizmo_drag(
+        &mut self,
+        pointer: glam::Vec2,
+        width: f32,
+        height: f32,
+        camera: &camera::Camera,
+    ) -> bool {
+        let Some(drag) = self.gizmo_drag.as_mut() else {
+            return false;
+        };
+        let view = gizmo::View::new(
+            camera,
+            width / height,
+            glam::Vec2::new(width, height),
+            drag.anchor,
+        );
+        let Some(transform) = drag.update(&view, pointer) else {
+            return false;
+        };
+        self.translate = transform.translate.to_array();
+        self.rotate_z = transform.rotate_z;
+        self.scale = transform.scale;
+        true
+    }
+
+    /// Recompute the hovered handle for a pointer with no button down.
+    fn update_gizmo_hover(
+        &mut self,
+        pointer: glam::Vec2,
+        width: f32,
+        height: f32,
+        camera: &camera::Camera,
+    ) -> bool {
+        if self.gizmo_drag.is_some() {
+            return false;
+        }
+        let hovered = self.gizmo_center().and_then(|center| {
+            let view =
+                gizmo::View::new(camera, width / height, glam::Vec2::new(width, height), center);
+            gizmo::pick(&view, pointer)
+        });
+        if hovered == self.gizmo_hover {
+            return false;
+        }
+        self.gizmo_hover = hovered;
+        true
     }
 
     /// Raise a toast for `TOAST_DURATION_MS`, replacing the current one.
@@ -758,12 +908,29 @@ impl Render for DragonFruit {
         } else {
             f32::INFINITY
         };
-        let gizmo = if self.mode == Mode::Prepare && self.active_tool == 1 {
-            self.mesh
-                .as_ref()
-                .map(|mesh| model_matrix.transform_point3(mesh.center).to_array())
-        } else {
-            None
+        // The transform gizmo. Mounted exactly under `UnifiedGizmo`'s conditions:
+        // Prepare's Transform tool with a selected model — and drawn from the
+        // entity's own handle state, so hover and the running gesture are what
+        // the viewport sees.
+        let gizmo_center = self.gizmo_center();
+        let gizmo_draw = match gizmo_center {
+            Some(center) => {
+                let size = window.viewport_size();
+                let width = size.width.0.max(1.0);
+                let height = size.height.0.max(1.0);
+                let active = self.gizmo_drag.as_ref().map(|drag| drag.handle);
+                let camera = self.camera.borrow();
+                Some(gizmo::vertices(
+                    &mut self.gizmo_cache,
+                    &camera,
+                    width / height,
+                    glam::Vec2::new(width, height),
+                    center,
+                    self.gizmo_hover,
+                    active,
+                ))
+            }
+            None => None,
         };
         let show_layers = viewport::ViewLayers {
             grid: self.show_grid,
@@ -822,7 +989,7 @@ impl Render for DragonFruit {
                 show_layers,
                 model_matrix,
                 clip_z,
-                gizmo,
+                gizmo_draw.as_deref().map(|vertices| vertices.as_slice()),
                 &canvas_camera.borrow(),
                 base_color,
                 width,
@@ -858,13 +1025,22 @@ impl Render for DragonFruit {
             let last = last.clone();
             let camera = camera.clone();
             let camera_enabled = camera_enabled.clone();
-            move |event, _, _| {
+            let entity = entity.clone();
+            move |event, _, cx| {
                 if !camera_enabled.get() {
                     return;
                 }
                 drag.set(Some(MouseButton::Right));
                 camera.borrow_mut().set_dragging(true);
                 last.set((event.position.x.0, event.position.y.0));
+                // Remembered so the release can tell a context-menu click from
+                // an orbit: a right drag turns the camera and must not open one.
+                entity
+                    .update(cx, |this, _| {
+                        this.right_press = Some((event.position.x.0, event.position.y.0));
+                        this.right_dragged = false;
+                    })
+                    .ok();
             }
         })
         .on_mouse_down(MouseButton::Middle, {
@@ -882,21 +1058,51 @@ impl Render for DragonFruit {
         .on_mouse_up(MouseButton::Left, {
             let drag = drag.clone();
             let entity = entity.clone();
+            let sync_entity = entity.clone();
             move |_, _, cx| {
-                if drag.get() == Some(MouseButton::Left) {
-                    drag.set(None);
-                    entity.update(cx, |this, _| this.grab = None).ok();
+                if drag.get() != Some(MouseButton::Left) {
+                    return;
+                }
+                drag.set(None);
+                let gizmo_ended = entity
+                    .update(cx, |this, _| {
+                        let had_gizmo = this.gizmo_drag.take().is_some();
+                        this.grab = None;
+                        had_gizmo
+                    })
+                    .unwrap_or(false);
+                if gizmo_ended {
+                    // The gesture moved the entity under the transform panel's
+                    // store; push the final state back before the next frame.
+                    features::tool_panels::sync_from_entity(&sync_entity, cx);
                 }
             }
         })
         .on_mouse_up(MouseButton::Right, {
             let drag = drag.clone();
             let camera = camera.clone();
-            move |_, _, _| {
+            let entity = entity.clone();
+            move |event, _, cx| {
                 if drag.get() == Some(MouseButton::Right) {
                     drag.set(None);
                     camera.borrow_mut().set_dragging(false);
                 }
+                let position = (event.position.x.0, event.position.y.0);
+                entity
+                    .update(cx, |this, cx| {
+                        let pressed = this.right_press.take().is_some();
+                        let dragged = std::mem::replace(&mut this.right_dragged, false);
+                        if !pressed {
+                            return;
+                        }
+                        // A right button that travelled turned the camera; only
+                        // the ones that stayed put open the editor menu.
+                        if this.mesh.is_some() && !dragged {
+                            this.editor_menu = Some(position);
+                            cx.notify();
+                        }
+                    })
+                    .ok();
             }
         })
         .on_mouse_up(MouseButton::Middle, {
@@ -926,15 +1132,27 @@ impl Render for DragonFruit {
                         let size = window.viewport_size();
                         let width = size.width.0.max(1.0);
                         let height = size.height.0.max(1.0);
-                        let ndc_x = event.position.x.0 / width * 2.0 - 1.0;
-                        let ndc_y = 1.0 - event.position.y.0 / height * 2.0;
-                        let plane_hit = {
+                        let pointer = glam::Vec2::new(event.position.x.0, event.position.y.0);
+                        let ndc_x = pointer.x / width * 2.0 - 1.0;
+                        let ndc_y = 1.0 - pointer.y / height * 2.0;
+                        let plane = {
                             let camera = camera.borrow();
                             plane_hit(&camera, width / height, ndc_x, ndc_y, 0.0)
                         };
+                        let drag_camera = camera.clone();
                         entity
                             .update(cx, |this, cx| {
-                                if let (Some(now), Some((origin, base))) = (plane_hit, this.grab) {
+                                // A gizmo handle owns the left button while it is
+                                // held; the plate grab below only runs when no
+                                // gesture is live.
+                                if this.gizmo_drag.is_some() {
+                                    let camera = drag_camera.borrow();
+                                    if this.update_gizmo_drag(pointer, width, height, &camera) {
+                                        cx.notify();
+                                    }
+                                    return;
+                                }
+                                if let (Some(now), Some((origin, base))) = (plane, this.grab) {
                                     let delta = now - origin;
                                     this.translate[0] = base[0] + delta.x;
                                     this.translate[1] = base[1] + delta.y;
@@ -958,6 +1176,24 @@ impl Render for DragonFruit {
                         }
                         _ => {}
                     }
+                    drop(camera);
+                    if button == MouseButton::Right {
+                        // Once a right gesture has travelled, its release is an
+                        // orbit's, whatever the release position says.
+                        let pointer = (event.position.x.0, event.position.y.0);
+                        entity
+                            .update(cx, |this, _| {
+                                if let Some(press) = this.right_press {
+                                    let dx = pointer.0 - press.0;
+                                    let dy = pointer.1 - press.1;
+                                    let slop = gizmo::CLICK_SLOP_PX * gizmo::CLICK_SLOP_PX;
+                                    if dx * dx + dy * dy > slop {
+                                        this.right_dragged = true;
+                                    }
+                                }
+                            })
+                            .ok();
+                    }
                     entity.update(cx, |_, cx| cx.notify()).ok();
                     return;
                 }
@@ -979,6 +1215,22 @@ impl Render for DragonFruit {
                     hovered.set(hit);
                     entity.update(cx, |_, cx| cx.notify()).ok();
                 }
+                // The gizmo's hover is its own question: a handle sits in front
+                // of the mesh, so it has to highlight even where the pointer is
+                // not over the model at all.
+                let size = window.viewport_size();
+                let width = size.width.0.max(1.0);
+                let height = size.height.0.max(1.0);
+                let pointer = glam::Vec2::new(event.position.x.0, event.position.y.0);
+                let hover_camera = camera.clone();
+                entity
+                    .update(cx, |this, cx| {
+                        let camera = hover_camera.borrow();
+                        if this.update_gizmo_hover(pointer, width, height, &camera) {
+                            cx.notify();
+                        }
+                    })
+                    .ok();
             }
         })
         .on_mouse_down(MouseButton::Left, {
@@ -986,14 +1238,43 @@ impl Render for DragonFruit {
             let mesh = click_mesh.clone();
             let entity = entity.clone();
             move |event, window, cx| {
-                let Some(mesh) = mesh.as_ref() else {
-                    return;
-                };
                 let size = window.viewport_size();
                 let width = size.width.0.max(1.0);
                 let height = size.height.0.max(1.0);
-                let ndc_x = event.position.x.0 / width * 2.0 - 1.0;
-                let ndc_y = 1.0 - event.position.y.0 / height * 2.0;
+                let pointer = glam::Vec2::new(event.position.x.0, event.position.y.0);
+
+                // A left press anywhere closes the editor menu, and a press on a
+                // gizmo handle starts a transform gesture instead of a model
+                // grab. This has to run before the mesh raycast: the handles sit
+                // in front of the model, so the ray would otherwise select the
+                // mesh under a handle the user is aiming at.
+                let grab_camera = camera.clone();
+                let started = entity
+                    .update(cx, |this, cx| {
+                        let had_menu = this.editor_menu.take().is_some();
+                        let started = {
+                            let camera = grab_camera.borrow();
+                            this.begin_gizmo_drag(pointer, width, height, &camera)
+                        };
+                        if started || had_menu {
+                            cx.notify();
+                        }
+                        started
+                    })
+                    .unwrap_or(false);
+                if started {
+                    // Same drag cell as the camera: the move handler branches on
+                    // the button, so a gesture and an orbit cannot both be live.
+                    drag.set(Some(MouseButton::Left));
+                    last.set((pointer.x, pointer.y));
+                    return;
+                }
+
+                let Some(mesh) = mesh.as_ref() else {
+                    return;
+                };
+                let ndc_x = pointer.x / width * 2.0 - 1.0;
+                let ndc_y = 1.0 - pointer.y / height * 2.0;
                 let (origin, direction) = camera.borrow().ray(width / height, ndc_x, ndc_y);
                 let inverse = model_matrix.inverse();
                 let origin = inverse.transform_point3(origin);
@@ -1138,6 +1419,7 @@ impl Render for DragonFruit {
                 key_entity
                     .update(cx, |this, cx| {
                         let mut changed = false;
+                        let mut cancelled_gizmo = false;
 
                         // `useEscapeToClose`: Escape closes the dialogs and menus.
                         if key == "escape" {
@@ -1157,16 +1439,38 @@ impl Render for DragonFruit {
                                 this.show_view_menu = false;
                                 changed = true;
                             }
+                            // The Auto Supports settings dialog.
+                            if this.show_support_settings {
+                                this.show_support_settings = false;
+                                changed = true;
+                            }
+                            // The editor context menu, which is a canvas overlay
+                            // rather than a dropdown of the bar.
+                            if this.editor_menu.take().is_some() {
+                                changed = true;
+                            }
+                            // A gizmo gesture in flight: `cancelActiveGizmoDrag`
+                            // puts back what the gesture changed, so a cancelled
+                            // drag leaves the model where the grab found it.
+                            if let Some(drag) = this.gizmo_drag.take() {
+                                let base = drag.base();
+                                this.translate = base.translate.to_array();
+                                this.rotate_z = base.rotate_z;
+                                this.scale = base.scale;
+                                cancelled_gizmo = true;
+                                changed = true;
+                            }
                             if changed {
                                 cx.notify();
                             }
-                            return;
+                            return cancelled_gizmo;
                         }
 
                         // The settings dialog owns the keyboard while open; GPUI
-                        // has no "focused input" query to test instead.
-                        if this.show_settings {
-                            return;
+                        // has no "focused input" query to test instead. The Auto
+                        // Supports settings dialog takes the same hold.
+                        if this.show_settings || this.show_support_settings {
+                            return false;
                         }
 
                         // `CAMERA.TOGGLE_PROJECTION` (o).
@@ -1247,6 +1551,14 @@ impl Render for DragonFruit {
 
                         if changed {
                             cx.notify();
+                        }
+                        cancelled_gizmo
+                    })
+                    .map(|cancelled| {
+                        if cancelled {
+                            // The transform panel's store still holds the
+                            // mid-drag values; put the restored ones back.
+                            features::tool_panels::sync_from_entity(&key_entity, cx);
                         }
                     })
                     .ok();
@@ -1372,11 +1684,19 @@ impl Render for DragonFruit {
                             }),
                         };
                         if let Some(body) = body {
-                            defs.push(
-                                panels::list::PanelDef::new(id, title, kind)
-                                    .dock(panels::list::PanelDock::Right)
-                                    .content(body),
-                            );
+                            let def = panels::list::PanelDef::new(id, title, kind)
+                                .dock(panels::list::PanelDock::Right)
+                                .content(body);
+                            // The Auto Supports panel's header gear opens the
+                            // settings dialog; only that panel has one.
+                            let def = if self.support_panel == SupportPanel::Auto {
+                                def.header_right(
+                                    features::tool_panels::supports_settings_gear(entity.clone()),
+                                )
+                            } else {
+                                def
+                            };
+                            defs.push(def);
                         }
                     }
                     Mode::Export => defs.push(
@@ -1490,6 +1810,12 @@ impl Render for DragonFruit {
                 let toast = self.toast.clone().expect("checked above");
                 this.child(toast_view(toast))
             })
+            // `EditorContextMenu` is a portal in the source: the last child, so it
+            // paints over the panels, the bar and the modals.
+            .child(crate::chrome::editor_menu::editor_menu(
+                self.editor_menu,
+                entity.clone(),
+            ))
     }
 }
 

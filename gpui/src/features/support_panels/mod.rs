@@ -17,22 +17,28 @@
 //! * [`islands_body`] plus [`island_scan_settings_dialog`] — the dialog is a
 //!   window-level body, mounted while `IslandsModel::settings_open` is set.
 //! * [`island_list_body`].
-//! * [`support_settings_body`].
+//! * [`support_settings_body`], whose preset strip and knobs are backed by
+//!   [`studio_presets`] (`support-presets.json`).
 //! * [`hollowing_body`] and [`hole_punch_body`].
 //!
 //! Each takes a cheap, cloneable state handle (`IslandsPanelState`,
-//! `IslandListState`, `SupportSettingsState`, `HollowingState`,
-//! `HolePunchState` — all `Rc<RefCell<..>>`, like `panels::PanelLayout`) plus the
-//! app's `WeakEntity<DragonFruit>`, and returns the body only.
+//! `IslandListState`, `HollowingState`, `HolePunchState` — all
+//! `Rc<RefCell<..>>`, like `panels::PanelLayout`) plus the app's
+//! `WeakEntity<DragonFruit>`, and returns the body only. `support_settings_body`
+//! is the exception: its values live in `support-presets.json`
+//! ([`studio_presets`]), not in a per-panel handle.
 //!
 //! # PORT DEVIATIONS
 //!
 //! ## Shared
 //!
-//! 1. `panels.rs::card_header` has no right slot, so each panel's header control
-//!    (the Islands scan-settings gear, the Hollowing mode badge, the island
-//!    list's Hierarchy button) is rendered at the top of the body, right-aligned,
-//!    where the header slot would have put it.
+//! 1. A body cannot reach its own card header: `PanelDef::header_right` exists,
+//!    but the caller builds the `PanelDef`. Each body therefore renders its
+//!    header control (the Islands scan-settings gear, the Hollowing mode badge,
+//!    the island list's Hierarchy button) at the top of the body, right-aligned.
+//!    The one control that does use the real slot is the Auto Supports gear
+//!    ([`crate::features::tool_panels::supports_settings_gear`]), chained onto
+//!    that panel's `PanelDef` by `app.rs`.
 //! 2. GPUI has no CSS transitions, `backdrop-blur`, `letter-spacing`,
 //!    `tabular-nums` or `filter: grayscale()`: hover fills apply instantly, the
 //!    backdrop blur is omitted, tracked labels are not tracked, numerals are not
@@ -88,24 +94,28 @@
 //! 18. Only the sections this panel is named for are ported: the preset strip,
 //!     Density & Sizing, Stability and the footer. Detection, Distribution,
 //!     Post-processing, Diagnostics and Advanced (calibration) are not rendered.
-//! 19. No preset store: `Rename` / `Export` / `Import` are inert, and the
-//!     selector's `New preset…` footer entry does not exist. The three built-ins
-//!     (`Light` / `Medium` / `Heavy`) are selectable and copy their
-//!     `areaPerSupportMm2` into the draft, and `Duplicate` turns the selection
-//!     into a custom profile in the panel's own state — the source's way out of
-//!     a locked built-in — but the copy has no name and is not persisted.
+//! 19. The preset strip is the studio collection (`detail` / `structure` /
+//!     `anchor` plus the user's own) persisted in `support-presets.json` by
+//!     [`studio_presets`], which the app hydrates on the first render. Selecting
+//!     a record is written at once, so the selection survives a restart.
+//!     `Rename` / `Export` / `Import` are still inert (no text entry, no Tauri
+//!     file bridge), and the selector's `New preset…` footer entry does not
+//!     exist.
 //! 19a. The source locks every policy field while a built-in is active
 //!     (`presetLocked`). That lock is reproduced; `Duplicate` is the escape, as
-//!     at the source.
-//! 20. No `AutoSupportSizingTierField`: the sizing band reads Support Studio's
-//!     preset collection, which the app does not have.
+//!     at the source, and it is what makes an edit persistable.
+//! 20. No `AutoSupportSizingTierField` in this panel: the sizing band it edits
+//!     lives in the record's `settings.autoSupport.sizingPreset`, which the
+//!     dialog's own tier field (not ported here) reads.
 //! 21. `overhangSelfSupportAngleDeg` is wired to `DragonFruit::support_angle`,
-//!     the value `stl::overhang_points` classifies with. The dialog's other
-//!     knobs live in the draft: nothing in the app consumes them yet, and
+//!     the value `stl::overhang_points` classifies with. The panel's other knobs
+//!     live in the active record: nothing in the app consumes them yet, and
 //!     `DragonFruit::support_density` (a 0.05–1.0 count multiplier) is a
 //!     different quantity from `areaPerSupportMm2`, so it is not bound here.
-//! 22. Save writes the draft over the baseline and clears the modified marker;
-//!     there is no settings store to persist to.
+//! 22. Save merges the draft into the active custom record's
+//!     `settings.autoSupport` and writes the document; a staged edit that is
+//!     never saved is dropped, where the source also persists the live settings
+//!     continuously.
 //!
 //! ## Hollowing — `HollowingPanel.tsx`
 //!
@@ -126,11 +136,16 @@
 
 mod shared;
 
+/// [`shared::hint`], for the panel adapters outside this module tree (the Auto
+/// Supports header gear [`crate::features::tool_panels`] builds).
+pub(crate) use shared::hint;
+
 pub mod hollowing;
 pub mod hole_punch;
 pub mod island_list;
 pub mod island_scan_settings;
 pub mod islands;
+pub mod studio_presets;
 pub mod support_settings;
 
 pub use hollowing::*;

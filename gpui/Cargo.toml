@@ -25,6 +25,10 @@ dragonfruit-mesh-core = { path = "../rust/dragonfruit-mesh-core" }
 gpui-core = { path = "crates/gpui-core" }
 gpui-ui = { path = "crates/gpui-ui" }
 gpui-store = { path = "crates/gpui-store" }
+# `SupportPreset.settings` is raw JSON (`gpui-store` leaves the tree to the
+# crate that owns it), so the support studio's preset editor reads and writes it
+# here. Already in the workspace graph through `gpui-store`.
+serde_json = "1"
 gpui-voxl = { path = "crates/gpui-voxl" }
 gpui-locale = { path = "crates/gpui-locale" }
 resvg = "0.45"

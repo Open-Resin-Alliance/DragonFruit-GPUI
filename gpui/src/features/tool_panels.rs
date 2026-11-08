@@ -100,10 +100,16 @@
 //! * **History.** `on_position_commit`, `on_rotation_complete`,
 //!   `on_scale_commit` and `on_transform_commit` are no-ops: the port has no
 //!   undo history.
-//! * **Support settings.** `support_settings_body` keeps its own
-//!   `SupportSettingsState`; the source persists the values in the support
-//!   settings store. The body's own module note records the missing sections and
-//!   preset actions.
+//! * **Support settings.** `support_settings_body` reads and writes
+//!   `support-presets.json` through
+//!   [`crate::features::support_panels::studio_presets`], so the preset the panel
+//!   shows survives a restart; the body's own module note records the missing
+//!   sections and the inert Rename / Export / Import.
+//! * **Auto Supports gear.** `AutoSupportPanel.tsx` puts the settings gear in
+//!   the card header's `right` slot. GPUI's `PanelDef` has that slot, but the
+//!   caller builds the `PanelDef`, so the gear is exposed as
+//!   [`supports_settings_gear`] for `app.rs` to chain onto the `support-auto`
+//!   panel; it is not part of a body.
 //! * **Islands scan dialog.** `islands_body`'s gear opens
 //!   `IslandsModel::settings_open`; [`crate::features::support_panels::island_scan_settings_dialog`]
 //!   is a window-level dialog and is not mounted here (the shell owns dialogs).
@@ -122,8 +128,9 @@ use crate::features::arrange_panels::{
 use crate::features::organic_cut_panel::{LoopSummary, OrganicCutActions, OrganicCutView, organic_cut_body};
 use crate::panels::content;
 use crate::features::smoothing_panel::{SmoothingActions, SmoothingState, smoothing_body};
-use crate::features::support_panels::{islands_body, support_settings_body};
-use gpui_core::support_state::{IslandsPanelState, SupportSettingsState};
+use crate::features::support_panels::{self, islands_body, support_settings_body};
+use gpui_core::support_state::IslandsPanelState;
+use gpui_ui::ui::{self, IconTone};
 use crate::features::transform_panel::{TransformActions, TransformState, transform_body};
 use crate::{DragonFruit, Mode};
 
@@ -146,7 +153,6 @@ struct PanelStore {
     duplicate: DuplicateState,
     organic: OrganicCutView,
     islands: IslandsPanelState,
-    support_settings: SupportSettingsState,
     /// `scene.supports.length`, for `crate::panels::content::supports_body`.
     support_count: usize,
     /// `scene.geom !== null`.
@@ -174,7 +180,6 @@ impl Default for PanelStore {
             duplicate: DuplicateState::default(),
             organic: OrganicCutView::default(),
             islands: IslandsPanelState::new(),
-            support_settings: SupportSettingsState::new(),
             support_count: 0,
             has_mesh: false,
             mesh_min_z: 0.0,
@@ -284,13 +289,10 @@ fn support_panel(tool: usize, entity: WeakEntity<DragonFruit>) -> Option<AnyElem
             )
         }
         // `supportRailMode === 'manual'`.
-        1 => {
-            let state = with_store(|store| store.support_settings.clone());
-            (
-                "tool-panel-support-settings",
-                support_settings_body(&state, entity.clone()).into_any_element(),
-            )
-        }
+        1 => (
+            "tool-panel-support-settings",
+            support_settings_body(entity.clone()).into_any_element(),
+        ),
         // `supportRailMode === 'auto'`.
         2 => {
             let count = with_store(|store| store.support_count);
@@ -303,6 +305,50 @@ fn support_panel(tool: usize, entity: WeakEntity<DragonFruit>) -> Option<AnyElem
     };
 
     Some(wrap(id, body, entity, transform_dirty, notify_dirty))
+}
+
+/// `AutoSupportPanel.tsx`'s `CardHeader right`: the gear that opens the Auto
+/// Supports settings dialog (`IconButton className="!p-1.5"` around the 14px
+/// `Settings` glyph at `--text-muted`, tooltip "Auto-support settings").
+///
+/// The dialog itself is [`crate::features::auto_support_settings`], mounted by
+/// the shell while `DragonFruit::show_support_settings` is set; this gear is the
+/// only thing that sets it. `app.rs` chains it onto the `support-auto` panel:
+///
+/// ```ignore
+/// let def = panels::list::PanelDef::new(id, title, kind)
+///     .dock(panels::list::PanelDock::Right)
+///     .content(body);
+/// let def = if self.support_panel == SupportPanel::Auto {
+///     def.header_right(features::tool_panels::supports_settings_gear(entity.clone()))
+/// } else {
+///     def
+/// };
+/// defs.push(def);
+/// ```
+pub fn supports_settings_gear(entity: WeakEntity<DragonFruit>) -> impl IntoElement {
+    let click_entity = entity;
+    support_panels::hint(
+        "support-auto-settings-tip",
+        ui::icon_button_tile(
+            "support-auto-settings",
+            "settings",
+            14.0,
+            IconTone::Neutral,
+            // `!p-1.5`: 6px around the 14px glyph, the 28px tile the 32px
+            // header row leaves room for.
+            6.0,
+            move |_, _, cx| {
+                click_entity
+                    .update(cx, |this, cx| {
+                        this.show_support_settings = true;
+                        cx.notify();
+                    })
+                    .ok();
+            },
+        ),
+        "Auto-support settings",
+    )
 }
 
 /// Wrap a body so the store's recorded changes reach the entity.
