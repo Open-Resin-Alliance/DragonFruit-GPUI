@@ -365,6 +365,41 @@ fn fs_main(in: AxisOut) -> @location(0) vec4<f32> {
 }
 "#;
 
+/// The gizmo's vertex-colour shader with an alpha channel. The handles carry the
+/// source's own opacities per vertex (`0.55` for the centre disc, `0.72` for a
+/// ring at rest, `0.26` of that for the back arc, `0.15` for a handle dimmed by
+/// a running gesture), and the pipeline blends them over the model and the grid
+/// exactly where three.js blends its `transparent` `meshBasicMaterial`s.
+pub(super) const GIZMO_SHADER: &str = r#"
+struct Uniforms {
+    view_proj: mat4x4<f32>,
+    inv_proj: mat4x4<f32>,
+    camera_pos: vec3<f32>,
+    base_color: vec3<f32>,
+    resolution: vec2<f32>,
+    headlight_dir: vec3<f32>,
+};
+@group(0) @binding(0) var<uniform> uniforms: Uniforms;
+
+struct GizmoOut {
+    @builtin(position) position: vec4<f32>,
+    @location(0) color: vec4<f32>,
+};
+
+@vertex
+fn vs_main(@location(0) position: vec3<f32>, @location(1) color: vec4<f32>) -> GizmoOut {
+    var out: GizmoOut;
+    out.position = uniforms.view_proj * vec4<f32>(position, 1.0);
+    out.color = color;
+    return out;
+}
+
+@fragment
+fn fs_main(in: GizmoOut) -> @location(0) vec4<f32> {
+    return in.color;
+}
+"#;
+
 pub(super) const VOLUME_SHADER: &str = r#"
 struct Uniforms {
     view_proj: mat4x4<f32>,

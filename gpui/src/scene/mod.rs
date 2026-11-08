@@ -20,12 +20,17 @@ use anyhow::{Context, Result, bail};
 use gpui_core::stl::{self, MeshData};
 use gpui_voxl::Scene;
 
+mod placement;
+pub use placement::placement;
+
 /// A VOXL scene whose first model is ready for the single-model viewport.
 pub struct Imported {
     /// The container as parsed, for the support panel (`SUPP`, `MODL`).
     pub scene: Scene,
     pub mesh: MeshData,
-    /// `MODL[0].transform.position`, `[x, y, z]` in millimetres.
+    /// The model's world translate: `MODL[0].transform.position`, `[x, y, z]`
+    /// in millimetres, plus the recentring the `MESH` payload needs (zero for
+    /// the bbox-centred payload the exporter writes).
     pub translate: [f32; 3],
     /// `MODL[0].transform.rotation`, `[x, y, z]` Euler radians about the fixed
     /// world axes — `ModelTransform::rotation` (`Euler('ZYX')` in the scene).
@@ -95,10 +100,32 @@ pub fn load(path: &Path) -> Result<Imported> {
             .and_then(|value| value.as_f64())
             .unwrap_or(0.0) as f32
     };
-    let translate = [
+    let stored = [
         finite_or(axis("position", "x"), 0.0),
         finite_or(axis("position", "y"), 0.0),
         finite_or(axis("position", "z"), 0.0),
+    ];
+    // A `MESH` chunk is written bbox-centred: `ExportManager
+    // ::exportModelAsEmbeddedBinaryStlBytes` moves the mesh by
+    // `-geometry.center` before exporting it (`ExportManager.ts`, around line
+    // 220), so `MODL.transform.position` is expressed against a mesh whose
+    // bbox centre is the local origin — the frame `useStlGeometry.ts` centres
+    // an imported geometry into as well. `placement` targets the *seated*
+    // frame (bbox bottom at `z = 0`), which differs by half the height, so
+    // that lift is taken back off before the stored position is added;
+    // otherwise a model the source already seated on the plate would rise by
+    // half its height a second time on every load. For a centred payload the
+    // recentring is zero and the stored position applies unchanged.
+    let seated = placement(&mesh, [0.0, 0.0]);
+    let recentre = [
+        seated[0],
+        seated[1],
+        seated[2] - mesh.size[2] * 0.5,
+    ];
+    let translate = [
+        stored[0] + recentre[0],
+        stored[1] + recentre[1],
+        stored[2] + recentre[2],
     ];
     let rotation = [
         finite_or(axis("rotation", "x"), 0.0),

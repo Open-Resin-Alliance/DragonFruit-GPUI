@@ -515,7 +515,9 @@ impl DragonFruit {
         match loaded {
             Loaded::Mesh(mesh) => {
                 self.scene = None;
-                self.translate = [0.0; 3];
+                // Plate centre is the origin in the port's plate-local frame;
+                // `defaultImportCenterXY` is computed from `plateLocalRect` in the source.
+                self.translate = scene::placement(&mesh, [0.0, 0.0]);
                 self.rotation = [0.0; 3];
                 self.scale = [1.0; 3];
                 self.set_mesh(mesh);
