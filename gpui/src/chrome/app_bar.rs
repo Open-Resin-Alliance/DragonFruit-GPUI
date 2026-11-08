@@ -407,12 +407,12 @@ pub fn app_bar(state: AppBarState, entity: WeakEntity<DragonFruit>) -> impl Into
                 if actions_disabled {
                     return;
                 }
-                // `hasTopbarFleetUnits` decides between the fleet quick menu
-                // and the printer profile flow; the profile flow is the
-                // printer picker (`Printer Library` + `Initial Setup`), which
-                // is what `requestOpenProfileSettings('printer')` leads to.
+                // `hasTopbarFleetUnits` decides between the fleet quick menu and
+                // the profile flow. `requestOpenProfileSettings('printer')` opens
+                // the Printer & Material Profiles modal; the bare picker is only
+                // its Add flow.
                 if !has_fleet_units {
-                    crate::features::printer_picker::begin();
+                    crate::features::printer_profiles::begin();
                 }
                 printer_entity
                     .update(cx, |this, cx| {
@@ -424,7 +424,7 @@ pub fn app_bar(state: AppBarState, entity: WeakEntity<DragonFruit>) -> impl Into
                             this.show_printer_menu = false;
                             this.show_app_menu = false;
                             this.show_view_menu = false;
-                            this.show_printer_picker = true;
+                            this.show_printer_profiles = true;
                         }
                         cx.notify();
                     })
