@@ -158,7 +158,9 @@ const TOOL_RAIL_WIDTH: f32 = 66.0;
 /// The source's `rightInsetPx` while the layer-slider column is shown.
 const LAYER_SLIDER_INSET: f32 = 48.0;
 /// `top-[var(--topbar-height)]` on the stack root.
-const STACK_TOP: f32 = TOPBAR_HEIGHT;
+/// The source anchors the panel stack at `calc(var(--topbar-height) + 6px)`, so
+/// the cards start 6px below the bar rather than flush against it.
+const STACK_TOP: f32 = TOPBAR_HEIGHT + 6.0;
 /// `bottom-0` on the stack root.
 const STACK_BOTTOM: f32 = 0.0;
 /// The dock edge handle is 6px wide in the source.
