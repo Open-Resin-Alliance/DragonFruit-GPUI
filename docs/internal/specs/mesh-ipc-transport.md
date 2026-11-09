@@ -265,3 +265,36 @@ brush.
 So the native surface is not "move the viewport", it is "re-implement the scene
 subsystem". That is the right call only if the webview's rendering is itself
 the limit, not just the transport.
+
+## Relationship to PR #972 (`sin/lazy-load-ipc`)
+
+That branch implements the "Rust owns the mesh" half of P3, and its own smoke
+table is the evidence: after import finalises, preparation and slicing upload
+**zero raw mesh chunks** (`Mesh upload sessions 1`, `Raw mesh chunk bytes
+uploaded 0`), because imported sources are retained natively and later sends are
+references plus transforms. It adds content-addressed 4 MiB chunk dedupe (only
+missing chunks cross), a retained last-slice snapshot, a prepared-modifier cache
+and a leased cache for large job values, refreshed by a scene coordinator after
+15 s of quiet plus idle.
+
+What that does and does not settle, measured against the analysis above:
+
+- **Fixed**: repeated whole-mesh uploads per slice — the largest *repeat* cost,
+  and the reason "slice, tweak, slice" felt slow.
+- **Not fixed: the first download.** Import still returns the full mesh through
+  `Response::new(bytes)` (`load_mesh_bytes` in `src-tauri/src/mesh_repair.rs`).
+  In `tauri-2.11.6` that path is the channel/fetch on Windows and Linux but the
+  `eval` + JSON-array path on macOS/iOS, so the one transfer that must happen
+  every import is still the platform-asymmetric one.
+- **Not fixed: copies.** Chunk transport is still IPC bytes; the webview
+  boundary copy remains.
+- **Not fixed: payload size.** No indexing/quantisation/zstd, so a single cold
+  transfer is the same number of bytes as before.
+- **Risk**: draft PR, 68 files, desktop `cargo check` unverified, no Windows
+  timings, no real-scene export, no final-layer parity. The macOS build check
+  passed.
+
+So it removes the repeated cost and leaves the cold path alone. The remaining
+work in this document is not in conflict with it: P0 still needed to know what a
+cold transfer costs, and the macOS response encoding is worth its own look
+because it is the direction that branch did not touch.
