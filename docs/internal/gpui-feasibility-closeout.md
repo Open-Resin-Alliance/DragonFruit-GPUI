@@ -71,6 +71,35 @@ Until then, the honest comparison is: a GPUI port is a from-scratch rewrite of
 the UI *and* the scene, with a permanently different feel in motion, blur and
 scrollbars.
 
+## Re-evaluation path: GPUIX
+
+[GPUIX](https://gpuix.dev) (React/Solid bindings for GPUI, Node-API native
+bindings, no webview) was assessed after this closure and is the most promising
+follow-up, because it removes most of the blockers above rather than the
+symptoms:
+
+| Blocker in this port | GPUIX (`@gpuix/react` 0.11.0) |
+|---|---|
+| no portal; tooltips inverted, `deferred` broken | `Dialog.Portal`, `createPortal`, `<anchored>` layers, per-window Escape layer stack |
+| scroller content = direct children's boxes | `overflow: "scroll"`, `onScrollChange`, native `scrollbarColor`/`scrollbarWidth` |
+| no hover callback on the stable line | nested `hover` / `active` / `focusVisible` styles |
+| hit-testing marks a full-window canvas hovered | `getElementsAt(x, y)`, `pointerEvents: "none"`, modal dialogs block clicks behind |
+| axis-aligned images; `RenderImage` needs `pub(crate) Frame` | `setImagePixels(w, h, buffer, { format: 'bgra' })` |
+
+It also keeps the existing React tree, hooks and state stores, and this
+research's artefacts become its inputs: `docs/internal/gpui-coverage.json`
+already carries 2,130 surfaces *with their className strings*, so a
+Tailwind-to-style-object codemod starts from a real corpus with a checker.
+
+The blocking unknown is the **3D scene**: three.js/R3F needs WebGL and a DOM
+canvas, GPUIX has neither, and `setImagePixels` is a CPU upload — workable for
+content, not for a 60 fps orbit viewport at resolution. The fallback is the
+wgpu pass this branch already contains, bridged through Node-API. Other risks:
+pre-1.0 API churn (adapter and native must be pinned to the same exact
+version) and Bun (~82 MB) or Hermes (~34 MB) plus a `.node` sidecar to ship.
+
+Re-evaluate when GPUIX exposes a GPU surface or a three.js-compatible canvas.
+
 ## What to do with this branch
 
 Keep it as research: the coverage ledger, the extractor, the scenario harness
