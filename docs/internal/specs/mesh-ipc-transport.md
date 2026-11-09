@@ -231,3 +231,37 @@ become TSL to run on the WebGPU backend.
 Verdict: worth a spike **after P0/P2**, because it is cheap to evaluate and it
 makes the cheap payloads cheaper to consume. It is not a substitute for the
 transport work, and it does not remove the reason to consider a native surface.
+
+## What the native surface actually costs: the whole scene graph
+
+The transfer is only the *mesh*. Everything else in the scene is also three.js,
+and a wgpu surface has to draw it too. Counted in this tree:
+
+| | Count |
+|---|---|
+| files under `src/components/scene` + `src/features/scene` | 149 |
+| files carrying R3F objects or `useFrame` | 59 |
+| instanced-mesh usages | 56 |
+| custom `ShaderMaterial`s | 6 |
+
+The instancing is not incidental — it is the support system:
+
+- `src/supports/SupportPrimitives/Roots/InstancedRootsGroup.tsx`
+- `.../ContactCone/InstancedContactConeGroup.tsx`
+- `.../Shaft/InstancedShaftGroup.tsx`
+- `.../Joint/InstancedJointGroup.tsx`
+
+plus `HollowVoxelPreview.tsx` (volume preview), `IslandOverlay.tsx`,
+`MeshSmoothingBrushCursor.tsx` and the canvas overlays. Each instanced group
+keeps its own per-instance attribute buffers, so moving to wgpu re-creates the
+same "how do I get this data into the GPU" problem *inside* the renderer, on a
+per-frame update path rather than a one-off load.
+
+For calibration, the GPUI spike's renderer — mesh, plate, axes, view cube,
+gizmo, camera — is 4,599 lines across `gpui/crates/gpui-core/src/viewport/`,
+and it does not include supports, hollowing preview, islands, or the smoothing
+brush.
+
+So the native surface is not "move the viewport", it is "re-implement the scene
+subsystem". That is the right call only if the webview's rendering is itself
+the limit, not just the transport.
