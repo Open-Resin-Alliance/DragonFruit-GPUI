@@ -52,14 +52,18 @@
 //!    source's `${size} · ${polygons}` reduced to the polygon clause, because
 //!    `stl::MeshData` has no file size.
 //! 9. No rename state: the row renders the read-only name only.
-//! 10. Delete is wired: the trash button runs `DragonFruit::delete_model`, the
-//!     same path the `Delete` key and the canvas menu take. The source's undo
-//!     stack does not exist here, so the delete cannot be undone.
+//! 10. Delete is wired: the trash button runs `DragonFruit::delete_model(id)`,
+//!     the source's `onDelete(model.id)`. The `Delete` key instead removes the
+//!     whole selection. The source's undo stack does not exist here, so the
+//!     delete cannot be undone.
 //! 11. No context-menu state (`PanelContextMenuState`): the menu cannot open.
-//! 12. Row click: the source calls `onSelect(id, 'single')`; the row calls
-//!     `DragonFruit::select_model`, which makes that model the active one — the
-//!     single-selection the source describes. Shift-range and ctrl-toggle have
-//!     no multi-selection equivalent yet.
+//! 12. Row click follows `ModelManagerPanel.tsx:613-641`: a plain click selects
+//!     exactly that model, ctrl/meta toggles it, and shift selects the range
+//!     between the primary model and the row over the panel's own row order
+//!     (ctrl+shift unions the range instead of replacing). The row never sets a
+//!     second "active" state — the scene has one selection set and the primary
+//!     is its last member. Folder/plate selection counts are not rendered:
+//!     those rows need groups and plates the scene does not have.
 //! 13. The row has no second line: the previous port invented a triangle line,
 //!     which the source does not have. The count lives in the info tooltip.
 //! 14. The list's `overflow-y-auto` is not applied: the card grows to its content
@@ -129,6 +133,8 @@
 //!     or send status: none of their inputs exist.
 //! 33. The previous port's "Slice a model to inspect layers." hint is not in
 //!     `PrintingPanel.tsx`; it is removed.
+
+use std::rc::Rc;
 
 use gpui::{
     AnyElement, App, BoxShadow, Div, ElementId, FontWeight, IntoElement, MouseButton, SharedString,
@@ -296,12 +302,16 @@ fn grid3(a: impl IntoElement, b: impl IntoElement, c: impl IntoElement) -> Div {
 /// one alphabetical row per ungrouped model (`ModelManagerPanel.tsx:159-186`).
 /// This build has no groups, so it is the ungrouped rows alone.
 ///
+/// `selected` is the scene's selection set. A row highlights membership and
+/// nothing else — there is no second "active" style, because the scene stores
+/// no active id (`gpui_core::scene::Scene`).
+///
 /// The return is type-erased: the rows borrow the scene, and in edition 2024 an
 /// `impl IntoElement` return would capture that borrow, so the caller could not
 /// turn it into the panel's `'static` `AnyElement`.
 pub fn models_body(
     models: &[gpui_core::scene::Model],
-    active: Option<gpui_core::scene::ModelId>,
+    selected: &[gpui_core::scene::ModelId],
     entity: WeakEntity<DragonFruit>,
 ) -> AnyElement {
     // `text-xs text-center py-2 italic`, muted.
@@ -317,14 +327,18 @@ pub fn models_body(
 
     // `buildModelGroups`' final sort, `a.name.localeCompare(b.name)`; without
     // the locale collator, case folding approximates it and the model id breaks
-    // a tie so two models sharing a name keep a stable order.
-    let mut rows: Vec<&gpui_core::scene::Model> = models.iter().collect();
-    rows.sort_by(|a, b| {
+    // a tie so two models sharing a name keep a stable order. The scene's
+    // `ordered_ids` is the same order, and it is what a shift-range runs over
+    // (`orderedModelIds`, `ModelManagerPanel.tsx:362-367`).
+    let mut ordered: Vec<&gpui_core::scene::Model> = models.iter().collect();
+    ordered.sort_by(|a, b| {
         a.name
             .to_lowercase()
             .cmp(&b.name.to_lowercase())
             .then(a.id.cmp(&b.id))
     });
+    let ordered_ids: Rc<Vec<gpui_core::scene::ModelId>> =
+        Rc::new(ordered.iter().map(|model| model.id).collect());
 
     // `space-y-1 overflow-y-auto pr-0.5 flex-1 min-h-0`; the scroll container is
     // omitted (deviation 14).
@@ -332,11 +346,15 @@ pub fn models_body(
         .flex()
         .flex_col()
         .gap(px(4.))
-        .when(rows.is_empty(), |this| this.child(empty()))
-        .children(
-            rows.into_iter()
-                .map(|model| model_row(model, active == Some(model.id), entity.clone())),
-        );
+        .when(ordered.is_empty(), |this| this.child(empty()))
+        .children(ordered.iter().map(|model| {
+            model_row(
+                *model,
+                selected.contains(&model.id),
+                ordered_ids.clone(),
+                entity.clone(),
+            )
+        }));
 
     // `px-2.5 pt-1 pb-2.5 space-y-2 flex flex-col flex-1 min-h-0`.
     div()
@@ -346,6 +364,11 @@ pub fn models_body(
         .flex()
         .flex_col()
         .gap(px(8.))
+        // Every press inside the body belongs to the body: without this the
+        // window's full-size canvas underneath is still "hovered" and its
+        // left-press listener runs for a click that was meant for a control
+        // (see `DragonFruit::render`'s canvas note).
+        .occlude()
         .child(list)
         .into_any_element()
 }
@@ -376,9 +399,15 @@ pub fn models_add_button(entity: WeakEntity<DragonFruit>) -> impl IntoElement {
 ///
 /// `px-2 py-1 rounded border transition-colors flex items-center gap-2
 /// cursor-pointer`, with the selected fills from the row's inline style.
+///
+/// The click maps the source's modifiers (`ModelManagerPanel.tsx:613-641`):
+/// shift selects the range between the primary model and this row over
+/// `ordered`, ctrl/meta adds it to a ctrl-shift range or toggles it, and a plain
+/// click selects exactly this row.
 fn model_row(
     model: &gpui_core::scene::Model,
     selected: bool,
+    ordered: Rc<Vec<gpui_core::scene::ModelId>>,
     entity: WeakEntity<DragonFruit>,
 ) -> impl IntoElement {
     let model_id = model.id;
@@ -432,12 +461,10 @@ fn model_row(
         },
     );
 
-    // `Trash2` → `onDelete(model.id)`. The source's `scene.deleteModel` is the
-    // same path the `Delete` key and the canvas menu take
-    // (`DragonFruit::delete_model`), and it asks nothing first because deleting
-    // is undoable there; this build has no undo stack either way. That path
-    // removes the *active* model, so the row makes its model active first and
-    // the next load re-derives from what is left.
+    // `Trash2` → `onDelete(model.id)`: the source's `scene.deleteModel([id])`,
+    // which removes the model of the row pressed. It asks nothing first
+    // because deleting is undoable there; this build has no undo stack either
+    // way. The row's own model goes, whatever the selection holds.
     let delete_button = ghost_icon_action(
         format!("model-delete-{row_key}"),
         "trash-2",
@@ -445,8 +472,7 @@ fn model_row(
         move |_, cx| {
             delete_entity
                 .update(cx, |this, cx| {
-                    this.select_model(model_id);
-                    this.delete_model();
+                    this.delete_model(model_id);
                     cx.notify();
                 })
                 .ok();
@@ -499,12 +525,40 @@ fn model_row(
                     "Delete model",
                 )),
         )
-        .on_click(move |_, _, cx| {
-            // `onSelect(model.id, 'single')`: the row makes its own model the
-            // active one, which is what moves the gizmo and the transform panel.
+        .on_click(move |event, _, cx| {
+            // `renderModelRow`'s onClick (`ModelManagerPanel.tsx:613-641`):
+            // shift is a range from the primary model to this row, ctrl/meta
+            // with shift unions that range, ctrl/meta alone toggles, and a
+            // plain click is `onSelect(model.id, 'single')`.
+            let modifiers = event.modifiers();
+            let additive = modifiers.control || modifiers.platform;
             select_entity
                 .update(cx, |this, cx| {
-                    this.select_model(model_id);
+                    if modifiers.shift {
+                        // `activeModelId ?? selectedModelIds[last] ?? model.id`.
+                        let anchor = this
+                            .scene
+                            .primary()
+                            .or_else(|| this.scene.selected().last().copied())
+                            .unwrap_or(model_id);
+                        let anchor_index = ordered.iter().position(|id| *id == anchor);
+                        let clicked_index = ordered.iter().position(|id| *id == model_id);
+                        if let (Some(anchor_index), Some(clicked_index)) =
+                            (anchor_index, clicked_index)
+                        {
+                            let start = anchor_index.min(clicked_index);
+                            let end = anchor_index.max(clicked_index);
+                            this.select_model_range(&ordered[start..=end], model_id, additive);
+                            cx.notify();
+                            return;
+                        }
+                    }
+                    let mode = if additive {
+                        gpui_core::scene::SelectionMode::Toggle
+                    } else {
+                        gpui_core::scene::SelectionMode::Single
+                    };
+                    this.select_model(model_id, mode);
                     cx.notify();
                 })
                 .ok();
@@ -763,7 +817,7 @@ pub fn supports_body(count: usize, entity: WeakEntity<DragonFruit>) -> impl Into
             let angle = auto_support::live_settings().overhang_self_support_angle_deg;
             generate_entity
                 .update(cx, |this, cx| {
-                    if let Some(mesh) = this.active_mesh() {
+                    if let Some(mesh) = this.primary_mesh() {
                         let model = this.model_matrix();
                         let points = stl::overhang_points(mesh, angle);
                         let target = (300.0 * this.support_density).max(1.0) as usize;
@@ -1213,7 +1267,7 @@ pub fn export_body(entity: WeakEntity<DragonFruit>) -> impl IntoElement {
                 .on_click(move |_, _, cx| {
                     export_entity
                         .update(cx, |this, cx| {
-                            let Some(mesh) = this.active_mesh() else {
+                            let Some(mesh) = this.primary_mesh() else {
                                 return;
                             };
                             let Some(path) = rfd::FileDialog::new()

@@ -51,6 +51,37 @@ fn load_file(path: &Path) -> Result<Loaded> {
     }
 }
 
+/// A model's committed transform, in the gizmo's terms.
+fn committed_transform(model: &gpui_core::scene::Model) -> gizmo::Transform {
+    gizmo::Transform {
+        translate: glam::Vec3::from_array(model.translate),
+        rotation: model.rotation,
+        scale: glam::Vec3::from_array(model.scale),
+    }
+}
+
+/// `safeRatio` (`src/features/scene/selectionTransform.ts`): a baseline near
+/// zero yields 1, so a multiply never explodes or collapses the set.
+fn safe_ratio(next: f32, current: f32) -> f32 {
+    if current.abs() <= 1e-8 {
+        return 1.0;
+    }
+    let ratio = next / current;
+    if ratio.is_finite() { ratio } else { 1.0 }
+}
+
+/// `transform.position` for a live (uncommitted) transform — the model's world
+/// bbox centre through that transform.
+///
+/// The source's loader re-centres geometry on its bbox, so its `position` is
+/// that point; this port's `translate` is the file origin's placement, so the
+/// same point is `translate + mesh.center` ([`gpui_core::scene::Model::position`]
+/// for a committed model). The point is invariant under rotation and scale,
+/// so a drag can read it without building the matrix.
+fn live_position(transform: &gizmo::Transform, model: &gpui_core::scene::Model) -> glam::Vec3 {
+    transform.translate + model.mesh.center
+}
+
 /// The toast for a failed import. VOXL's own errors are worth surfacing; a
 /// `.lys` is a Lychee scene, which this build has no importer for.
 fn load_failure_text(path: &Path, error: &anyhow::Error) -> String {
@@ -196,10 +227,42 @@ pub struct Toast {
     id: u64,
 }
 
+/// What a live gesture does to the selection.
+///
+/// The source's multi-selection maths is keyed on the operation
+/// (`buildMultiSelectionTransformsFromActive`, `SceneCanvas.tsx:3042-3108`):
+/// a move shifts every model by the primary's delta, a rotate orbits every
+/// model about the selection pivot, a scale grows every model and its offset
+/// from the pivot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum GestureOperation {
+    Move,
+    Rotate,
+    Scale,
+}
+
+/// A live gesture's selection-wide frame, captured at press.
+///
+/// `before` is the selection as it stood when the gesture began — the source's
+/// `gizmoGroupStartSnapshot.beforeByModelId` (`SceneCanvas.tsx:1196-1206`) —
+/// so a run of pointer samples is always derived from one state and cannot
+/// drift. `pivot` is `getSelectionPivot`: the mean of the selected models'
+/// positions, the point a group rotation or scale turns about.
+pub(crate) struct Gesture {
+    /// The model the gizmo's drag maths is driven by: `selected.last()` at
+    /// press, the source's `activeModelId` for the gesture.
+    pub(crate) primary: gpui_core::scene::ModelId,
+    pub(crate) operation: GestureOperation,
+    pub(crate) pivot: glam::Vec3,
+    /// The selection's committed transforms at press, in selection order.
+    pub(crate) before: Vec<(gpui_core::scene::ModelId, gizmo::Transform)>,
+}
+
 pub(crate) struct DragonFruit {
-    /// The plate's models and the active model. Everything that used to read
-    /// the single `mesh`/`translate`/`rotation`/`scale` fields reads this
-    /// scene through the active model now.
+    /// The plate's models and the selection set. Every single-model surface
+    /// (the gizmo's anchor, the transform panel, Delete, the name a toast
+    /// shows) reads [`gpui_core::scene::Scene::primary`] — `selected.last()` —
+    /// instead of a second stored "active" id.
     pub(crate) scene: gpui_core::scene::Scene,
     /// The parsed VOXL container when the last load was a scene: `SUPP` and
     /// every model's `MODL` entry. The scene above is the drawable view of it.
@@ -211,7 +274,12 @@ pub(crate) struct DragonFruit {
     /// apply them to; [`Self::install_models`] and [`Self::append_mesh`] (for
     /// the first model) restore them when the same scene is loaded again.
     session_models: Vec<gpui_store::session::SessionModel>,
-    /// The index into [`Self::session_models`] that was active.
+    /// `session.json`'s saved `active` index into [`Self::session_models`].
+    ///
+    /// This is the session file's own key (the source writes
+    /// `scene.activeModelId`), kept only as a restore input: a matched load
+    /// turns it into a one-model selection. The scene itself stores no active
+    /// id — see [`gpui_core::scene::Scene`].
     session_active: Option<usize>,
     /// Time of the last frame, for the camera's real delta. The source drives
     /// every tween from `requestAnimationFrame`'s timestamp, so the port must
@@ -277,15 +345,26 @@ pub(crate) struct DragonFruit {
     pub(crate) show_box: bool,
     pub(crate) overhang_view: bool,
     pub(crate) logo: Option<PathBuf>,
-    /// The running gesture's stand-in transform for the active model.
+    /// The running gesture's stand-in transform for the primary model.
     ///
     /// The source separates the two halves of a drag: the live transform moves
     /// the model, and only the release commits it. This field is that stand-in
-    /// for the active model. The viewport, picking and the gizmo read it in
+    /// for the primary model. The viewport, picking and the gizmo read it in
     /// place of the committed model transform; the transform panel's store and
     /// `session.json` see nothing until [`Self::commit_draft`] folds it in,
     /// once, on release.
     pub(crate) draft: Option<gizmo::Transform>,
+    /// The live gesture's selection-wide frame, and `draft_models` the
+    /// per-model transforms it derives.
+    pub(crate) gesture: Option<Gesture>,
+    /// Every model the running gesture moves, with its live transform.
+    ///
+    /// The source keeps `multiGizmoPreviewTransformsById` for the same job
+    /// (`SceneCanvas.tsx:3110-3120`): the primary drives the maths and the rest
+    /// of the selection follows. Empty when no gesture is live; a single-model
+    /// selection still stores its one entry, so the draw loop has a uniform
+    /// source of truth.
+    pub(crate) draft_models: Vec<(gpui_core::scene::ModelId, gizmo::Transform)>,
     pub(crate) support_angle: f32,
     pub(crate) support_density: f32,
     pub(crate) focus: FocusHandle,
@@ -473,6 +552,8 @@ impl DragonFruit {
             overhang_view: false,
             logo: rasterize_logo(),
             draft: None,
+            gesture: None,
+            draft_models: Vec::new(),
             support_angle: 45.0,
             support_density: 0.5,
             focus: cx.focus_handle(),
@@ -678,7 +759,7 @@ impl DragonFruit {
                     visible: model.visible,
                 })
                 .collect();
-            let active = self.scene.active.and_then(|id| {
+            let active = self.scene.primary().and_then(|id| {
                 self.scene
                     .models()
                     .iter()
@@ -794,17 +875,20 @@ impl DragonFruit {
         let id = self
             .scene
             .push(name, mesh, translate, rotation, scale, visible);
-        self.scene.set_active(id);
-        self.frame_active_model();
+        // The import's new model is selected and framed: the caller passes the
+        // id, the scene stores no "active model" for the intro to find.
+        self.scene
+            .select(id, gpui_core::scene::SelectionMode::Single);
+        self.frame_primary_model();
     }
 
     /// Apply `session.json`'s stored transforms to a freshly loaded `scene`.
     ///
     /// The match is strict — same count, same names in the same import order —
     /// so a different file (or a different scene) does not inherit the old
-    /// placement. A matched scene also restores the saved active model, or
-    /// clears the selection when the saved session had none. Returns whether
-    /// the scene matched.
+    /// placement. A matched scene also restores the document's saved active
+    /// model as a one-model selection, or clears the selection when the saved
+    /// session had none. Returns whether the scene matched.
     fn restore_session_models(&self, scene: &mut gpui_core::scene::Scene) -> bool {
         let saved = &self.session_models;
         if saved.is_empty()
@@ -837,16 +921,16 @@ impl DragonFruit {
             .and_then(|index| scene.models.get(index).map(|model| model.id));
         match active {
             Some(id) => {
-                scene.set_active(id);
+                scene.select(id, gpui_core::scene::SelectionMode::Single);
             }
-            None => scene.clear_active(),
+            None => scene.clear_selection(),
         }
         true
     }
 
-    /// Replace the plate's contents with `models` — the VOXL scene path — make
-    /// the first one active and frame it. The camera intro still frames the
-    /// active model only; the scene's whole-bounds framing is a later step.
+    /// Replace the plate's contents with `models` — the VOXL scene path — select
+    /// the first one and frame it. The camera intro frames the primary model
+    /// only; the scene's whole-bounds framing is a later step.
     fn install_models(&mut self, models: Vec<scene::ImportedModel>) {
         let mut installed = gpui_core::scene::Scene::new();
         for model in models {
@@ -869,13 +953,13 @@ impl DragonFruit {
         let restored = self.restore_session_models(&mut installed);
         if !restored {
             if let Some(first) = installed.models.first().map(|model| model.id) {
-                installed.set_active(first);
+                installed.select(first, gpui_core::scene::SelectionMode::Single);
             }
         }
         self.session_models.clear();
         self.session_active = None;
         self.scene = installed;
-        self.frame_active_model();
+        self.frame_primary_model();
     }
 
     /// The smoke gate's model line: triangle count, millimetre bounding box and
@@ -905,20 +989,18 @@ impl DragonFruit {
     }
 
     /// The shared tail of installing or appending models: end any gesture and
-    /// frame the now-active model.
+    /// frame the primary model.
     ///
     /// The intro animates from wherever the camera is (the parked home pose in
-    /// a fresh scene) to the active model's framing. Frame where the model
+    /// a fresh scene) to the primary model's framing. Frame where the model
     /// actually lands: the import placement moves it, so the raw bbox centre is
     /// no longer the model's world centre.
-    fn frame_active_model(&mut self) {
-        self.draft = None;
+    fn frame_primary_model(&mut self) {
+        self.end_gesture();
         self.hovered.set(None);
-        self.gizmo_drag = None;
-        self.gizmo_hover = None;
         self.gizmo_cache = None;
 
-        if let Some(model) = self.scene.active_model() {
+        if let Some(model) = self.scene.primary_model() {
             let world_center = model.world_center();
             self.camera
                 .borrow_mut()
@@ -1031,29 +1113,56 @@ impl DragonFruit {
         self.load_path(path, cx);
     }
 
-    /// `GLOBAL.DELETE` / the fixed `Delete` key: remove the active model.
-    /// The source deletes the selection (or the active model) through the
-    /// history store; this build has no undo, so the removal is final.
+    /// `GLOBAL.DELETE` / the fixed `Delete` key: remove the selection.
     ///
-    /// With models left on the plate the next one becomes active and the scene
-    /// keeps its placement; only the last model takes the empty-scene reset
-    /// and forgets the reopenable file.
-    pub(crate) fn delete_model(&mut self) {
-        let Some(active) = self.scene.active else {
+    /// The source deletes the whole selection through
+    /// `dispatchDeleteModelAction` (`src/features/scene/modelActionTargets.ts`),
+    /// which resolves the target ids from `selectedModelIds`; this build has no
+    /// undo, so the removal is final.
+    ///
+    /// With models left on the plate the scene keeps its placement; only the
+    /// last model takes the empty-scene reset and forgets the reopenable file.
+    pub(crate) fn delete_selected(&mut self) {
+        if self.scene.remove_selected() == 0 {
             return;
-        };
-        self.scene.remove(active);
+        }
+        self.after_scene_edit();
+        self.save_session();
+    }
+
+    /// Remove one model — the Models panel row's trash, the source's
+    /// `onDelete(model.id)`. Unlike [`Self::delete_selected`] this does not
+    /// depend on the selection; it prunes the model from the set if it was
+    /// there.
+    pub(crate) fn delete_model(&mut self, id: gpui_core::scene::ModelId) {
+        if !self.scene.remove(id) {
+            return;
+        }
         self.after_scene_edit();
         self.save_session();
     }
 
     /// The app menu's `New scene`: empty the plate whatever is selected. The
-    /// source's `newScene` clears the collection; the port's old
-    /// `delete_model` did both jobs because "the model" was the whole plate.
+    /// source's `newScene` clears the collection; the port's old delete did
+    /// both jobs because "the model" was the whole plate.
     pub(crate) fn clear_scene(&mut self) {
         self.scene = gpui_core::scene::Scene::new();
         self.after_scene_edit();
         self.save_session();
+    }
+
+    /// End any live gesture without committing it.
+    ///
+    /// Escape, a cancelled drag and every scene edit that invalidates the
+    /// selection all end here: the draft is dropped, which *is* the restore,
+    /// because nothing was ever written to a model.
+    pub(crate) fn end_gesture(&mut self) {
+        self.draft = None;
+        self.draft_models.clear();
+        self.gesture = None;
+        self.gizmo_drag = None;
+        self.gizmo_hover = None;
+        self.grab = None;
     }
 
     /// The shared tail of a removal: drop the support set generated from the
@@ -1063,10 +1172,7 @@ impl DragonFruit {
         // The support set was generated from the deleted model.
         *self.supports.borrow_mut() = None;
         self.hovered.set(None);
-        self.gizmo_drag = None;
-        self.gizmo_hover = None;
-        self.draft = None;
-        self.grab = None;
+        self.end_gesture();
         self.editor_menu = None;
         if self.scene.is_empty() {
             self.voxl = None;
@@ -1093,19 +1199,77 @@ impl DragonFruit {
         }
     }
 
-    /// The active model's transform: the running gesture's draft while one is
+    /// The primary model's transform: the running gesture's draft while one is
     /// live, the committed model transform otherwise.
+    ///
+    /// "Primary" is [`gpui_core::scene::Scene::primary`] — the last model the
+    /// user selected, which is the source's `activeModelId` wherever a single
+    /// transform is read (the gizmo's base, `session.json`, the automation
+    /// snapshot). The transform panel asks for [`Self::panel_transform`]
+    /// instead, which averages a multi-selection's position.
     pub(crate) fn transform(&self) -> gizmo::Transform {
         if let Some(draft) = self.draft {
             return draft;
         }
         self.scene
-            .active_model()
-            .map(|model| gizmo::Transform {
-                translate: glam::Vec3::from_array(model.translate),
-                rotation: model.rotation,
-                scale: glam::Vec3::from_array(model.scale),
-            })
+            .primary_model()
+            .map(committed_transform)
+            .unwrap_or_default()
+    }
+
+    /// The transform the Transform panel displays.
+    ///
+    /// `TransformControls` takes `selectionPositionOrigin` for the position
+    /// while several models are selected — the mean of their
+    /// `transform.position`s (`src/features/scene/selectionPosition.ts`,
+    /// `getSelectionPositionOrigin`) — and the active model's rotation and
+    /// scale (`PreparePanelStack.tsx:220-236`).
+    ///
+    /// PORT DEVIATION: the port's Transform panel has always shown the model's
+    /// `translate` in its position rows (its `Center` action writes
+    /// `-mesh.center`, which is translate-space), because that is the only
+    /// position the editor has; so a multi-selection averages `translate` too,
+    /// keeping one meaning for the field across one and many selected models.
+    /// The source's `transform.position` is its geometry's bbox centre
+    /// (`useStlGeometry.ts:635-639` re-centres on load); the gizmo uses that
+    /// point ([`Self::gizmo_center`]), the panel keeps translate.
+    pub(crate) fn panel_transform(&self) -> gizmo::Transform {
+        let mut transform = self.transform();
+        let targets = self.scene.action_targets();
+        if targets.len() > 1 {
+            let mut center = glam::Vec3::ZERO;
+            let mut count = 0;
+            for id in targets {
+                if self.scene.model(id).is_some() {
+                    center += self.live_transform(id).translate;
+                    count += 1;
+                }
+            }
+            if count > 0 {
+                transform.translate = center / count as f32;
+            }
+        }
+        transform
+    }
+
+    /// The transform `model` is drawn and picked with: the running gesture's
+    /// per-model draft, or its committed transform.
+    pub(crate) fn live_transform(&self, id: gpui_core::scene::ModelId) -> gizmo::Transform {
+        if let Some((_, transform)) = self
+            .draft_models
+            .iter()
+            .find(|(model_id, _)| *model_id == id)
+        {
+            return *transform;
+        }
+        if self.scene.primary() == Some(id) {
+            if let Some(draft) = self.draft {
+                return draft;
+            }
+        }
+        self.scene
+            .model(id)
+            .map(committed_transform)
             .unwrap_or_default()
     }
 
@@ -1128,28 +1292,160 @@ impl DragonFruit {
     /// invariant — which is what makes `Drag::locked_center` correct.
     pub(crate) fn model_matrix(&self) -> glam::Mat4 {
         let transform = self.transform();
-        let Some(model) = self.scene.active_model() else {
+        let Some(model) = self.scene.primary_model() else {
             return transform.matrix();
         };
         model.matrix_for(transform.translate, transform.rotation, transform.scale)
     }
 
-    /// Fold a finished gesture's draft into the active model's transform.
+    /// [`Self::model_matrix`] for any model, live draft included.
+    pub(crate) fn model_matrix_of(&self, model: &gpui_core::scene::Model) -> glam::Mat4 {
+        let transform = self.live_transform(model.id);
+        model.matrix_for(transform.translate, transform.rotation, transform.scale)
+    }
+
+    /// The live gesture's world-space frame.
+    ///
+    /// `before` is the selection's committed state at press and `pivot` the
+    /// mean of its positions — `getSelectionPivot`
+    /// (`src/features/scene/selectionTransform.ts`), which the source captures
+    /// into `gizmoGroupStartSnapshot` so a run of pointer samples cannot drift
+    /// (`SceneCanvas.tsx:3042-3108`). [`live_position`] is the source's
+    /// `transform.position`, the point the source's re-centred geometry keeps
+    /// there.
+    fn begin_gesture(&self, operation: GestureOperation) -> Option<Gesture> {
+        let targets = self.scene.action_targets();
+        let primary = self.scene.primary()?;
+        let mut before = Vec::with_capacity(targets.len());
+        let mut pivot = glam::Vec3::ZERO;
+        for id in &targets {
+            let model = self.scene.model(*id)?;
+            let transform = committed_transform(model);
+            pivot += live_position(&transform, model);
+            before.push((*id, transform));
+        }
+        pivot /= before.len().max(1) as f32;
+        Some(Gesture {
+            primary,
+            operation,
+            pivot,
+            before,
+        })
+    }
+
+    /// Derive every selected model's live transform from the primary's.
+    ///
+    /// The source's `buildMultiSelectionTransformsFromActive`
+    /// (`SceneCanvas.tsx:3042-3108`) is the same shape: the primary's gesture
+    /// is the driver, every other selected model follows it.
+    ///
+    /// * **move** — the primary's translation delta, added to every model. The
+    ///   source applies it as `activeAfter.position - activeBefore.position`.
+    /// * **rotate** — the group mode (`selectionRotationMode`'s default,
+    ///   `page.tsx:1141`): every model turns by the primary's rotation delta and
+    ///   its position orbits the pivot, so the selection keeps its shape.
+    /// * **scale** — the primary's per-axis scale ratio grows every model and
+    ///   its offset from the pivot, and each model's own bottom is held
+    ///   (`preserveModelBottom` in `selectionLiftDrop.ts`) so a seated model
+    ///   does not sink or lift as it grows.
+    fn apply_gesture(&mut self, primary: gizmo::Transform) {
+        let Some(gesture) = self.gesture.as_ref() else {
+            return;
+        };
+        let base = gesture
+            .before
+            .iter()
+            .find(|(id, _)| *id == gesture.primary)
+            .map(|(_, transform)| *transform);
+        let mut drafts: Vec<(gpui_core::scene::ModelId, gizmo::Transform)> =
+            Vec::with_capacity(gesture.before.len());
+        match (gesture.operation, base) {
+            (GestureOperation::Move, Some(base)) => {
+                let delta = primary.translate - base.translate;
+                for (id, before) in &gesture.before {
+                    let mut next = *before;
+                    next.translate += delta;
+                    drafts.push((*id, next));
+                }
+            }
+            (GestureOperation::Rotate, Some(base)) => {
+                let delta = primary.rotation_quat() * base.rotation_quat().inverse();
+                for (id, before) in &gesture.before {
+                    let mut next = *before;
+                    if let Some(model) = self.scene.model(*id) {
+                        // `rotateSelectionFromActive`: positions orbit the
+                        // pivot; rotations compose with the same delta.
+                        let world_center = live_position(before, model);
+                        let orbited =
+                            gesture.pivot + delta * (world_center - gesture.pivot);
+                        next.translate = orbited - model.mesh.center;
+                    }
+                    let (rx, ry, rz) = (delta * before.rotation_quat())
+                        .to_euler(glam::EulerRot::XYZEx);
+                    next.rotation = [rx, ry, rz];
+                    drafts.push((*id, next));
+                }
+            }
+            (GestureOperation::Scale, Some(base)) => {
+                let ratio = glam::Vec3::new(
+                    safe_ratio(primary.scale.x, base.scale.x),
+                    safe_ratio(primary.scale.y, base.scale.y),
+                    safe_ratio(primary.scale.z, base.scale.z),
+                );
+                for (id, before) in &gesture.before {
+                    let Some(model) = self.scene.model(*id) else {
+                        continue;
+                    };
+                    // `scaleSelectionFromActive`: the offset from the pivot
+                    // grows with the model, and its own scale multiplies.
+                    let world_center = live_position(before, model);
+                    let offset = (world_center - gesture.pivot) * ratio;
+                    let mut next = *before;
+                    next.translate = gesture.pivot + offset - model.mesh.center;
+                    next.scale *= ratio;
+                    // `preserveModelBottom`.
+                    let bottom_before = model.world_bottom_for(
+                        before.translate,
+                        before.rotation,
+                        before.scale,
+                    );
+                    let bottom_after = model.world_bottom_for(
+                        next.translate,
+                        next.rotation,
+                        next.scale,
+                    );
+                    next.translate.z += bottom_before - bottom_after;
+                    drafts.push((*id, next));
+                }
+            }
+            (_, None) => return,
+        }
+        self.draft_models = drafts;
+    }
+
+    /// Fold a finished gesture's drafts into every model they moved.
     ///
     /// This is the one write a drag performs on the entity: the pointer stream
-    /// only ever touched [`Self::draft`]. Returns whether there was a draft to
-    /// commit, which is also whether the transform panel needs its one sync.
+    /// only ever touched [`Self::draft_models`]. Returns whether there was a
+    /// draft to commit, which is also whether the transform panel needs its one
+    /// sync.
     pub(crate) fn commit_draft(&mut self) -> bool {
-        let Some(draft) = self.draft.take() else {
+        if self.draft.take().is_none() {
             return false;
-        };
-        let Some(model) = self.scene.active_model_mut() else {
-            return false;
-        };
-        model.translate = draft.translate.to_array();
-        model.rotation = draft.rotation;
-        model.scale = draft.scale.to_array();
-        true
+        }
+        let drafts = std::mem::take(&mut self.draft_models);
+        self.gesture = None;
+        let mut committed = false;
+        for (id, transform) in drafts {
+            let Some(model) = self.scene.model_mut(id) else {
+                continue;
+            };
+            model.translate = transform.translate.to_array();
+            model.rotation = transform.rotation;
+            model.scale = transform.scale.to_array();
+            committed = true;
+        }
+        committed
     }
 
     /// Throw the draft away, leaving the committed transform as it was. Escape
@@ -1157,6 +1453,8 @@ impl DragonFruit {
     /// needs rebroadcasting.
     pub(crate) fn discard_draft(&mut self) {
         self.draft = None;
+        self.draft_models.clear();
+        self.gesture = None;
     }
 
     /// Whether the plate holds a model. The panels' `has_mesh` snapshot and
@@ -1166,14 +1464,16 @@ impl DragonFruit {
         !self.scene.is_empty()
     }
 
-    /// The active model's geometry.
-    pub(crate) fn active_mesh(&self) -> Option<&Arc<stl::MeshData>> {
-        self.scene.active_model().map(|model| &model.mesh)
+    /// The primary model's geometry.
+    pub(crate) fn primary_mesh(&self) -> Option<&Arc<stl::MeshData>> {
+        self.scene.primary_model().map(|model| &model.mesh)
     }
 
-    /// The active model's display name — the panel's row title.
-    pub(crate) fn active_model_name(&self) -> Option<&str> {
-        self.scene.active_model().map(|model| model.name.as_str())
+    /// The primary model's display name — the panel's row title.
+    pub(crate) fn primary_model_name(&self) -> Option<&str> {
+        self.scene
+            .primary_model()
+            .map(|model| model.name.as_str())
     }
 
     /// How many models are on the plate.
@@ -1181,19 +1481,50 @@ impl DragonFruit {
         self.scene.models().len()
     }
 
-    /// Whether a model is active. This is the port's stand-in for
-    /// `activeModelId !== null`; the source's selection *set* arrives with the
-    /// multi-selection step.
-    pub(crate) fn selected(&self) -> bool {
-        self.scene.active.is_some()
+    /// How many models are selected — the rows' badge and the panel's
+    /// multi-selection gates read it.
+    pub(crate) fn selection_count(&self) -> usize {
+        self.scene.action_targets().len()
     }
 
-    /// The Models panel's row click: make `id` the active model. A stale id
-    /// (a row for a model that has since been removed) is ignored. The painter
-    /// picks up the new selection from `cx.notify()`; the session records it on
-    /// the next save.
-    pub(crate) fn select_model(&mut self, id: gpui_core::scene::ModelId) {
-        self.scene.set_active(id);
+    /// Whether anything is selected. This is the source's `activeModelId !==
+    /// null` for every gate that only asks "is there something to act on"; the
+    /// set itself is read through [`Self::scene`].
+    pub(crate) fn has_selection(&self) -> bool {
+        !self.scene.selected.is_empty()
+    }
+
+    /// A selection click — the source's `selectModel(id, mode)`
+    /// (`useSceneCollectionManager.ts:3210-3231`). A stale id (a row for a
+    /// model that has since been removed) is ignored. The painter picks up the
+    /// new selection from `cx.notify()`; the session records it on the next
+    /// save.
+    pub(crate) fn select_model(
+        &mut self,
+        id: gpui_core::scene::ModelId,
+        mode: gpui_core::scene::SelectionMode,
+    ) {
+        self.scene.select(id, mode);
+    }
+
+    /// A shift-clicked row's range — `handleModelRangeSelection`
+    /// (`page.tsx:5804-5815`), with `ids` taken from the panel's own row order
+    /// and `additive` set when ctrl/meta was held with shift.
+    pub(crate) fn select_model_range(
+        &mut self,
+        ids: &[gpui_core::scene::ModelId],
+        clicked: gpui_core::scene::ModelId,
+        additive: bool,
+    ) {
+        self.scene.select_range(ids, clicked, additive);
+    }
+
+    /// A click past every model: `clearModelSelection`
+    /// (`useSceneCollectionManager.ts:3236-3239`). Modifiers do not change it —
+    /// the source's pointer-missed path passes no selection mode
+    /// (`SceneCanvas.tsx:4997-5000`).
+    pub(crate) fn clear_selection(&mut self) {
+        self.scene.clear_selection();
     }
 
     /// The Models panel's eye toggle. Visibility feeds `max_height_world`, so
@@ -1212,34 +1543,143 @@ impl DragonFruit {
         self.save_session();
     }
 
-    /// The transform panel's write-back: its three rows edit the active model.
-    pub(crate) fn set_active_transform(
+    /// The transform panel's write-back.
+    ///
+    /// One model selected: its three fields are written directly.
+    ///
+    /// Several selected: the panel shows the selection's position origin and
+    /// the primary's rotation/scale, and an edit is applied to the whole
+    /// selection the way the source's three handlers do —
+    /// `handlePositionSelectedModels` translates every model by the shift of
+    /// the origin, `handleRotateSelectedModels` turns the group about the
+    /// selection pivot, `handleScaleSelectedModels` scales the group about it
+    /// (`page.tsx:9215-9312`). Only the component that changed is applied: the
+    /// panel flushes all three at once.
+    pub(crate) fn set_selection_transform(
         &mut self,
         translate: [f32; 3],
         rotation: [f32; 3],
         scale: [f32; 3],
     ) {
-        let Some(model) = self.scene.active_model_mut() else {
+        let targets = self.scene.action_targets();
+        if targets.len() <= 1 {
+            let Some(model) = self.scene.primary_model_mut() else {
+                return;
+            };
+            model.translate = translate;
+            model.rotation = rotation;
+            model.scale = scale;
+            return;
+        }
+
+        let position = glam::Vec3::from_array(translate);
+        let scale_next = glam::Vec3::from_array(scale);
+        let Some(primary_id) = self.scene.primary() else {
             return;
         };
-        model.translate = translate;
-        model.rotation = rotation;
-        model.scale = scale;
+        let Some(primary) = self.scene.model(primary_id) else {
+            return;
+        };
+        let primary_before = committed_transform(primary);
+        let mut pivot = glam::Vec3::ZERO;
+        // `(id, transform before the edit, the model's position)` — positions
+        // are the source's `transform.position`, which is what its handlers
+        // shift and orbit (`selectionPosition.ts`, `selectionTransform.ts`).
+        let mut entries: Vec<(gpui_core::scene::ModelId, gizmo::Transform, glam::Vec3)> =
+            Vec::with_capacity(targets.len());
+        for id in &targets {
+            let Some(model) = self.scene.model(*id) else {
+                continue;
+            };
+            let before = committed_transform(model);
+            let model_position = live_position(&before, model);
+            pivot += model_position;
+            entries.push((*id, before, model_position));
+        }
+        if entries.is_empty() {
+            return;
+        }
+        pivot /= entries.len() as f32;
+
+        // `handlePositionSelectedModels`: a typed position is the selection's
+        // origin, so every model moves by the shift of that origin.
+        let origin_shift = position - self.panel_transform().translate;
+        if origin_shift.length() > 1e-6 {
+            for (id, _, _) in &entries {
+                if let Some(model) = self.scene.model_mut(*id) {
+                    let next = glam::Vec3::from_array(model.translate) + origin_shift;
+                    model.translate = next.to_array();
+                }
+            }
+        }
+
+        // `rotateSelectionFromActive(..., selectionRotationMode = 'group')`.
+        if rotation
+            .iter()
+            .zip(primary_before.rotation.iter())
+            .any(|(next, before)| (next - before).abs() > 1e-6)
+        {
+            let delta = gpui_core::scene::rotation_quat(rotation)
+                * primary_before.rotation_quat().inverse();
+            for (id, before, model_position) in &entries {
+                let Some(model) = self.scene.model_mut(*id) else {
+                    continue;
+                };
+                let orbited = pivot + delta * (*model_position - pivot);
+                model.translate = (orbited - model.mesh.center).to_array();
+                let (rx, ry, rz) = (delta * before.rotation_quat())
+                    .to_euler(glam::EulerRot::XYZEx);
+                model.rotation = [rx, ry, rz];
+            }
+        }
+
+        // `scaleSelectionFromActive` + `holdSelectionBottoms`.
+        if scale
+            .iter()
+            .zip(primary_before.scale.to_array().iter())
+            .any(|(next, before)| (next - before).abs() > 1e-6)
+        {
+            let ratio = glam::Vec3::new(
+                safe_ratio(scale_next.x, primary_before.scale.x),
+                safe_ratio(scale_next.y, primary_before.scale.y),
+                safe_ratio(scale_next.z, primary_before.scale.z),
+            );
+            for (id, before, model_position) in &entries {
+                let Some(model) = self.scene.model_mut(*id) else {
+                    continue;
+                };
+                let offset = (*model_position - pivot) * ratio;
+                let mut next = *before;
+                next.translate = pivot + offset - model.mesh.center;
+                next.scale *= ratio;
+                let bottom_before =
+                    model.world_bottom_for(before.translate, before.rotation, before.scale);
+                let bottom_after =
+                    model.world_bottom_for(next.translate, next.rotation, next.scale);
+                next.translate.z += bottom_before - bottom_after;
+                model.translate = next.translate.to_array();
+                model.scale = next.scale.to_array();
+            }
+        }
     }
 
     /// Whether the gizmo answers the pointer.
     ///
     /// `SceneCanvas` mounts `UnifiedGizmo` in Prepare, in the Transform tool,
-    /// with an active model — and the source's `enabled` gate is what makes a
+    /// with a selection — and the source's `enabled` gate is what makes a
     /// handle with nothing to transform impossible. The same three conditions
     /// are the gate here.
     fn gizmo_enabled(&self) -> bool {
-        self.mode == Mode::Prepare && self.active_tool == 1 && self.selected()
+        self.mode == Mode::Prepare && self.active_tool == 1 && self.has_selection()
     }
 
-    /// Where the gizmo sits: the active model's own centre through the
-    /// transform the viewport draws with, or the position a rotation/scale drag
+    /// Where the gizmo sits: the mean of the selected models' world centres
+    /// through their live transforms, or the position a rotation/scale drag
     /// locked at press (`ScreenSpaceGizmo`'s `lockedDragPosition`).
+    ///
+    /// `getSelectionGizmoCenter` averages every selected model's position; a
+    /// one-model selection lands on that model's own centre, exactly where the
+    /// single-model gizmo sat before the set existed.
     fn gizmo_center(&self) -> Option<glam::Vec3> {
         if !self.gizmo_enabled() {
             return None;
@@ -1251,8 +1691,17 @@ impl DragonFruit {
         {
             return Some(center);
         }
-        let model = self.scene.active_model()?;
-        Some(self.model_matrix().transform_point3(model.mesh.center))
+        let targets = self.scene.action_targets();
+        let mut center = glam::Vec3::ZERO;
+        let mut count = 0;
+        for id in targets {
+            let Some(model) = self.scene.model(id) else {
+                continue;
+            };
+            center += live_position(&self.live_transform(id), model);
+            count += 1;
+        }
+        (count > 0).then(|| center / count as f32)
     }
 
     /// Start a gesture if `pointer` is over a handle. Returns whether the press
@@ -1277,8 +1726,8 @@ impl DragonFruit {
             return false;
         };
         // The transform panel's `mesh_min_z` and the model matrix's pivot: the
-        // active model's local underside and bbox centre.
-        let mesh_bounds = self.scene.active_model().map(|model| {
+        // primary model's local underside and bbox centre.
+        let mesh_bounds = self.scene.primary_model().map(|model| {
             (
                 model.mesh.center.z - model.mesh.size[2] * 0.5,
                 model.mesh.center.z,
@@ -1288,9 +1737,17 @@ impl DragonFruit {
         else {
             return false;
         };
+        let operation = match handle {
+            gizmo::Handle::Ring(_) => GestureOperation::Rotate,
+            gizmo::Handle::Scale(_) => GestureOperation::Scale,
+            gizmo::Handle::Center | gizmo::Handle::Axis(_) => GestureOperation::Move,
+        };
+        self.gesture = self.begin_gesture(operation);
         // The gesture starts from the committed transform, so the draft is a
         // copy of it until the pointer moves.
-        self.draft = Some(drag.base());
+        let base = drag.base();
+        self.apply_gesture(base);
+        self.draft = Some(base);
         self.gizmo_drag = Some(drag);
         self.gizmo_hover = Some(handle);
         true
@@ -1321,14 +1778,19 @@ impl DragonFruit {
             return false;
         };
         self.draft = Some(transform);
+        self.apply_gesture(transform);
         true
     }
 
-    /// The plate-plane grab: drag the model under the pointer in the world XY
-    /// plane. `origin` is the plane hit at press and `base` the transform then,
-    /// so a low camera angle cannot turn vertical travel into extra distance.
+    /// The plate-plane grab: drag the selection under the pointer in the world
+    /// XY plane. `origin` is the plane hit at press and `base` the primary's
+    /// transform then, so a low camera angle cannot turn vertical travel into
+    /// extra distance.
     ///
     /// Like the gizmo handles, this writes the draft only; the release commits.
+    /// A multi-selection moves as one: the primary's XY delta is applied to
+    /// every selected model through [`Self::apply_gesture`], which is the
+    /// source's move rule (`buildMultiSelectionTransformsFromActive`).
     fn update_grab(
         &mut self,
         pointer: glam::Vec2,
@@ -1352,6 +1814,7 @@ impl DragonFruit {
             return false;
         }
         self.draft = Some(transform);
+        self.apply_gesture(transform);
         true
     }
 
@@ -1371,6 +1834,8 @@ impl DragonFruit {
         };
         let base = self.transform();
         self.grab = Some((hit, base));
+        self.gesture = self.begin_gesture(GestureOperation::Move);
+        self.apply_gesture(base);
         self.draft = Some(base);
         true
     }
@@ -1511,9 +1976,9 @@ impl Render for DragonFruit {
             window.request_animation_frame();
         }
         // Resolve the scene into the viewport's per-model draw list once per
-        // frame. The running draft lives on the entity, so the active model's
-        // matrix comes from `model_matrix`; every other model is its committed
-        // placement.
+        // frame. Every model is drawn through its live transform, so a gesture
+        // that moves the whole selection moves every one of them; the
+        // selection tint follows set membership, not one "active" model.
         let draw_models: Vec<viewport::ModelDraw> = self
             .scene
             .models()
@@ -1522,13 +1987,9 @@ impl Render for DragonFruit {
             .map(|model| viewport::ModelDraw {
                 id: model.id,
                 mesh: model.mesh.clone(),
-                matrix: if Some(model.id) == self.scene.active {
-                    self.model_matrix()
-                } else {
-                    model.matrix()
-                },
+                matrix: self.model_matrix_of(model),
                 color: mesh_color(
-                    Some(model.id) == self.scene.active,
+                    self.scene.is_selected(model.id),
                     self.hovered.get() == Some(model.id),
                 ),
             })
@@ -1895,6 +2356,15 @@ impl Render for DragonFruit {
             }
         })
         .on_mouse_down(MouseButton::Left, {
+            // This listener is on the full-window canvas, which is painted
+            // first and therefore sits *below* every panel, the rail and the
+            // app bar. GPUI dispatches a press to every hitbox under the
+            // pointer unless one stops propagation or occludes
+            // (`bite-gp-authoring`'s `hit_test`/`dispatch_mouse_event`), so
+            // without those occluders a press on any control also reached this
+            // handler and its `None` branch cleared the selection. The layers
+            // above now `occlude`; this handler runs only for presses that
+            // actually landed on the canvas.
             let camera = camera.clone();
             let hit_models = pick_models.clone();
             let entity = entity.clone();
@@ -1935,7 +2405,34 @@ impl Render for DragonFruit {
                 let ndc_y = 1.0 - pointer.y / height * 2.0;
                 let (origin, direction) = camera.borrow().ray(width / height, ndc_x, ndc_y);
                 let hit = pick_model(&hit_models, origin, direction);
+                // `StlMesh.tsx:1751-1758`: ctrl/meta is `toggle`, shift is
+                // `add`, anything else is `single`. The modifiers are read once
+                // so the selection and the grab below agree on the gesture.
+                let modifiers = event.modifiers;
+                let primary = modifiers.control || modifiers.platform;
+                let mode = if primary {
+                    gpui_core::scene::SelectionMode::Toggle
+                } else if modifiers.shift {
+                    gpui_core::scene::SelectionMode::Add
+                } else {
+                    gpui_core::scene::SelectionMode::Single
+                };
                 if grab_mode && hit.is_some() {
+                    // `selectModel` runs on the press, before any drag: the
+                    // source's model pointer-down selects and only then reports
+                    // a select-mode drag (`StlMesh.tsx:1751-1768`). A modifier
+                    // press is a multi-select gesture, not a move.
+                    if primary || modifiers.shift {
+                        entity
+                            .update(cx, |this, cx| {
+                                if let Some(id) = hit {
+                                    this.select_model(id, mode);
+                                }
+                                cx.notify();
+                            })
+                            .ok();
+                        return;
+                    }
                     // Same drag cell as the camera: the move handler branches on
                     // the button, so a grab and an orbit cannot both be live.
                     drag.set(Some(MouseButton::Left));
@@ -1944,9 +2441,9 @@ impl Render for DragonFruit {
                     entity
                         .update(cx, |this, cx| {
                             // The grab reads `transform()`, so the picked model
-                            // has to be active before the gesture starts.
+                            // has to be primary before the gesture starts.
                             if let Some(id) = hit {
-                                this.scene.set_active(id);
+                                this.select_model(id, gpui_core::scene::SelectionMode::Single);
                             }
                             let camera = grab_camera.borrow();
                             this.begin_grab(pointer, width, height, &camera);
@@ -1957,14 +2454,14 @@ impl Render for DragonFruit {
                 }
                 entity
                     .update(cx, |this, cx| {
-                        // A plain click is the source's `selectModel(id,
-                        // 'single')`: the picked model becomes the active one,
-                        // and clicking past every model clears the selection.
+                        // The source's `handleSceneModelSelection`: a model
+                        // press selects with the modifiers' mode, a press past
+                        // every model clears the selection. The pointer-missed
+                        // path passes no selection mode, so a modifier-held
+                        // empty click clears too (`SceneCanvas.tsx:4997-5000`).
                         match hit {
-                            Some(id) => {
-                                this.scene.set_active(id);
-                            }
-                            None => this.scene.clear_active(),
+                            Some(id) => this.select_model(id, mode),
+                            None => this.clear_selection(),
                         }
                         cx.notify();
                     })
@@ -2171,7 +2668,7 @@ impl Render for DragonFruit {
                         // prefers the hovered point; there is no hover raycast
                         // here, so the whole model is framed.
                         if key == "f" && !primary && !alt && !repeat {
-                            if let Some(model) = this.scene.active_model() {
+                            if let Some(model) = this.scene.primary_model() {
                                 let world = this.model_matrix().transform_point3(model.mesh.center);
                                 let radius = model.mesh.radius.max(1.0);
                                 let mut camera = this.camera.borrow_mut();
@@ -2217,7 +2714,7 @@ impl Render for DragonFruit {
                             && !repeat
                             && this.has_mesh()
                         {
-                            this.delete_model();
+                            this.delete_selected();
                             changed = true;
                         }
 
@@ -2251,9 +2748,19 @@ impl Render for DragonFruit {
                 ))
             })
             .when(has_models, |this| {
-                this.child(div().absolute().bottom(px(4.)).left(px(4.)).child(
-                    panels::empty_scene::model_stats_card(self.stats.clone(), entity.clone()),
-                ))
+                this.child(
+                    div()
+                        .absolute()
+                        .bottom(px(4.))
+                        .left(px(4.))
+                        // The chip is a real surface: its presses belong to it,
+                        // not to the canvas behind (`occlude`).
+                        .occlude()
+                        .child(panels::empty_scene::model_stats_card(
+                            self.stats.clone(),
+                            entity.clone(),
+                        )),
+                )
             })
             .when(mode == Mode::Printing && has_models, |this| {
                 this.child(features::printing_preview::printing_preview(
@@ -2293,7 +2800,7 @@ impl Render for DragonFruit {
                         .header_right(panels::content::models_add_button(entity.clone()))
                         .content(panels::content::models_body(
                             self.scene.models(),
-                            self.scene.active,
+                            self.scene.selected(),
                             entity.clone(),
                         )),
                     );
@@ -2354,7 +2861,7 @@ impl Render for DragonFruit {
                                 if let Some(def) =
                                     crate::widgets::orientation_panel::orientation_panel_def(
                                         self.scene
-                                            .active_model()
+                                            .primary_model()
                                             .map(|model| model.name.clone().into()),
                                         entity.clone(),
                                     )
@@ -2429,6 +2936,7 @@ impl Render for DragonFruit {
                     .absolute()
                     .bottom(px(22.))
                     .right(px(72.))
+                    .occlude()
                     .child(overlays::view_cube(
                         camera.clone(),
                         cube_viewport.clone(),
@@ -2442,6 +2950,7 @@ impl Render for DragonFruit {
                     // the chip's box sits just inside the widget's corner.
                     .bottom(px(10.0))
                     .right(px(60.0))
+                    .occlude()
                     .child(overlays::home_button(camera.clone(), entity.clone())),
             )
             // `CrossSliderPanel` wrapper: hidden in printing (the source's
@@ -2454,6 +2963,7 @@ impl Render for DragonFruit {
                         .top(px(TOPBAR_HEIGHT + 6.0))
                         .bottom(px(6.0))
                         .w(px(48.))
+                        .occlude()
                         .child(
                             ui::card().size_full().flex().flex_col().child(
                                 div()

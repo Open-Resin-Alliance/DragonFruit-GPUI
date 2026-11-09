@@ -14,8 +14,9 @@
 //! `T(translate)`, which is the placement the import path has always used.
 //!
 //! Selection sets, plates, groups, materials and supports are deliberately not
-//! here yet: the first slice draws N models and picks one active model, and
-//! every one of those concepts is migrated by a later wave.
+//! here yet: the set is the only selection state this module keeps
+//! (`Scene::selected`, with `primary()` derived), and every one of the other
+//! concepts is migrated by a later wave.
 
 use std::cmp::Ordering;
 use std::sync::Arc;
@@ -81,6 +82,24 @@ impl Model {
         Mat4::from_translation(pivot) * transform * Mat4::from_translation(-pivot)
     }
 
+    /// The model's position in the source's sense — `transform.position`.
+    ///
+    /// The source's loader re-centres every geometry on its bbox
+    /// (`useStlGeometry.ts:635-639`: `geometry.translate(-preCenter.x,
+    /// -preBBox.min.y, -preCenter.z)`), so a source model's `position` *is*
+    /// where its bbox centre sits in the world; the source puts the gizmo there
+    /// for one model and for a selection (`SceneCanvas.tsx:7523-7527`,
+    /// `getSelectionGizmoCenter`). This port keeps file-space vertices, so its
+    /// `translate` is the file origin's placement and the same world point is
+    /// `translate + mesh.center`.
+    ///
+    /// The point is invariant under rotation and scale — the model matrix
+    /// pivots on `mesh.center` (`Model::matrix_for`) — so [`Model::world_center`]
+    /// and this agree, and a gesture can read it without a matrix.
+    pub fn position(&self) -> Vec3 {
+        Vec3::from_array(self.translate) + self.mesh.center
+    }
+
     /// The model's bbox centre in world space, through its own matrix.
     pub fn world_center(&self) -> Vec3 {
         self.matrix().transform_point3(self.mesh.center)
@@ -98,6 +117,16 @@ impl Model {
     /// The lowest point of this model's transformed AABB, in world space.
     pub fn world_bottom(&self) -> f32 {
         let matrix = self.matrix();
+        aabb_corners(&self.mesh)
+            .map(|corner| matrix.transform_point3(corner).z)
+            .fold(f32::INFINITY, f32::min)
+    }
+
+    /// [`Model::world_bottom`] for a transform that has not been committed —
+    /// what `preserveModelBottom` (`selectionLiftDrop.ts`) measures the
+    /// before/after gap with while a gesture or a panel edit is live.
+    pub fn world_bottom_for(&self, translate: Vec3, rotation: [f32; 3], scale: Vec3) -> f32 {
+        let matrix = self.matrix_for(translate, rotation, scale);
         aabb_corners(&self.mesh)
             .map(|corner| matrix.transform_point3(corner).z)
             .fold(f32::INFINITY, f32::min)
@@ -358,15 +387,50 @@ pub fn find_free_spot_center(
     [fallback_x, center_y]
 }
 
-/// The plate's models, in import order, plus the active model.
+/// Click semantics for [`Scene::select`].
 ///
-/// `active` is the model the gizmo, the transform panel and every single-model
-/// edit target — the source's `activeModelId`. It is `None` only when the
-/// scene is empty or the user clicked past every model; it is never an id that
-/// is not in `models`.
+/// The source's `selectModel(id, mode)` (`useSceneCollectionManager.ts:3210-3231`)
+/// has exactly these three modes; the canvas maps ctrl/meta to `Toggle`, shift
+/// to `Add` and a plain click to `Single` (`StlMesh.tsx:1751-1758`), and the
+/// Models panel rows map ctrl/meta to `Toggle` and a plain click to `Single`
+/// (`ModelManagerPanel.tsx:639-640`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SelectionMode {
+    /// Exactly this model.
+    Single,
+    /// In when it was out, out when it was in.
+    Toggle,
+    /// In, keeping the rest — the source's `'add'`.
+    Add,
+}
+
+/// The plate's models and the models the user has selected.
+///
+/// The selection set is the only selection state. The source kept
+/// `selectedModelIds` *and* an `activeModelId` that disagreed with it
+/// (`ModelManagerPanel.tsx:615` anchors on `activeModelId ?? last selected`;
+/// `page.tsx:2618` falls back to `[activeModelId]` when no ids reach it; Delete
+/// acted on `activeModelId` alone while the rows highlighted the set), and that
+/// dual state is what made a selection survive or vanish depending on which
+/// half a handler read. Here there is one truth and everything else derives
+/// from it:
+///
+/// * [`Scene::primary`] is `selected.last()` — the model the user touched
+///   last, which is the source's `activeModelId` wherever a single value is
+///   needed. The source itself falls back to the last selected id when it has
+///   no active one (`ModelManagerPanel.tsx:615`).
+/// * the selection is never empty while a model is being transformed, so a
+///   "selected but no primary" state — the source could reach it by deleting
+///   the active model and leaving its peers selected
+///   (`useSceneCollectionManager.ts:5517-5521`) — cannot exist here.
+///
+/// Neither field ever holds an id that is not in `models`:
+/// [`Scene::remove`] prunes both.
 pub struct Scene {
     pub models: Vec<Model>,
-    pub active: Option<ModelId>,
+    /// The selected models, in the order they joined the set. Re-selecting an
+    /// id moves it to the end, so the last entry is the primary model.
+    pub selected: Vec<ModelId>,
     next_id: u64,
 }
 
@@ -380,7 +444,7 @@ impl Scene {
     pub fn new() -> Self {
         Self {
             models: Vec::new(),
-            active: None,
+            selected: Vec::new(),
             next_id: 1,
         }
     }
@@ -438,42 +502,186 @@ impl Scene {
         self.models.iter_mut().find(|model| model.id == id)
     }
 
-    pub fn active_model(&self) -> Option<&Model> {
-        self.active.and_then(|id| self.model(id))
+    /// The selection, in the order the models joined it.
+    pub fn selected(&self) -> &[ModelId] {
+        &self.selected
     }
 
-    pub fn active_model_mut(&mut self) -> Option<&mut Model> {
-        let id = self.active?;
+    pub fn is_selected(&self, id: ModelId) -> bool {
+        self.selected.contains(&id)
+    }
+
+    /// The single-value selection: the model the user touched last.
+    ///
+    /// This is the source's `activeModelId` — the gizmo's anchor, the transform
+    /// panel's model, the name a toast shows. It is derived, never stored:
+    /// see [`Scene`] for why.
+    pub fn primary(&self) -> Option<ModelId> {
+        self.selected.last().copied()
+    }
+
+    pub fn primary_model(&self) -> Option<&Model> {
+        self.primary().and_then(|id| self.model(id))
+    }
+
+    pub fn primary_model_mut(&mut self) -> Option<&mut Model> {
+        let id = self.primary()?;
         self.models.iter_mut().find(|model| model.id == id)
     }
 
-    /// Make `id` active. Returns whether it names a model in the scene, so a
-    /// stale id (a deleted model) clears nothing.
-    pub fn set_active(&mut self, id: ModelId) -> bool {
-        if self.model(id).is_some() {
-            self.active = Some(id);
-            true
-        } else {
-            false
+    /// `selectModel(id, mode)` (`useSceneCollectionManager.ts:3210-3231`).
+    ///
+    /// A stale id (a row for a model that has since been removed) changes
+    /// nothing and returns `false`. The source sets its active id to `id` in
+    /// every mode; here that is expressed as `id` becoming the last entry, so
+    /// `Toggle` on a selected id removes it and `Add` on a selected id promotes
+    /// it to primary without duplicating it.
+    pub fn select(&mut self, id: ModelId, mode: SelectionMode) -> bool {
+        if self.model(id).is_none() {
+            return false;
         }
+        match mode {
+            SelectionMode::Single => {
+                self.selected.clear();
+                self.selected.push(id);
+            }
+            SelectionMode::Toggle => {
+                if let Some(index) = self.selected.iter().position(|sid| *sid == id) {
+                    self.selected.remove(index);
+                } else {
+                    self.selected.push(id);
+                }
+            }
+            SelectionMode::Add => {
+                self.selected.retain(|sid| *sid != id);
+                self.selected.push(id);
+            }
+        }
+        true
     }
 
-    pub fn clear_active(&mut self) {
-        self.active = None;
+    /// `handleModelRangeSelection` (`page.tsx:5804-5815`) over the panel's own
+    /// row order: `ids` is the range the caller computed from
+    /// [`Scene::ordered_ids`], `clicked` is the row that was shift-clicked, and
+    /// `additive` is ctrl/meta held with shift.
+    ///
+    /// The source sets the active id to `clicked` whatever the mode, so the
+    /// clicked model becomes primary here too. Returns whether the range named
+    /// anything in the scene; the source returns early on an empty range.
+    pub fn select_range(&mut self, ids: &[ModelId], clicked: ModelId, additive: bool) -> bool {
+        let valid: Vec<ModelId> = ids
+            .iter()
+            .copied()
+            .filter(|id| self.model(*id).is_some())
+            .collect();
+        if valid.is_empty() {
+            return false;
+        }
+        if !additive {
+            self.selected.clear();
+        }
+        for id in valid {
+            if !self.selected.contains(&id) {
+                self.selected.push(id);
+            }
+        }
+        // `setActiveModelId(activeId)` after the set write.
+        if self.model(clicked).is_some() {
+            self.selected.retain(|sid| *sid != clicked);
+            self.selected.push(clicked);
+        }
+        true
     }
 
-    /// Remove a model. If it was active, the first remaining model becomes
-    /// active, which is the source's behaviour when the deleted id was the
-    /// only selection.
+    /// [`Scene::clear_selection`]'s counterpart for a click past every model:
+    /// `clearModelSelection` (`useSceneCollectionManager.ts:3236-3239`) empties
+    /// the set and the active id together. Modifiers do not change that — the
+    /// source's pointer-missed path passes no selection mode
+    /// (`SceneCanvas.tsx:4997-5000`).
+    pub fn clear_selection(&mut self) {
+        self.selected.clear();
+    }
+
+    /// The Models panel's row order — `orderedModelIds`
+    /// (`ModelManagerPanel.tsx:362-367`), which is `buildModelGroups`' order:
+    /// grouped models first, then one row per ungrouped model sorted by
+    /// `a.name.localeCompare(b.name)` (`:159-186`).
+    ///
+    /// This build has no groups, so it is the ungrouped sort. Without the
+    /// locale collator, case folding approximates `localeCompare` and the id
+    /// breaks a tie, exactly as the panel's own rows do.
+    pub fn ordered_ids(&self) -> Vec<ModelId> {
+        let mut models: Vec<&Model> = self.models.iter().collect();
+        models.sort_by(|a, b| {
+            a.name
+                .to_lowercase()
+                .cmp(&b.name.to_lowercase())
+                .then(a.id.cmp(&b.id))
+        });
+        models.into_iter().map(|model| model.id).collect()
+    }
+
+    /// The models a panel action or a gizmo gesture targets —
+    /// `resolveModelActionTargetIds` (`src/features/scene/modelActionTargets.ts`):
+    /// the selection, deduplicated, in selection order.
+    ///
+    /// The source falls back to `activeModelId` when the selection is empty;
+    /// with the set as the only truth the primary *is* the last selected id, so
+    /// that fallback has nothing left to add and an empty set targets nothing.
+    pub fn action_targets(&self) -> Vec<ModelId> {
+        let mut targets: Vec<ModelId> = Vec::with_capacity(self.selected.len());
+        for id in &self.selected {
+            if self.model(*id).is_some() && !targets.contains(id) {
+                targets.push(*id);
+            }
+        }
+        targets
+    }
+
+    /// The selection's centre: the mean of the selected models' positions.
+    ///
+    /// `getSelectionGizmoCenter` (`src/features/scene/selectionPosition.ts:9-28`,
+    /// fed by `SceneCanvas.tsx:4064-4075`) averages the models'
+    /// `transform.position` — [Model::position] in this port, which is the
+    /// world point the source's re-centred geometry stores there. A one-model
+    /// selection lands on that model's own position, exactly where the
+    /// single-model gizmo sat before the set existed.
+    pub fn selection_center(&self) -> Option<Vec3> {
+        let mut center = Vec3::ZERO;
+        let mut count = 0;
+        for id in self.action_targets() {
+            if let Some(model) = self.model(id) {
+                center += model.position();
+                count += 1;
+            }
+        }
+        (count > 0).then(|| center / count as f32)
+    }
+
+    /// Remove one model and drop it from the selection.
+    ///
+    /// The source filters the deleted ids out of `selectedModelIds`
+    /// (`useSceneCollectionManager.ts:5520`) instead of promoting a neighbour.
+    /// With no stored active id, the remaining members keep their order and the
+    /// last one becomes primary — see [`Scene`].
     pub fn remove(&mut self, id: ModelId) -> bool {
         let Some(index) = self.models.iter().position(|model| model.id == id) else {
             return false;
         };
         self.models.remove(index);
-        if self.active == Some(id) {
-            self.active = self.models.first().map(|model| model.id);
-        }
+        self.selected.retain(|sid| *sid != id);
         true
+    }
+
+    /// Remove every selected model — Delete's target. Returns how many went.
+    pub fn remove_selected(&mut self) -> usize {
+        let targets = self.action_targets();
+        let removed = targets
+            .iter()
+            .filter(|id| self.remove(**id))
+            .count();
+        self.selected.clear();
+        removed
     }
 
     /// The scene's height above the plate: the tallest visible model's top.
@@ -534,11 +742,20 @@ mod tests {
     fn scene_with(two: bool) -> Scene {
         let mut scene = Scene::new();
         let first = scene.push("a".into(), mesh(), [0.0; 3], [0.0; 3], [1.0; 3], true);
-        scene.set_active(first);
+        scene.select(first, SelectionMode::Single);
         if two {
             scene.push("b".into(), mesh(), [20.0; 3], [0.0; 3], [1.0; 3], true);
         }
         scene
+    }
+
+    /// Three models plus their ids, in import order.
+    fn three_models() -> (Scene, [ModelId; 3]) {
+        let mut scene = Scene::new();
+        let a = scene.push("c".into(), mesh(), [0.0; 3], [0.0; 3], [1.0; 3], true);
+        let b = scene.push("a".into(), mesh(), [20.0; 3], [0.0; 3], [1.0; 3], true);
+        let c = scene.push("b".into(), mesh(), [40.0; 3], [0.0; 3], [1.0; 3], true);
+        (scene, [a, b, c])
     }
 
     #[test]
@@ -557,24 +774,241 @@ mod tests {
         assert!((centre - model.mesh.center).length() < 1e-4);
     }
 
+    /// `selectModel(id, 'single')` — a plain click replaces the set and the
+    /// clicked model becomes primary.
     #[test]
-    fn removing_the_active_model_promotes_the_next() {
-        let mut scene = scene_with(true);
-        let active = scene.active.unwrap();
-        assert!(scene.remove(active));
-        assert_eq!(scene.models.len(), 1);
-        assert_eq!(scene.active, Some(scene.models[0].id));
-        scene.remove(scene.models[0].id);
-        assert!(scene.is_empty());
-        assert_eq!(scene.active, None);
+    fn a_plain_click_selects_exactly_that_model() {
+        let (mut scene, [a, b, c]) = three_models();
+        assert!(scene.select(a, SelectionMode::Single));
+        assert_eq!(scene.selected(), &[a]);
+        assert_eq!(scene.primary(), Some(a));
+
+        assert!(scene.select(c, SelectionMode::Single));
+        assert_eq!(scene.selected(), &[c]);
+        assert_eq!(scene.primary(), Some(c));
+
+        scene.select(b, SelectionMode::Single);
+        assert_eq!(scene.selected(), &[b], "single must drop the rest");
+        assert_eq!(scene.primary(), Some(b));
+        assert!(!scene.is_selected(a));
+    }
+
+    /// `selectModel(id, 'toggle')` — ctrl/meta in both the canvas and the rows.
+    #[test]
+    fn toggle_adds_then_removes_and_leaves_the_rest() {
+        let (mut scene, [a, b, c]) = three_models();
+        scene.select(a, SelectionMode::Single);
+
+        scene.select(c, SelectionMode::Toggle);
+        assert_eq!(scene.selected(), &[a, c]);
+        assert_eq!(scene.primary(), Some(c), "a toggle-in becomes primary");
+        scene.select(b, SelectionMode::Toggle);
+        assert_eq!(scene.selected(), &[a, c, b]);
+        assert_eq!(scene.primary(), Some(b));
+
+        scene.select(c, SelectionMode::Toggle);
+        assert_eq!(scene.selected(), &[a, b], "toggle-out removes only that id");
+        assert_eq!(scene.primary(), Some(b));
+
+        scene.select(b, SelectionMode::Toggle);
+        scene.select(a, SelectionMode::Toggle);
+        assert!(scene.selected().is_empty());
+        assert_eq!(scene.primary(), None);
+    }
+
+    /// `selectModel(id, 'add')` — a canvas shift-click. Adding an id that is
+    /// already in the set promotes it to primary without duplicating it, which
+    /// is what `setActiveModelId(id)` did alongside the no-op set write.
+    #[test]
+    fn add_promotes_an_existing_id_instead_of_duplicating_it() {
+        let (mut scene, [a, b, c]) = three_models();
+        scene.select(a, SelectionMode::Single);
+        scene.select(b, SelectionMode::Add);
+        assert_eq!(scene.selected(), &[a, b]);
+
+        scene.select(a, SelectionMode::Add);
+        assert_eq!(scene.selected(), &[b, a]);
+        assert_eq!(scene.primary(), Some(a));
+
+        scene.select(c, SelectionMode::Add);
+        assert_eq!(scene.selected(), &[b, a, c]);
+        assert_eq!(scene.primary(), Some(c));
+    }
+
+    /// `handleModelRangeSelection(ids, clicked.id, 'replace')` with the range
+    /// taken from `orderedModelIds`.
+    #[test]
+    fn a_shift_range_replaces_the_set_and_the_clicked_row_is_primary() {
+        let (mut scene, [a, b, c]) = three_models();
+        let ordered = scene.ordered_ids();
+        // `a`("c"), `b`("a"), `c`("b") sort by name to `b, c, a`.
+        assert_eq!(ordered, vec![b, c, a]);
+
+        scene.select(b, SelectionMode::Single);
+        // Shift-click the panel's last row: the whole ordered list is the range.
+        assert!(scene.select_range(&ordered, a, false));
+        assert_eq!(scene.selected(), &[b, c, a]);
+        assert_eq!(scene.primary(), Some(a));
+
+        // A narrower range from the middle to the end.
+        assert!(scene.select_range(&ordered[1..], a, false));
+        assert_eq!(scene.selected(), &[c, a], "replace drops b");
+        assert_eq!(scene.primary(), Some(a));
+    }
+
+    /// Shift with ctrl/meta held: `handleModelRangeSelection(..., 'add')` keeps
+    /// the previous selection and unions the range into it.
+    #[test]
+    fn a_ctrl_shift_range_unions_with_the_previous_selection() {
+        let (mut scene, [a, b, c]) = three_models();
+        let ordered = scene.ordered_ids(); // b, c, a
+        scene.select(b, SelectionMode::Single);
+
+        assert!(scene.select_range(&ordered[1..], c, true));
+        // Membership is the union; the clicked id is last so it stays primary
+        // (the source's separate `setActiveModelId(activeId)`).
+        assert_eq!(scene.selected(), &[b, a, c]);
+        assert_eq!(scene.primary(), Some(c));
+
+        // The additive range repeats ids already held: no duplicates.
+        assert!(scene.select_range(&ordered, a, true));
+        assert_eq!(scene.selected(), &[b, c, a]);
+        assert_eq!(scene.primary(), Some(a));
+    }
+
+    /// A range of stale ids changes nothing and reports it, like the source's
+    /// early return on an empty range.
+    #[test]
+    fn a_stale_range_does_not_touch_the_selection() {
+        let (mut scene, [a, ..]) = three_models();
+        scene.select(a, SelectionMode::Single);
+        assert!(!scene.select_range(&[ModelId(999)], ModelId(999), false));
+        assert_eq!(scene.selected(), &[a]);
+    }
+
+    /// Deleting the primary leaves its peers selected and the next last member
+    /// becomes primary — the state the source could not express, because it
+    /// nulled `activeModelId` while keeping `selectedModelIds`
+    /// (`useSceneCollectionManager.ts:5517-5521`).
+    #[test]
+    fn removing_the_primary_keeps_the_rest_and_promotes_the_previous_member() {
+        let (mut scene, [a, b, c]) = three_models();
+        scene.select(a, SelectionMode::Single);
+        scene.select(b, SelectionMode::Add);
+        scene.select(c, SelectionMode::Add);
+        assert_eq!(scene.primary(), Some(c));
+
+        assert!(scene.remove(c));
+        assert_eq!(scene.models.len(), 2);
+        assert_eq!(scene.selected(), &[a, b]);
+        assert_eq!(scene.primary(), Some(b));
+
+        assert!(scene.remove(a));
+        assert_eq!(scene.selected(), &[b]);
+        assert!(!scene.is_selected(a), "a removal prunes the selection");
     }
 
     #[test]
-    fn unbounded_ids_do_not_become_active() {
-        let mut scene = scene_with(false);
+    fn removing_a_non_selected_model_leaves_the_selection_alone() {
+        let (mut scene, [a, b, _]) = three_models();
+        scene.select(b, SelectionMode::Single);
+        assert!(scene.remove(a));
+        assert_eq!(scene.selected(), &[b]);
+        assert_eq!(scene.primary(), Some(b));
+    }
+
+    /// Delete acts on the whole selection (`page.tsx:8390`, `dispatchDeleteModelAction`).
+    #[test]
+    fn remove_selected_removes_every_selected_model() {
+        let (mut scene, [a, b, c]) = three_models();
+        scene.select(a, SelectionMode::Single);
+        scene.select(b, SelectionMode::Toggle);
+        assert_eq!(scene.remove_selected(), 2);
+        assert_eq!(scene.models.len(), 1);
+        assert_eq!(scene.models[0].id, c);
+        assert!(scene.selected().is_empty());
+        assert_eq!(scene.primary(), None);
+    }
+
+    /// `clearModelSelection` (`useSceneCollectionManager.ts:3236-3239`).
+    #[test]
+    fn clearing_empties_the_set() {
+        let (mut scene, [a, b, c]) = three_models();
+        scene.select(a, SelectionMode::Single);
+        scene.select(b, SelectionMode::Toggle);
+        scene.select(c, SelectionMode::Toggle);
+        scene.clear_selection();
+        assert!(scene.selected().is_empty());
+        assert_eq!(scene.primary(), None);
+        assert_eq!(scene.models.len(), 3, "clearing selects nothing; it does not delete");
+        assert!(scene.action_targets().is_empty());
+    }
+
+    #[test]
+    fn unbounded_ids_never_join_the_selection() {
+        let (mut scene, [a, ..]) = three_models();
+        scene.select(a, SelectionMode::Single);
         let stale = ModelId(999);
-        assert!(!scene.set_active(stale));
-        assert_ne!(scene.active, Some(stale));
+        assert!(!scene.select(stale, SelectionMode::Single));
+        assert!(!scene.select(stale, SelectionMode::Toggle));
+        assert!(!scene.select(stale, SelectionMode::Add));
+        assert_eq!(scene.selected(), &[a]);
+        assert_eq!(scene.action_targets(), vec![a]);
+    }
+
+    /// `resolveModelActionTargetIds`: the selection, deduplicated, and nothing
+    /// when the set is empty.
+    #[test]
+    fn action_targets_are_the_selection_in_selection_order() {
+        let (mut scene, [a, b, c]) = three_models();
+        assert!(scene.action_targets().is_empty());
+        scene.select(c, SelectionMode::Single);
+        scene.select(a, SelectionMode::Add);
+        scene.select(b, SelectionMode::Add);
+        assert_eq!(scene.action_targets(), vec![c, a, b]);
+    }
+
+    /// The gizmo sits on the mean of the selected models' *positions* —
+    /// `getSelectionGizmoCenter`'s average of `transform.position`
+    /// (`selectionPosition.ts:9-28`). In this port the position is
+    /// `translate + mesh.center` (the source's re-centred geometry stores the
+    /// bbox centre there), and `three_models` offsets the translations on all
+    /// three axes: a (0,0,0), b (20,20,20), c (40,40,40), with the fixture's
+    /// bbox centre (5,5,2), so the positions are (5,5,2), (25,25,22) and
+    /// (45,45,42).
+    #[test]
+    fn selection_centre_averages_the_selected_models() {
+        let (mut scene, [a, b, c]) = three_models();
+        scene.select(a, SelectionMode::Single);
+        let single = scene.selection_center().unwrap();
+        assert!((single - Vec3::new(5.0, 5.0, 2.0)).length() < 1e-4);
+
+        scene.select(c, SelectionMode::Add);
+        let pair = scene.selection_center().unwrap();
+        assert!(
+            (pair - Vec3::new(25.0, 25.0, 22.0)).length() < 1e-4,
+            "pair centre {pair}"
+        );
+
+        scene.select(b, SelectionMode::Add);
+        let three = scene.selection_center().unwrap();
+        assert!(
+            (three - Vec3::new(25.0, 25.0, 22.0)).length() < 1e-4,
+            "triple centre {three}"
+        );
+    }
+
+    /// The panel's row order: `a.name.localeCompare(b.name)`, with the id as a
+    /// tie-break.
+    #[test]
+    fn ordered_ids_follow_the_models_panel_order() {
+        let (scene, [a, b, c]) = three_models();
+        // Names are "c", "a", "b".
+        assert_eq!(scene.ordered_ids(), vec![b, c, a]);
+
+        let mut scene = scene;
+        scene.models[2].name = "A".into(); // "b" -> "A": case folding ties with "a"
+        assert_eq!(scene.ordered_ids(), vec![b, c, a], "the id breaks the tie");
     }
 
     #[test]

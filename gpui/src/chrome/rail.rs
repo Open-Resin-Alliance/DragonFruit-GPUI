@@ -862,6 +862,9 @@ fn vertical_rail(
         .top(px(RAIL_TOP))
         .bottom(px(0.))
         .w(px(RAIL_WIDTH))
+        // The rail is a real surface over the canvas: a press on it is the
+        // rail's, not the canvas's (`occlude` stops the hit test here).
+        .occlude()
         .flex()
         .flex_col()
         .items_stretch()
@@ -892,6 +895,10 @@ fn horizontal_rail(
         .child(
             div()
                 .id("tool-rail")
+                // Only the tiles' own row claims the pointer; the full-width
+                // wrapper above stays transparent, matching the source's
+                // `pointer-events-none` container.
+                .occlude()
                 .flex()
                 .flex_row()
                 .items_stretch()

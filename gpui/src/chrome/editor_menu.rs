@@ -154,7 +154,7 @@ fn select(entity: &WeakEntity<DragonFruit>, id: &str, cx: &mut App) {
                 // `hasTargetModel`.
                 "delete" => {
                     if this.has_mesh() {
-                        this.delete_model();
+                        this.delete_selected();
                     }
                 }
 

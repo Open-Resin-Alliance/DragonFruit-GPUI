@@ -398,18 +398,20 @@ pub(crate) fn sync_from_entity(entity: &WeakEntity<DragonFruit>, cx: &mut App) {
                     .as_ref()
                     .map(|batches| batches.straight_shafts.len() + batches.tapered_shafts.len())
                     .unwrap_or(0);
-                let transform = this.transform();
+                // The panel shows a multi-selection's position origin, so it
+                // reads the selection-aware transform, not the primary's.
+                let transform = this.panel_transform();
                 store.transform.position = transform.translate.to_array();
                 store.transform.rotation = transform.rotation;
                 store.transform.scale = transform.scale.to_array();
-                if let Some(mesh) = this.active_mesh() {
+                if let Some(mesh) = this.primary_mesh() {
                     store.transform.has_bbox = true;
                     store.transform.original_size = mesh.size;
                     store.mesh_min_z = mesh.center.z - mesh.size[2] * 0.5;
                     store.mesh_center_z = mesh.center.z;
                     store.mesh_center = [mesh.center.x, mesh.center.y];
                     store.duplicate.active_model_name =
-                        this.active_model_name().map(|name| name.to_owned().into());
+                        this.primary_model_name().map(|name| name.to_owned().into());
                 } else {
                     store.transform.has_bbox = false;
                     store.transform.original_size = [1.0; 3];
@@ -417,7 +419,7 @@ pub(crate) fn sync_from_entity(entity: &WeakEntity<DragonFruit>, cx: &mut App) {
                     store.duplicate.active_model_name = None;
                 }
                 store.arrange.model_count = this.model_count();
-                store.arrange.selected_model_count = if this.selected() { 1 } else { 0 };
+                store.arrange.selected_model_count = this.selection_count();
                 store.organic.disabled = !store.has_mesh;
                 store.islands.model_mut().has_geometry = store.has_mesh;
             });
@@ -449,7 +451,7 @@ fn flush(
     entity
         .update(cx, |this, cx| {
             if transform_changed {
-                this.set_active_transform(position, rotation, scale);
+                this.set_selection_transform(position, rotation, scale);
             }
             cx.notify();
         })

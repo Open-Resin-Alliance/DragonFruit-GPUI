@@ -1,0 +1,14 @@
+{
+  "name": "Selection survives a control click",
+  "model": "../test-cube.stl",
+  "steps": [
+    { "kind": "wait", "ms": 1400 },
+    { "kind": "expect", "state": { "has_mesh": true, "selected": true } },
+    { "kind": "click", "target": "appbar/settings" },
+    { "kind": "wait", "ms": 200 },
+    { "kind": "expect", "state": { "show_settings": true, "selected": true } },
+    { "kind": "key", "key": "Escape" },
+    { "kind": "wait", "ms": 200 },
+    { "kind": "expect", "state": { "selected": true } }
+  ]
+}

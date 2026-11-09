@@ -338,6 +338,13 @@ fn panel_item(
     div()
         .w(px(width))
         .flex_shrink_0()
+        // The source's card is `pointer-events-auto` inside a
+        // `pointer-events-none` dock (see the module note): every press on a
+        // panel belongs to the panel, and must not also reach the canvas's
+        // full-window hitbox behind it. `occlude` is the GPUI spelling of that
+        // — it stops the hit test at this box instead of letting lower
+        // elements (`app.rs`'s `gpu_canvas`) answer the same press.
+        .occlude()
         .on_mouse_down(
             MouseButton::Right,
             move |event: &MouseDownEvent, _: &mut Window, cx: &mut App| {

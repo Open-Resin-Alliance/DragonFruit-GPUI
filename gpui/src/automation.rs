@@ -251,7 +251,13 @@ impl Step {
 pub(crate) struct Snapshot {
     pub mode: String,
     pub has_mesh: bool,
+    /// Whether the plate's model is in the selection set — the scene's only
+    /// selection state. `true` means at least one selected model exists in
+    /// `models` (`Scene::action_targets` filters stale ids), so a scenario
+    /// cannot pass on an empty set.
     pub selected: bool,
+    /// How many models are selected.
+    pub selected_count: usize,
     pub active_tool: usize,
     pub support_panel: String,
     pub translate: [f32; 3],
@@ -314,7 +320,8 @@ impl DragonFruit {
         Snapshot {
             mode: self.mode.label().to_owned(),
             has_mesh: self.has_mesh(),
-            selected: self.selected(),
+            selected: self.has_selection(),
+            selected_count: self.selection_count(),
             active_tool: self.active_tool,
             support_panel: support_panel_name(self.support_panel).to_owned(),
             translate: transform.translate.to_array(),
