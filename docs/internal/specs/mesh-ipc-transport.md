@@ -194,3 +194,40 @@ still worth doing because the *slicing preview* and layer views may stay in the
 webview. And P0 decides whether this is worth it: if a 6 MB transfer costs 8 ms
 after P2, a native surface buys little; if it costs 400 ms and stalls the frame
 loop, it is the only real answer.
+
+## Does WebGPU in three.js change this?
+
+Partly — and it changes the **rendering** half, not the **transfer** half.
+
+What it does not do: WebGPU cannot import memory owned by our process. A
+`GPUBuffer` is still filled from a JS `ArrayBuffer`, so the chain stays
+IPC copy → JS heap → GPU upload. The native surface remains the only
+architecture that removes the boundary copies.
+
+What it improves:
+
+- uploads no longer stall the frame the way `WebGL2.gl.bufferData` can; WebGPU
+  buffers are staged asynchronously, so a 6 MB upload overlaps rendering
+  instead of blocking a frame;
+- compute shaders let the **payload shrink further**: send `u16` positions and
+  normals the GPU reconstructs, instead of decoding them in JS (this multiplies
+  with P2's quantisation and zstd gains);
+- multi-draw and instancing overhead is lower, which matters for a scene that
+  draws many models and supports.
+
+Platform support (`navigator.gpu`, per the W3C implementation-status page):
+
+| Tauri target | WebView | WebGPU |
+|---|---|---|
+| Windows | WebView2 (Chromium, evergreen) | available (Chromium 113+) |
+| macOS | system WKWebView | Safari 26+ only, i.e. macOS 26+; older macOS falls back |
+| Linux | webkit2gtk | not shipped, falls back |
+
+three.js's `WebGPURenderer` falls back to WebGL 2, so the gap is a performance
+tier rather than a broken build — but the porting cost is real for this app:
+`src/features/shaders/mesh/*` are custom GLSL `ShaderMaterial`s, which have to
+become TSL to run on the WebGPU backend.
+
+Verdict: worth a spike **after P0/P2**, because it is cheap to evaluate and it
+makes the cheap payloads cheaper to consume. It is not a substitute for the
+transport work, and it does not remove the reason to consider a native surface.
