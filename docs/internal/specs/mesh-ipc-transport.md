@@ -143,3 +143,54 @@ webview boundary copy, so it comes last.
 Do P0 and P2 first — both are local, testable, and P2 is the largest single
 factor. Then P1 to remove the remaining copies and the platform asymmetry. P3
 is the architectural change worth planning next; P4 is a refinement.
+
+## The alternative architecture: native viewport, HTML shell
+
+If the goal is that **no mesh ever crosses IPC**, the way to get it is to stop
+drawing the scene in the webview: render it with wgpu into a surface owned by
+the Rust process, and keep the Next.js UI as the shell around it.
+
+Tauri v2 exposes what is needed to create that surface —
+`WebviewWindow::hwnd()` (`tauri-2.11.6/src/webview/webview_window.rs`) and
+`WebviewWindow::ns_window()` — so a `wgpu::Surface` over a child window or
+`sibling` `NSView` is straightforward. The hard part is not the surface,
+it is **composition and input**, because z-order is per window, not per region.
+
+Two variants, and they are very different jobs:
+
+| | Surface **beneath** a transparent webview | Surface **above** the webview |
+|---|---|---|
+| HTML overlays (view cube, chips, sliders) | stay HTML — they paint over the hole | must be drawn in wgpu, like the GPUI port |
+| Webview | transparent (WebView2 `DefaultBackgroundColor` transparent, WKWebView `isOpaque = false`) | opaque |
+| Input over the viewport | the webview owns the pixels, so DOM events must be forwarded to Rust (camera deltas, picking — small, no mesh) | the surface receives input directly |
+| Hard part | transparent-webview compositing and resize/DPI sync; corruption on resize is a known failure mode | re-implementing every viewport overlay natively |
+
+Platform reality: macOS is the friendliest (opaque-off WKWebView plus a Metal
+layer sibling is a well-trodden arrangement); Windows generally works with
+WebView2 transparency but is where resize artifacts show up; **Linux
+(webkit2gtk) is the likely blocker** — transparent webviews there are not
+reliable, so this architecture would need a fallback for Linux.
+
+What it costs, honestly:
+
+- the scene must be drawn by wgpu, not three.js — this branch already contains
+  that renderer (`gpui/crates/gpui-core/src/viewport.rs`: mesh pass, plate,
+  axes, view cube, camera), so the asset exists, but it must be decoupled from
+  GPUI;
+- one more surface to keep in sync with the DOM viewport rect: position, size,
+  DPR, occlusion (a modal open must hide the surface or it paints over it);
+- input forwarding for camera gestures, or native overlays if the surface sits
+  on top;
+- window-level transparency: the Tauri window itself must be transparent, which
+  changes how every panel draws.
+
+The payoff: **zero mesh traffic**, no copies, 60 fps on meshes that today
+cannot cross at all, and slicing results stay where the engine is.
+
+### Relationship to the other proposals
+
+This does not replace P0–P2; it replaces P1 and P3. P2 (smaller payload) is
+still worth doing because the *slicing preview* and layer views may stay in the
+webview. And P0 decides whether this is worth it: if a 6 MB transfer costs 8 ms
+after P2, a native surface buys little; if it costs 400 ms and stalls the frame
+loop, it is the only real answer.
