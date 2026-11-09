@@ -71,9 +71,9 @@ use std::path::Path;
 use std::time::Duration;
 
 use gpui::{
-    AsyncWindowContext, Context, KeyDownEvent, KeyUpEvent, Keystroke, Modifiers, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, PlatformInput, Point, ScrollDelta,
-    ScrollWheelEvent, WeakEntity, Window, point, px,
+    AsyncWindowContext, Bounds, Context, Div, KeyDownEvent, KeyUpEvent, Keystroke, Modifiers,
+    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, PlatformInput, Point,
+    ScrollDelta, ScrollHandle, ScrollWheelEvent, WeakEntity, Window, point, px,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -93,6 +93,12 @@ pub(crate) struct Scenario {
     /// scenarios/support-rail.json` works on its own.
     #[serde(default)]
     model: Option<String>,
+    /// Built-in printer presets to install into the throwaway store before the
+    /// first step, through the picker's own `add_preset` path. The profile
+    /// modal has no printer without one, and its editor/material dialogs are
+    /// unreachable from a scenario otherwise.
+    #[serde(default)]
+    seed_printers: Vec<String>,
     steps: Vec<Step>,
 }
 
@@ -242,6 +248,218 @@ impl Step {
     }
 }
 
+// ── Measured rectangles ─────────────────────────────────────────────────────
+
+/// One element's window-space box, as the frame laid it out.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub(crate) struct RectSnapshot {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+}
+
+/// The profile modal's body scroller. `on_children_prepainted` reports layout
+/// bounds without a scroll container's translate, so a target inside the body
+/// is resolved with this offset applied.
+thread_local! {
+    static BODY_SCROLL: std::cell::RefCell<Option<ScrollHandle>> =
+        std::cell::RefCell::new(None);
+}
+
+/// The one handle `mod.rs` attaches to the profile modal's body.
+pub(crate) fn body_scroll() -> ScrollHandle {
+    BODY_SCROLL.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if slot.is_none() {
+            *slot = Some(ScrollHandle::new());
+        }
+        slot.as_ref().expect("set above").clone()
+    })
+}
+
+fn body_scroll_offset() -> f32 {
+    BODY_SCROLL.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .map(|handle| handle.offset().y.0)
+            .unwrap_or(0.0)
+    })
+}
+
+struct RectStore {
+    /// Bumped once per `printer_profiles` build, i.e. once per painted frame
+    /// while the modal is up. A dialog that closed since the last frame is not
+    /// re-recorded, so its stale box drops out of the snapshot.
+    generation: u64,
+    entries: BTreeMap<&'static str, (u64, RectSnapshot)>,
+}
+
+thread_local! {
+    static RECTS: std::cell::RefCell<RectStore> = std::cell::RefCell::new(RectStore {
+        generation: 0,
+        entries: BTreeMap::new(),
+    });
+}
+
+/// Start a frame's rect pass. Called by the profile modal, the only surface
+/// whose geometry scenarios assert on.
+pub(crate) fn begin_frame() {
+    RECTS.with(|rects| rects.borrow_mut().generation += 1);
+}
+
+/// Drop every recorded box (the modal closed).
+pub(crate) fn clear_rects() {
+    RECTS.with(|rects| rects.borrow_mut().entries.clear());
+    BODY_SCROLL.with(|slot| *slot.borrow_mut() = None);
+}
+
+/// Record one element's real bounds. `name` is the id a scenario asserts on.
+pub(crate) fn record_rect(name: &'static str, bounds: Bounds<Pixels>) {
+    let rect = RectSnapshot {
+        x: bounds.origin.x.0,
+        y: bounds.origin.y.0,
+        w: bounds.size.width.0,
+        h: bounds.size.height.0,
+    };
+    RECTS.with(|rects| {
+        let mut rects = rects.borrow_mut();
+        let generation = rects.generation;
+        rects.entries.insert(name, (generation, rect));
+    });
+}
+
+/// Attach `names` to `element`'s children in layout order: GPUI reports the
+/// children's prepainted bounds, which is the only public measurement the
+/// window offers (`Window` keeps its hitboxes private).
+pub(crate) fn measure_children(element: Div, names: &'static [&'static str]) -> Div {
+    element.on_children_prepainted(
+        move |children: Vec<Bounds<Pixels>>, _: &mut Window, _: &mut gpui::App| {
+            for (name, bounds) in names.iter().zip(children.iter()) {
+                record_rect(name, *bounds);
+            }
+        },
+    )
+}
+
+/// The boxes measured in the current frame, keyed by name.
+fn measured_rects() -> BTreeMap<String, RectSnapshot> {
+    RECTS.with(|rects| {
+        let rects = rects.borrow();
+        rects
+            .entries
+            .iter()
+            .filter(|(_, (generation, _))| *generation == rects.generation)
+            .map(|(name, (_, rect))| ((*name).to_owned(), *rect))
+            .collect()
+    })
+}
+
+/// The measured centre of `name`, for a scenario click that names an element
+/// no static constant can locate.
+///
+/// The prepainted bounds already carry the scroll container's translate — a
+/// `wheel` step visibly moves them (`material-edit` 827 → 713) — so adding
+/// `body_scroll_offset()` here would double-count it and click past the
+/// element. The offset is retained only to prove a scenario actually scrolled.
+fn measured_point(name: &str) -> Option<Rect> {
+    measured_rects().get(name).map(|rect| Rect {
+        x: rect.x,
+        y: rect.y,
+        w: rect.w,
+        h: rect.h,
+    })
+}
+
+/// One modal card's geometry, derived from the boxes the frame measured. A
+/// scenario asserts `height_ratio ≤ 0.88` and `center_error ≈ 0`.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub(crate) struct CardFit {
+    pub width: f32,
+    pub height: f32,
+    /// `height / window_height`.
+    pub height_ratio: f32,
+    /// `|card centre − window centre|`, in pixels.
+    pub center_error: f32,
+    /// `height − 2 − (header + body + footer)`. Every card draws `border_1()`,
+    /// so those two pixels are its top and bottom border by construction, not
+    /// a gap. Zero then means the body absorbed exactly the leftover card
+    /// height: a taller form scrolls instead of growing the card.
+    pub parts_error: Option<f32>,
+}
+
+/// The cards the profile surface mounts, with the part ids each records.
+const CARDS: [(&str, &str, &[&str]); 4] = [
+    (
+        "profile_modal",
+        "profile-modal",
+        &["profile-modal-header", "profile-modal-body"],
+    ),
+    (
+        "printer_editor",
+        "printer-editor",
+        &[
+            "printer-editor-header",
+            "printer-editor-body",
+            "printer-editor-footer",
+        ],
+    ),
+    (
+        "material_editor",
+        "material-editor",
+        &[
+            "material-editor-header",
+            "material-editor-body",
+            "material-editor-footer",
+        ],
+    ),
+    (
+        "material_create",
+        "material-create",
+        &[
+            "material-create-header",
+            "material-create-body",
+            "material-create-footer",
+        ],
+    ),
+];
+
+/// The cards measured in this frame, keyed by the name the scenario asserts.
+fn card_fits(window_height: f32) -> BTreeMap<String, CardFit> {
+    let rects = measured_rects();
+    let mut out = BTreeMap::new();
+    for (key, card, parts) in CARDS {
+        let Some(card) = rects.get(&format!("{card}-card")) else {
+            continue;
+        };
+        let parts: Vec<f32> = parts
+            .iter()
+            .filter_map(|part| rects.get(*part).map(|rect| rect.h))
+            .collect();
+        let parts_sum: f32 = parts.iter().sum();
+        out.insert(
+            key.to_owned(),
+            CardFit {
+                width: card.w,
+                height: card.h,
+                height_ratio: if window_height > 0.0 {
+                    card.h / window_height
+                } else {
+                    0.0
+                },
+                center_error: (card.y + card.h / 2.0 - window_height / 2.0).abs(),
+                parts_error: if parts.is_empty() {
+                    None
+                } else {
+                    // `border_1()`: 1px top + 1px bottom.
+                    Some(card.h - 2.0 - parts_sum)
+                },
+            },
+        );
+    }
+    out
+}
+
 // ── Snapshot ────────────────────────────────────────────────────────────────
 
 /// The parts of the shell a scenario can assert on: the workspace, the model's
@@ -291,6 +509,15 @@ pub(crate) struct Snapshot {
     /// The ids the frame passed to `panel_stack`, in mount order.
     pub panels: Vec<String>,
     pub panel_count: usize,
+    /// Real layout bounds of the surfaces that measure themselves, keyed by
+    /// the id they recorded in this frame (`profile-modal-card`, …). Empty
+    /// once that surface unmounts.
+    pub rects: BTreeMap<String, RectSnapshot>,
+    /// The window's content height, the denominator of every `88vh` cap.
+    pub window_height: f32,
+    /// The modal cards measured this frame, keyed `profile_modal`,
+    /// `printer_editor`, `material_editor`, `material_create`.
+    pub geometry: BTreeMap<String, CardFit>,
 }
 
 /// `Camera::home`'s target.
@@ -356,6 +583,9 @@ impl DragonFruit {
                 .map(|id| (*id).to_owned())
                 .collect(),
             panel_count: self.mounted_panels.len(),
+            rects: measured_rects(),
+            window_height: self.window_height,
+            geometry: card_fits(self.window_height),
         }
     }
 }
@@ -382,6 +612,17 @@ async fn run(this: WeakEntity<DragonFruit>, cx: &mut AsyncWindowContext, scenari
     if width <= 0.0 {
         eprintln!("scenario: the window never rendered");
         std::process::exit(1);
+    }
+
+    // `seed_printers`: install built-in presets the way the library's
+    // `Add printer` does, so the profile modal's rail, editor and material
+    // dialogs exist. Only the throwaway scenario store is touched.
+    if !scenario.seed_printers.is_empty() {
+        for preset_id in &scenario.seed_printers {
+            crate::features::printer_picker::seed_preset(preset_id);
+        }
+        this.update(cx, |_, cx| cx.notify()).ok();
+        wait_for_frames(&this, cx, 1, 400).await;
     }
 
     let Ok(initial) = this.read_with(cx, |app, _| app.snapshot()) else {
@@ -642,7 +883,7 @@ fn check(state: &Map<String, Value>, snapshot: &Snapshot) -> Result<(), String> 
     let actual = serde_json::to_value(snapshot).map_err(|error| error.to_string())?;
     let mut failures = Vec::new();
     for (key, expected) in state {
-        match actual.get(key) {
+        match path(&actual, key) {
             None => failures.push(format!("`{key}` is not a snapshot field")),
             Some(value) => {
                 if !json_matches(value, expected) {
@@ -662,14 +903,38 @@ fn check(state: &Map<String, Value>, snapshot: &Snapshot) -> Result<(), String> 
     }
 }
 
+/// A dotted path into the snapshot (`geometry.printer_editor.height_ratio`).
+fn path<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
+    let mut current = value;
+    for part in key.split('.') {
+        current = current.get(part)?;
+    }
+    Some(current)
+}
+
 /// Equality with a relative tolerance on numbers, so a scenario can write
-/// `405.46` for a computed distance.
+/// `405.46` for a computed distance. A plain object expectation is a bound:
+/// `{"max": 0.88}` / `{"min": 0.0}`.
 fn json_matches(actual: &Value, expected: &Value) -> bool {
     match (actual, expected) {
         (Value::Number(left), Value::Number(right)) => match (left.as_f64(), right.as_f64()) {
             (Some(left), Some(right)) => (left - right).abs() <= 1e-3 * left.abs().max(1.0),
             _ => actual == expected,
         },
+        (Value::Number(left), Value::Object(bound)) => {
+            let Some(left) = left.as_f64() else {
+                return false;
+            };
+            let max_ok = bound
+                .get("max")
+                .and_then(Value::as_f64)
+                .map_or(true, |max| left <= max + 1e-3);
+            let min_ok = bound
+                .get("min")
+                .and_then(Value::as_f64)
+                .map_or(true, |min| left >= min - 1e-3);
+            (max_ok && min_ok) && (bound.contains_key("max") || bound.contains_key("min"))
+        }
         (Value::Array(left), Value::Array(right)) => {
             left.len() == right.len()
                 && left
@@ -1006,7 +1271,10 @@ pub(crate) fn resolve(name: &str, app: &DragonFruit) -> Option<Rect> {
             if APP_MENU_ROWS.iter().any(|(id, _)| *id == name) {
                 return app_menu_row(name);
             }
-            rail_rect(name, app.mode)
+            // Modal controls have no layout constant: their boxes are the ones
+            // the frame measured. `printer-profiles-edit`, `material-edit`, …
+            // resolve to where they actually are.
+            rail_rect(name, app.mode).or_else(|| measured_point(name))
         }
     }
 }

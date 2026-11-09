@@ -10,6 +10,7 @@ pub mod icons;
 pub mod log;
 pub mod panel_layout;
 pub mod scene;
+pub mod sponsors;
 pub mod state;
 pub mod stl;
 pub mod support_state;

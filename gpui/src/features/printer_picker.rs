@@ -2056,6 +2056,14 @@ pub fn select_profile(id: &str) {
     }
 }
 
+/// `handleAdd`'s store write, for the `--scenario` driver: install a built-in
+/// preset into the throwaway store so the profile modal has a printer to open.
+/// The library sheet's own click path is what the app uses; this is the same
+/// `add_preset` without the two clicks a scenario cannot name reliably.
+pub(crate) fn seed_preset(preset_id: &str) {
+    store().add_preset(preset_id);
+}
+
 /// `movePrinterProfile`.
 pub fn move_profile(id: &str, before_id: Option<&str>) {
     store().move_before(id, before_id);

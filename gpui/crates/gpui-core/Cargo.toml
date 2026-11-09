@@ -20,3 +20,9 @@ resvg = "0.45"
 fontdue = "0.9"
 declarative-gpui = "0.3"
 winreg = "0.55"
+# Sponsor avatars (`src/components/settings/SponsorsCarousel.tsx`'s
+# `CachedAvatar`): the web build reaches them through the Tauri command
+# `fetch_sponsor_avatar` (reqwest) or the `/api/sponsor-avatar` proxy. This
+# build has neither, and GPUI's own `App::http_client` is a null client, so the
+# bytes come from `ureq` — rustls + ring, no async runtime.
+ureq = "3.3"

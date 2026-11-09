@@ -1,0 +1,53 @@
+{
+  "name": "profiles modal: card heights, 88vh caps and centring",
+  "seed_printers": ["generic-machine"],
+  "steps": [
+    { "kind": "wait", "ms": 1400 },
+    {
+      "kind": "expect",
+      "state": {
+        "show_printer_profiles": false
+      }
+    },
+    { "kind": "click", "target": "appbar/printer" },
+    { "kind": "wait", "ms": 200 },
+    {
+      "kind": "expect",
+      "state": {
+        "show_printer_profiles": true,
+        "window_height": { "min": 600 },
+        "geometry.profile_modal.height_ratio": { "min": 0.9, "max": 0.99 },
+        "geometry.profile_modal.center_error": { "max": 1 },
+        "geometry.profile_modal.parts_error": { "max": 1, "min": -1 },
+        "geometry.profile_modal.width": { "max": 1120 }
+      }
+    },
+    { "kind": "click", "target": "printer-profiles-edit" },
+    { "kind": "wait", "ms": 250 },
+    {
+      "kind": "expect",
+      "state": {
+        "geometry.printer_editor.height_ratio": { "max": 0.88 },
+        "geometry.printer_editor.center_error": { "max": 1 },
+        "geometry.printer_editor.parts_error": { "max": 1, "min": -1 },
+        "geometry.printer_editor.width": { "max": 960 }
+      }
+    },
+    { "kind": "key", "key": "Escape" },
+    { "kind": "wait", "ms": 250 },
+    { "kind": "hover", "target": "profile-modal-body" },
+    { "kind": "wheel", "target": "profile-modal-body", "delta": -30 },
+    { "kind": "wait", "ms": 250 },
+    { "kind": "click", "target": "material-edit" },
+    { "kind": "wait", "ms": 250 },
+    {
+      "kind": "expect",
+      "state": {
+        "geometry.material_editor.height_ratio": { "max": 0.88 },
+        "geometry.material_editor.center_error": { "max": 1 },
+        "geometry.material_editor.parts_error": { "max": 1, "min": -1 },
+        "geometry.material_editor.width": { "max": 920 }
+      }
+    }
+  ]
+}

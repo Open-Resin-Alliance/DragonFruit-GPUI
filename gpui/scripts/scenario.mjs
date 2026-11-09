@@ -66,7 +66,13 @@ function defaultBinary() {
 }
 
 // The scenarios this port ships, in the order the report lists them.
-export const shipped = ['app-bar', 'support-rail', 'new-scene', 'deselect'];
+export const shipped = [
+  'app-bar',
+  'support-rail',
+  'new-scene',
+  'deselect',
+  'profiles-modal',
+];
 
 function usage(message) {
   if (message) console.error(`scenario: ${message}`);

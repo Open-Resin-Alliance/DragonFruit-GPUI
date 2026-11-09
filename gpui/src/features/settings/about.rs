@@ -23,36 +23,55 @@
 //! inline-styled div, and its radius/background/padding are the class strings.
 //!
 //! PORT DEVIATIONS (About-specific; the shared ones are listed in `mod.rs`)
-//! - **Image assets.** `text_logo.svg`, `simple_icon.svg` and
-//!   `open_resin_alliance_logo_darkmode.png` are not in the GPUI asset set
-//!   (`gpui/assets` holds fonts and icons only). They *do* exist in the web
-//!   build's tree, at `public/dragonfruit_assets/branding/`, and are loaded from
-//!   there by compile-time-anchored path — the same trick `icons::icon` uses for
-//!   `gpui/assets/icons`. Nothing is missing and nothing is substituted: the
-//!   old text stand-in for the wordmark is gone.
+//! - **Image assets are embedded, and `img()` paints them, not `svg()`.** The
+//!   three marks live in the web build's tree at
+//!   `public/dragonfruit_assets/branding/` and are `include_bytes!`d into the
+//!   binary — a desktop build has no `public/` and no working directory to
+//!   resolve against. They are decoded through `img()`, whose SVG branch is
+//!   `SvgRenderer::render_single_frame` and keeps the artwork's own colours.
+//!   `svg().external_path(…)` — what this tab used before — does load the file,
+//!   but it paints the SVG as a *monochrome alpha mask tinted by
+//!   `style.text.color`*, and the three elements never set a colour:
+//!   `Svg::paint` gates on `self.external_path.as_ref().zip(style.text.color)`,
+//!   so with no `text_color` it painted nothing at all. `icons::icon` only works
+//!   because it sets one. Setting a tint would still flatten the wordmark's
+//!   `fill:white` / `rgb(255,44,126)` / `rgb(191,254,46)`, hence `img()`.
 //! - **Sponsors are the baked-in fallback list, fetched never.** The source
 //!   paints `sponsors.json` first and then replaces it with a live Open
 //!   Collective fetch (two collectives, 6 h `localStorage` cache, per-avatar
-//!   blob cache, `SponsorsCarousel.tsx:74-360`). The port has no HTTP client, so
-//!   it renders exactly the fallback list the source uses before/without a
-//!   fetch — the same 18 sponsors, same order, same amounts — through
-//!   [`SPONSORS`]. The loading branch (`sponsors === null`) and the
-//!   "No sponsors yet" empty branch are therefore unreachable and not spelled:
-//!   the list is never empty, so "no spinner forever" is not a state this tab
-//!   can enter.
-//! - **Avatars.** The fallback entries carry `image` URLs for 12 of the 18
-//!   sponsors; loading them needs the network, so every sponsor takes the
-//!   source's own monogram branch (`SponsorsCarousel.tsx:590-616`) — initials,
-//!   tier ring, tier ink. `SPONSORS` only stores `(name, profile, amount)`, so
-//!   the image URLs are not carried; adding them without an image loader would
-//!   be dead data. The initials maths is `sponsorInitials`
-//!   (`SponsorsCarousel.tsx:57-67`).
-//! - **Marquee.** The track is a 34 s CSS keyframe translating `-50%` over a
-//!   duplicated list (`SponsorsCarousel.tsx:562-650`). GPUI has no CSS
-//!   animation, so the row is a single copy in a horizontal scroller: same
-//!   single-row geometry, same 12px gaps, same `py-2`, and every sponsor stays
-//!   reachable instead of being clipped. The `ml-6` lead-in only exists to make
-//!   the loop restart invisible, so it is not reproduced.
+//!   blob cache, `SponsorsCarousel.tsx:74-360`). The port has no HTTP client for
+//!   the member documents, so it renders exactly the fallback list the source
+//!   uses before/without a fetch — the same 18 sponsors, same order, same
+//!   amounts — through [`SPONSORS`]. The loading branch (`sponsors === null`)
+//!   and the "No sponsors yet" empty branch are therefore unreachable and not
+//!   spelled: the list is never empty, so "no spinner forever" is not a state
+//!   this tab can enter.
+//! - **Avatars are fetched.** `sponsors.json` carries an `image` for 11 of the
+//!   18 sponsors; the About tab fetches, decodes and caches those through
+//!   [`gpui_core::sponsors`] (see that module for the transport and cache) and
+//!   paints the source's `CachedAvatar` 48px disk inside the 3px ring gutter.
+//!   Until the bytes land the tile shows the source's `Spinner size="lg"`; if
+//!   the fetch or the decode fails it shows the monogram branch — the source
+//!   falls back to the bare URL for a direct `<img>` load instead, which leaves
+//!   a blank circle once that load errors too. The initials maths is
+//!   `sponsorInitials` (`SponsorsCarousel.tsx:57-67`).
+//! - **Marquee, driven from the render loop.** The source animates the track
+//!   with a 34 s CSS keyframe (`SponsorsCarousel.tsx:627-643`): 3 s of dwell,
+//!   28 s translating `0` → `-50%`, 3 s of dwell, `linear`, `infinite`, paused
+//!   by `:hover` / `:focus-within`. The port duplicates the list the same way
+//!   and shifts the track by `left(-offset)`; the clock is wall time, and the
+//!   one-frame-ahead wrap distance is measured from the two copies'
+//!   prepainted bounds ([`MARQUEE`], [`marquee_prepaint`]). The trailing dwell
+//!   rests on the frame the loop restarts from, so the source's 3 s + 3 s
+//!   halves read as one ~6 s rest; the port keeps both, exactly as the keyframe
+//!   does. `focus-within` has no port — the tiles are not focusable here.
+//!   `:hover` is `marquee_hover_prepaint`: this GPUI line has no callback
+//!   hover (`.on_hover` is a `gpui-pre` API), so each prepaint tests
+//!   `window.mouse_position()` against the viewport's own painted rect. That
+//!   keeps the frame loop running while paused (no frames would mean no
+//!   prepaint and the pause could never be released); the clock freezes, so
+//!   the picture rests. Frames stop as soon as the About tab is not built, so
+//!   a closed modal or another tab costs nothing.
 //! - **Tier rings.** The source's ring is a `conic-gradient` plus a two-layer
 //!   `box-shadow` glow (`SponsorsCarousel.tsx:22-45`). A GPUI background takes
 //!   two stops, so the ring is the conic's first two stops as a 135° linear
@@ -86,7 +105,12 @@
 //!   has no GPUI form; the alpha that survives is baked into the colour
 //!   (`rgba(with_alpha(SURFACE_0, 0xCC))` for the sponsor viewport).
 
-use gpui::{BoxShadow, img, svg};
+use std::cell::RefCell;
+use std::sync::{Arc, LazyLock};
+use std::time::{Duration, Instant};
+
+use gpui::{Bounds, BoxShadow, Image, ImageFormat, ObjectFit, Pixels, img};
+use gpui_core::sponsors::{self, AvatarState};
 
 use super::*;
 
@@ -183,15 +207,20 @@ fn sponsor_rank(total: f32) -> SponsorRank {
     }
 }
 
-/// One sponsor tile — the `!s.image` branch (`SponsorsCarousel.tsx:590-616`):
-/// a `3rem` circle in a 3px gutter ring (`box-sizing: content-box`, so the
-/// tile is 54px), the monogram 15px for two letters and 19px for one,
-/// `leading-none tracking-wide` at semibold.
+/// One sponsor tile — `SponsorsCarousel.tsx:586-620`.
+///
+/// The outer circle is the source's ring: a `3rem` content box in a 3px gutter
+/// (`box-sizing: content-box`, so the tile is 54px), the rank gradient, the
+/// glow. Inside it:
+/// - with a decoded avatar (`s.image` → `CachedAvatar`, `:314-365`), the 48px
+///   image on a `surface-1` disk, `object-cover`;
+/// - while the fetch is in flight, the source's `Spinner size="lg"` on
+///   `color-mix(surface-1, transparent 20%)` with a `border-subtle` ring;
+/// - with no image at all, or after a failed fetch, the monogram branch
+///   (`:591-616`): initials, 15px for two letters and 19px for one,
+///   `leading-none tracking-wide` at semibold, tier ink on `surface-1`.
 fn sponsor_tile(name: &str, total: f32) -> Div {
     let rank = sponsor_rank(total);
-    let initials = sponsor_initials(name);
-    let short = initials.chars().count() <= 1;
-
     let mut tile = div()
         .w(px(54.)) // `width: 3rem` + `padding: 3px`, content-box
         .h(px(54.))
@@ -214,31 +243,54 @@ fn sponsor_tile(name: &str, total: f32) -> Div {
 
     // `background: var(--surface-1)`, `borderColor: transparent`, and
     // `color: gradient ? borderColor : var(--accent)`.
-    let ink = if rank.ring.is_some() { rank.border } else { ACCENT };
-    tile.child(
-        div()
-            .size_full()
-            .rounded_full()
+    let ink = if rank.ring.is_some() {
+        rank.border
+    } else {
+        ACCENT
+    };
+    let disk = div()
+        .size_full()
+        .rounded_full()
+        .bg(rgb(SURFACE_1))
+        .flex()
+        .items_center()
+        .justify_center();
+
+    let content = match sponsors::avatar_for(name).and_then(sponsors::state) {
+        Some(AvatarState::Ready(image)) => disk.overflow_hidden().child(
+            img(image)
+                .w(px(48.))
+                .h(px(48.))
+                .flex_shrink_0()
+                .object_fit(ObjectFit::Cover),
+        ),
+        Some(AvatarState::Loading) => disk
+            // `background: color-mix(surface-1, transparent 20%)`, border
+            // `border-subtle`, `color: text-muted`.
+            .bg(rgba(with_alpha(SURFACE_1, 0xCC)))
             .border_1()
-            .border_color(rgba(0x00000000))
-            .bg(rgb(SURFACE_1))
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(
+            .border_color(rgb(BORDER_SUBTLE))
+            .child(spinner(20.)),
+        Some(AvatarState::Failed) | None => {
+            let initials = sponsor_initials(name);
+            let short = initials.chars().count() <= 1;
+            disk.border_1().border_color(rgba(0x00000000)).child(
                 div()
                     .text_size(px(if short { 19. } else { 15. }))
                     .line_height(px(if short { 19. } else { 15. })) // `leading-none`
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(rgb(ink))
                     .child(initials),
-            ),
-    )
+            )
+        }
+    };
+
+    tile.child(content)
 }
 
 /// `SponsorsCarousel.tsx:491-651` — the `shrink-0 rounded-lg border px-3 py-2`
-/// card on `surface-1`, with the pinned header and the sponsor row.
-fn sponsors_card() -> Div {
+/// card on `surface-1`, with the pinned header and the animated sponsor row.
+fn sponsors_card(entity: WeakEntity<DragonFruit>) -> Div {
     // Header (`:494-514`): `flex items-center justify-between gap-2`, the
     // title at `text-[11px] font-semibold uppercase`, "via Open Collective" at
     // normal weight / 0.85 opacity, "Sponsor Us" at `text-[10px] font-medium`.
@@ -278,34 +330,71 @@ fn sponsors_card() -> Div {
                 .child(icon("heart", 12., ACCENT)),
         );
 
-    // Track (`:562-574`): `flex items-center gap-3 py-2` over the fallback list.
-    // The source duplicates the list for the 34s marquee; with no CSS animation
-    // the port keeps one copy and lets the viewport scroll horizontally.
-    let mut track = div().flex().items_center().gap(px(12.)).py(px(8.));
-    for &(name, _profile, total) in SPONSORS.iter() {
-        // Each tile is a `Tooltip content={label} maxWidth={220}`
-        // (`:571-614`). React portals that box to `<body>`; GPUI has no portal
-        // and the row lives in the source's `overflow-hidden` viewport, so the
-        // popover would be clipped away entirely — omitted, see the module note.
-        // `openExternal(href)` likewise has no port.
-        track = track.child(sponsor_tile(name, total));
+    // Track (`:562-574`): `flex items-center gap-3 py-2` over `[...sponsors,
+    // ...sponsors]`. Each copy is one child so the wrap distance can be
+    // measured from the two copies' bounds; the outer `gap-3` is the source's
+    // gap across the seam, and `ml-6` on each copy's first tile is its lead-in.
+    let offset = marquee_offset();
+    let mut track = div()
+        .relative()
+        // `transform: translateX(-offset)` — the keyframe's only animated
+        // property. Taffy resolves a relative inset after layout, so this
+        // shifts the painted row without reflowing it.
+        .left(px(-offset))
+        .flex()
+        .items_center()
+        .gap(px(12.))
+        .py(px(8.)); // py-2
+    for _ in 0..2 {
+        let mut copy = div().flex().items_center().gap(px(12.)).flex_shrink_0();
+        for (index, &(name, _profile, total)) in SPONSORS.iter().enumerate() {
+            // Each tile is the source's `inline-flex shrink-0 … py-1` button
+            // (`:574-578`); the wrapper keeps its 4px vertical padding, so a
+            // 54px ring makes a 62px item. The `Tooltip content={label}` on it
+            // (`:571`) is portaled to `<body>` in React and GPUI has no portal,
+            // so the popover would be clipped by the viewport — omitted, see
+            // the module note. `openExternal(href)` likewise has no port.
+            let mut item = div().flex_shrink_0().py(px(4.));
+            if index == 0 {
+                item = item.ml(px(24.)); // `ml-6`, only on `idx % len === 0`
+            }
+            copy = copy.child(item.child(sponsor_tile(name, total)));
+        }
+        track = track.child(copy);
     }
 
+    // The render-loop seat: the prepaint listener runs on every frame the row
+    // is painted, which is exactly while the About tab is on screen with its
+    // sponsors card pinned. It measures the wrap distance from the two copies
+    // and starts the avatar fetches (they need `&mut App`, which only a
+    // callback gets). The viewport's own listener asks for the next frame.
+    let entity_for_frames = entity.clone();
+    track = track.on_children_prepainted(move |bounds, _, cx| {
+        marquee_prepaint(&bounds);
+        for &(name, _, _) in SPONSORS.iter() {
+            if let Some(url) = sponsors::avatar_for(name) {
+                sponsors::ensure_loaded(url, cx, entity_for_frames.clone());
+            }
+        }
+    });
+
     // Viewport (`:550`): `relative mt-2 overflow-hidden rounded-md` on
-    // `color-mix(surface-0, transparent 20%)`.
+    // `color-mix(surface-0, transparent 20%)`. The source pauses the keyframe
+    // on `:hover` / `:focus-within`. This GPUI line has no callback hover
+    // (`Div::on_hover` is a `gpui-pre` API; `gpui-ui` only uses the style-only
+    // `.hover(…)`), so the pause is resolved against the pointer in the
+    // viewport's own prepainted rect — the same rectangle `:hover` means.
     let mut viewport = div()
         .relative()
         .mt(px(8.))
         .rounded(px(ROUNDED_MD)) // `rounded-md` — 10px in this app
         .overflow_hidden()
         .bg(rgba(with_alpha(SURFACE_0, 0xCC)))
-        .child(
-            div()
-                .id("about-sponsors-row")
-                .overflow_x_scroll()
-                .restrict_scroll_to_axis()
-                .child(track),
-        );
+        // First child, so `bounds[0]` in the listener below is the viewport's
+        // own painted rect (absolute + `size_full`, invisible).
+        .child(div().absolute().top(px(0.)).left(px(0.)).size_full())
+        .child(track)
+        .on_children_prepainted(move |bounds, window, _| marquee_hover_prepaint(&bounds, window));
     // Edge fades (`:552-560`): `absolute inset-y-0 w-6`, `surface-1` →
     // transparent, painted over the row on both ends.
     viewport = viewport
@@ -348,30 +437,221 @@ fn sponsors_card() -> Div {
         .child(viewport)
 }
 
+// ── Marquee (`SponsorsCarousel.tsx:627-643`) ─────────────────────────────
+
+/// `@keyframes sponsors-marquee` runs for 34 s (`animation: … 34s linear
+/// infinite`), of which 28 s is the scroll.
+const MARQUEE_LOOP: f32 = 34.0;
+const MARQUEE_SCROLL: f32 = 28.0;
+/// The keyframe rests at `translateX(0)` for `0%`→`8.8%` (2.992 s) and at
+/// `translateX(-50%)` for `91.2%`→`100%` (2.992 s); the comments in the source
+/// call them 3 s.
+const MARQUEE_DWELL: f32 = 3.0;
+/// A frame gap longer than this means the page was not on screen: the source
+/// remounts the carousel and its keyframe restarts from `0%`, so the port
+/// restarts too instead of jumping forward.
+const MARQUEE_RESTART_GAP: Duration = Duration::from_millis(250);
+
+struct MarqueeClock {
+    started: Option<Instant>,
+    last_frame: Option<Instant>,
+    /// The distance from the first copy's left edge to the second's — the
+    /// `-50%` the keyframe travels. Measured from the two copies' prepainted
+    /// bounds rather than assumed, so text metrics or a future avatar size
+    /// cannot desynchronise the wrap.
+    pitch: f32,
+    /// `animation-play-state: paused` while `:hover` holds the row.
+    paused_at: Option<Instant>,
+    paused_total: Duration,
+}
+
+impl Default for MarqueeClock {
+    fn default() -> Self {
+        Self {
+            started: None,
+            last_frame: None,
+            pitch: 0.0,
+            paused_at: None,
+            paused_total: Duration::ZERO,
+        }
+    }
+}
+
+thread_local! {
+    /// The About tab is one view on the main thread, so a thread-local clock is
+    /// enough and costs no lock per frame.
+    static MARQUEE: RefCell<MarqueeClock> = RefCell::new(MarqueeClock::default());
+}
+
+/// The keyframe's `translateX` at `elapsed` into the loop, in pixels: flat for
+/// the leading 3 s, linear to the copy distance over the next 28 s, flat again
+/// for the trailing 3 s, then back to `0` (which is the same picture, because
+/// the second copy lands exactly where the first one started).
+fn marquee_offset_at(elapsed: Duration, pitch: f32) -> f32 {
+    let phase = elapsed.as_secs_f32() % MARQUEE_LOOP;
+    let progress = if phase <= MARQUEE_DWELL {
+        0.0
+    } else if phase >= MARQUEE_LOOP - MARQUEE_DWELL {
+        1.0
+    } else {
+        (phase - MARQUEE_DWELL) / MARQUEE_SCROLL
+    };
+    pitch * progress
+}
+
+/// This frame's offset. Called once per build, before the track is assembled,
+/// which is also where a cold mount restarts the clock (and lets the avatars
+/// that failed last time try again).
+fn marquee_offset() -> f32 {
+    MARQUEE.with(|cell| {
+        let mut clock = cell.borrow_mut();
+        let now = Instant::now();
+        let restart = match clock.last_frame {
+            Some(last) => now.saturating_duration_since(last) > MARQUEE_RESTART_GAP,
+            None => true,
+        };
+        if restart {
+            clock.started = Some(now);
+            // A paused row stops requesting frames, so the gap that follows a
+            // long hover is not an absence: re-anchor the pause instead of
+            // clearing it, and the row simply rests at `0` until the pointer
+            // leaves.
+            clock.paused_at = clock.paused_at.map(|_| now);
+            clock.paused_total = Duration::ZERO;
+            sponsors::reset_failed();
+        }
+        clock.last_frame = Some(now);
+        let started = clock.started.unwrap_or(now);
+        let at = clock.paused_at.unwrap_or(now);
+        let elapsed = at
+            .saturating_duration_since(started)
+            .saturating_sub(clock.paused_total);
+        marquee_offset_at(elapsed, clock.pitch)
+    })
+}
+
+/// The track's prepaint half of the clock: read the wrap distance from the two
+/// copies' painted rects. It requests no frame; the viewport listener below is
+/// the single place that does.
+fn marquee_prepaint(bounds: &[Bounds<Pixels>]) {
+    if let (Some(first), Some(second)) = (bounds.first(), bounds.get(1)) {
+        set_marquee_pitch(second.origin.x.0 - first.origin.x.0);
+    }
+}
+
+fn set_marquee_pitch(pitch: f32) {
+    if pitch > 0.0 {
+        MARQUEE.with(|cell| cell.borrow_mut().pitch = pitch);
+    }
+}
+
+/// `:hover` for the viewport, resolved against the pointer and the viewport's
+/// own painted rect (`bounds[0]`, the invisible first child), then the next
+/// frame request — the only one.
+///
+/// The loop keeps running while paused on purpose: no frames means no prepaint,
+/// and the pause would never be released. Pausing freezes the *clock*, so the
+/// picture rests even though frames continue.
+fn marquee_hover_prepaint(bounds: &[Bounds<Pixels>], window: &mut Window) {
+    if let Some(area) = bounds.first() {
+        let hovered = area.contains(&window.mouse_position());
+        set_marquee_hovered(hovered);
+    }
+    window.request_animation_frame();
+}
+
+/// `animation-play-state` on hover. `true` when the state changed.
+fn set_marquee_hovered(hovered: bool) -> bool {
+    MARQUEE.with(|cell| {
+        let mut clock = cell.borrow_mut();
+        let now = Instant::now();
+        match (hovered, clock.paused_at) {
+            (true, None) => {
+                clock.paused_at = Some(now);
+                true
+            }
+            (false, Some(at)) => {
+                clock.paused_total += now.saturating_duration_since(at);
+                clock.paused_at = None;
+                true
+            }
+            _ => false,
+        }
+    })
+}
+
+/// The pause test needs the keyframe's scroll phase without waiting out the
+/// 3 s lead-in dwell, so it rewinds this thread's clock instead.
+#[cfg(test)]
+fn marquee_seek(elapsed: Duration) {
+    MARQUEE.with(|cell| {
+        let mut clock = cell.borrow_mut();
+        let now = Instant::now();
+        clock.started = Some(now - elapsed);
+        clock.last_frame = Some(now);
+        clock.paused_at = None;
+        clock.paused_total = Duration::ZERO;
+    });
+}
+
 // ── Branding assets ──────────────────────────────────────────────────────
 
 /// `public/dragonfruit_assets/branding/` — where the web build keeps the three
-/// marks the About tab paints. Anchored at compile time so the binary does not
-/// depend on the working directory (`icons::icon` anchors `gpui/assets` the
-/// same way).
-fn branding_path(file: &str) -> std::path::PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../public/dragonfruit_assets/branding")
-        .join(file)
-}
+/// marks the About tab paints. They are embedded at compile time: a desktop
+/// binary has no `public/`, and a path read at paint time would tie the marks
+/// to the source tree the binary was built from.
+///
+/// # Which mark goes down which path
+///
+/// All three go through `img()`, and none may go through `svg()`:
+///
+/// | file | `img()` branch | why |
+/// |------|----------------|-----|
+/// | `text_logo.svg` | `ImageFormat::Svg` → `SvgRenderer::render_single_frame` | polychrome: `fill:white`, `rgb(255,44,126)`, `rgb(191,254,46)` |
+/// | `simple_icon.svg` | `ImageFormat::Svg` → `SvgRenderer::render_single_frame` | same rasterizer; its paths are tinted too |
+/// | `open_resin_alliance_logo_darkmode.png` | `ImageFormat::Png` → `decode_static_image` | a raster, no vector pass |
+///
+/// `svg()` is the dead end this tab used to sit on: it paints a *monochrome
+/// alpha mask tinted with the element's text colour* (`Svg::paint` gates on
+/// `external_path.zip(style.text.color)`, and no colour was ever set, so it
+/// painted nothing at all). A tint would still flatten the wordmark. `img()`'s
+/// SVG branch keeps the artwork's own colours. `Image::from_bytes` hashes the
+/// bytes for its cache key, so GPUI decodes each mark once and every frame
+/// reuses the `RenderImage`.
+static TEXT_LOGO: LazyLock<Arc<Image>> = LazyLock::new(|| {
+    Arc::new(Image::from_bytes(
+        ImageFormat::Svg,
+        include_bytes!("../../../../public/dragonfruit_assets/branding/text_logo.svg").to_vec(),
+    ))
+});
 
-fn branding_svg(file: &str) -> String {
-    branding_path(file).to_string_lossy().into_owned()
-}
+static SIMPLE_ICON: LazyLock<Arc<Image>> = LazyLock::new(|| {
+    Arc::new(Image::from_bytes(
+        ImageFormat::Svg,
+        include_bytes!("../../../../public/dragonfruit_assets/branding/simple_icon.svg").to_vec(),
+    ))
+});
 
-/// `text_logo.svg`'s `viewBox="0 0 1772 304"`; `h-9` (36px) with `w-auto`.
+static ORA_LOGO: LazyLock<Arc<Image>> = LazyLock::new(|| {
+    Arc::new(Image::from_bytes(
+        ImageFormat::Png,
+        include_bytes!(
+            "../../../../public/dragonfruit_assets/branding/open_resin_alliance_logo_darkmode.png"
+        )
+        .to_vec(),
+    ))
+});
+
+/// `text_logo.svg`'s `viewBox="0 0 1772 304"` with `h-9` (36px) and `w-auto`:
+/// the aspect is `1772 / 304 = 5.8289…`, so the painted width is
+/// `36 × (1772 / 304) = 209.84 px`. `object-contain` adds nothing because the
+/// element's aspect already matches the artwork's.
 const TEXT_LOGO_WIDTH: f32 = 36.0 * 1772.0 / 304.0;
 
 // ── The tab ──────────────────────────────────────────────────────────────
 
 /// `SettingsModal.tsx:1583-1766`.
 pub(crate) fn about_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>) -> Div {
-    let _ = entity;
     let copied = state.about.copied;
 
     // `isBetaBuildChannel` / `buildStatusLabel` / `buildStatusStyle`
@@ -417,14 +697,15 @@ pub(crate) fn about_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>) 
                 .flex()
                 .items_center()
                 .justify_center()
-                // `/dragonfruit_assets/branding/text_logo.svg`, `h-9 w-auto
-                // object-contain` (`:1593-1598`). The light theme's
-                // `drop-shadow` is not emitted (see the module note).
+                // `text_logo.svg` at `h-9 w-auto object-contain`
+                // (`:1593-1598`). The artwork is `img()`-painted, not `svg()`,
+                // so the wordmark keeps the SVG's own three fills. The light
+                // theme's `drop-shadow` is not emitted (see the module note).
                 .child(
-                    svg()
-                        .external_path(branding_svg("text_logo.svg"))
+                    img(TEXT_LOGO.clone())
                         .w(px(TEXT_LOGO_WIDTH))
-                        .h(px(36.)),
+                        .h(px(36.))
+                        .flex_shrink_0(),
                 )
                 // `absolute right-0 top-0 inline-flex shrink-0 rounded-full
                 // px-2.5 py-0.5 text-[12px] font-semibold`, white on
@@ -661,12 +942,7 @@ pub(crate) fn about_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>) 
         // `ORA_LOGO_DARK_URL` at `h-14 w-auto object-contain shrink-0`
         // (`:1727-1734`); the PNG is 1500×1500, so `h-14` is 56×56. The light
         // theme's `drop-shadow` is not emitted.
-        .child(
-            img(branding_path("open_resin_alliance_logo_darkmode.png"))
-                .w(px(56.))
-                .h(px(56.))
-                .flex_shrink_0(),
-        )
+        .child(img(ORA_LOGO.clone()).w(px(56.)).h(px(56.)).flex_shrink_0())
         // `min-w-0 flex-1 space-y-2 text-center` (`:1736`)
         .child(
             div()
@@ -712,10 +988,11 @@ pub(crate) fn about_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>) 
                 ),
         )
         // `simple_icon.svg` at `h-10 w-auto object-contain shrink-0`
-        // (`:1761-1765`); its `viewBox` is square, so `h-10` is 40×40.
+        // (`:1761-1765`). Its `viewBox="0 0 422 422"` is square
+        // (`422 / 422 = 1`), so `w-auto` is `40 × 1 = 40` and the box is
+        // 40×40.
         .child(
-            svg()
-                .external_path(branding_svg("simple_icon.svg"))
+            img(SIMPLE_ICON.clone())
                 .w(px(40.))
                 .h(px(40.))
                 .flex_shrink_0(),
@@ -747,6 +1024,91 @@ pub(crate) fn about_tab(state: &SettingsState, entity: WeakEntity<DragonFruit>) 
                         .child(team),
                 ),
         )
-        .child(sponsors_card())
+        .child(sponsors_card(entity))
         .child(ora)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The keyframe's own numbers: 3 s rest, 28 s across one copy, 3 s rest,
+    /// then the loop point (which is the same picture, because the second copy
+    /// lands where the first one started).
+    #[test]
+    fn marquee_speed_and_dwells_match_the_source_keyframe() {
+        const PITCH: f32 = 1212.0;
+        let secs = |seconds: f32| Duration::from_secs_f32(seconds);
+
+        assert_eq!(marquee_offset_at(Duration::ZERO, PITCH), 0.0);
+        assert_eq!(marquee_offset_at(secs(3.0), PITCH), 0.0);
+        // 28 s to travel the copy: a quarter of it after 7 s of scrolling.
+        assert!((marquee_offset_at(secs(10.0), PITCH) - PITCH * 0.25).abs() < 0.01);
+        assert!((marquee_offset_at(secs(17.0), PITCH) - PITCH * 0.5).abs() < 0.01);
+        assert!((marquee_offset_at(secs(31.0), PITCH) - PITCH).abs() < 0.01);
+        // The trailing dwell, then the wrap back to the loop's first frame.
+        assert!((marquee_offset_at(secs(33.0), PITCH) - PITCH).abs() < 0.01);
+        assert!(marquee_offset_at(secs(34.0), PITCH).abs() < 0.01);
+    }
+
+    /// Smoke line for the render loop: between two consecutive 60 Hz frames in
+    /// the scroll phase the offset advances by `pitch / 28 s * dt`.
+    #[test]
+    fn marquee_offset_advances_between_frames() {
+        const PITCH: f32 = 1212.0;
+        let frame = Duration::from_secs_f32(1.0 / 60.0);
+        let before = marquee_offset_at(Duration::from_secs_f32(10.0), PITCH);
+        let after = marquee_offset_at(Duration::from_secs_f32(10.0) + frame, PITCH);
+        let expected = PITCH / MARQUEE_SCROLL * frame.as_secs_f32();
+        assert!(after > before, "{after} did not advance from {before}");
+        assert!((after - before - expected).abs() < 0.01);
+    }
+
+    /// The pause is observable, not prose: the hovered row's offset is exactly
+    /// the same across two reads a sleep apart, and leaving resumes it.
+    #[test]
+    fn hovering_freezes_the_marquee_and_leaving_resumes_it() {
+        // Each test runs on its own thread, and the clock is thread-local, so
+        // this starts from `Default`.
+        set_marquee_pitch(1200.0);
+        marquee_seek(Duration::from_secs(10)); // mid-scroll, past the dwell
+
+        let before = marquee_offset();
+        std::thread::sleep(Duration::from_millis(12));
+        let after = marquee_offset();
+        assert!(after > before, "the row must be moving: {before} → {after}");
+
+        // Pointer inside the viewport's painted rect.
+        assert!(set_marquee_hovered(true), "hover-in must change the state");
+        let frozen = marquee_offset();
+        std::thread::sleep(Duration::from_millis(24));
+        assert_eq!(
+            marquee_offset(),
+            frozen,
+            "a hovered row advanced while it should be paused"
+        );
+
+        // Pointer left: the clock resumes where it stopped.
+        assert!(
+            set_marquee_hovered(false),
+            "hover-out must change the state"
+        );
+        std::thread::sleep(Duration::from_millis(12));
+        assert!(
+            marquee_offset() > frozen,
+            "leaving the row did not resume the keyframe"
+        );
+    }
+
+    /// The source's own `sponsorInitials` cases (`SponsorsCarousel.tsx:57-67`).
+    #[test]
+    fn initials_match_the_source() {
+        assert_eq!(sponsor_initials("WickedGrey"), "WG");
+        assert_eq!(sponsor_initials("Kryz Slaughter"), "KS");
+        assert_eq!(sponsor_initials("ben"), "B");
+        // `3D` splits into `3` / `D`; the digit is dropped as a non-letter, so
+        // the two survivors are first + last: `C` + `D`.
+        assert_eq!(sponsor_initials("Concepts 3D"), "CD");
+        assert_eq!(sponsor_initials("SIN"), "S");
+    }
 }

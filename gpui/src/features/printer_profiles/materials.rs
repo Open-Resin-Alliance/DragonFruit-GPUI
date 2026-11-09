@@ -59,12 +59,12 @@
 //!    note). `selectedDisplay` / `hideSelectedText` have no equivalent, so an
 //!    unassigned tank's trigger carries the source's dash as a menu row
 //!    (`Unassigned`) instead of a centred overlay.
-//! 8. **Dialog overlays are pane-local.** `StructuredDialogModal` paints a
-//!    `size_full` backdrop under its parent; this pane is that parent, so the
-//!    editor/create dialogs cover the materials surface rather than the whole
-//!    window (`fixed inset-0` in the source). The modal shell keeps working.
-//!    The source's `max-h-[88vh]` editor is a fixed 620px, because this
-//!    function gets no window measurement.
+//! 8. **Dialog overlays are window-local now.** The editor/create dialogs are
+//!    mounted by `mod.rs`'s full-window layer ([`overlays`]) rather than inside
+//!    this pane, so their `absolute size_full` backdrop covers the window as
+//!    the source's `fixed inset-0` does. `max-h-[88vh]` is 88 % of the window
+//!    height, passed down as `viewport_height`; the floating 620px cap this
+//!    note used to document made every dialog too short on a large window.
 //! 9. The Multi-Tank grid is always four columns: the source's `xl:grid-cols-4`
 //!    is the widest layout and the port has no window-width measurement. The
 //!    material columns use the source's `1fr 1fr 1.25fr` flex split.
@@ -94,6 +94,7 @@ use gpui_ui::ui::{
 use crate::features::settings::fields::{number_on_blur, text_input};
 use super::model::{self, MaterialProfile, PrinterProfile};
 use crate::DragonFruit;
+use crate::app::automation;
 
 const SURFACE_0: u32 = 0x111216;
 const SURFACE_1: u32 = 0x1a1b21;
@@ -365,9 +366,10 @@ pub fn materials_panel(
     }
     pane = pane.child(material_settings_section(&view, &entity));
 
-    // The source's nested dialogs are `fixed inset-0`; with no portal they
-    // paint inside this pane's bounds (deviation 8).
-    pane.child(overlays(&view, &entity))
+    // The nested dialogs are `fixed inset-0` in the source. They are mounted by
+    // `mod.rs`'s window-sized layer (`materials::overlays`) rather than here:
+    // `size_full` inside this pane resolves against the pane, not the window.
+    pane
 }
 
 /// `useEscapeToClose` for this pane. Returns whether an overlay consumed the
@@ -1465,7 +1467,10 @@ fn action_bar(view: &View, entity: &WeakEntity<DragonFruit>) -> Div {
     if !is_official && selected.is_some() {
         bar = bar.child(lock);
     }
-    bar.child(div().flex_1()).child(delete)
+    // `material-edit` stays the bar's first child in every branch, so a
+    // scenario can click it by name.
+    let bar = automation::measure_children(bar.child(div().flex_1()), &["material-edit"]);
+    bar.child(delete)
 }
 
 // ── Buttons ─────────────────────────────────────────────────────────────────
@@ -1558,11 +1563,27 @@ fn button_recipe(
 
 // ── Overlays ────────────────────────────────────────────────────────────────
 
-fn overlays(view: &View, entity: &WeakEntity<DragonFruit>) -> Div {
+/// A CSS `box-shadow` layer.
+fn shadow(x: f32, y: f32, blur: f32, spread: f32, color: u32) -> gpui::BoxShadow {
+    gpui::BoxShadow::new(px(x), px(y), rgba(color).into())
+        .blur_radius(px(blur))
+        .spread_radius(px(spread))
+}
+
+/// The material pane's `fixed inset-0` dialogs, mounted by `mod.rs`'s
+/// window-sized layer. `viewport_height` is the window's content height, which
+/// the cards' `max-h-[88vh]` measures against (`ProfileSettingsModal.tsx:5414`,
+/// `:5527`, `:6333`).
+pub(crate) fn overlays(
+    profile: &PrinterProfile,
+    viewport_height: f32,
+    entity: &WeakEntity<DragonFruit>,
+) -> Div {
+    let view = view(profile);
     let mut layer = div().absolute().top(px(0.0)).left(px(0.0)).size_full();
 
     if let Some(create) = ui_edit(|state| state.create.clone()) {
-        layer = layer.child(create_dialog(view, &create, entity));
+        layer = layer.child(create_dialog(&view, &create, viewport_height, entity));
     }
     if let Some(editor) = ui_edit(|state| {
         state
@@ -1571,28 +1592,35 @@ fn overlays(view: &View, entity: &WeakEntity<DragonFruit>) -> Div {
             .map(|editor| (editor.material_id.clone(), editor.draft.clone()))
     }) {
         let (material_id, draft) = editor;
-        layer = layer.child(editor_dialog(view, &material_id, &draft, entity));
+        layer = layer.child(editor_dialog(
+            &view,
+            &material_id,
+            &draft,
+            viewport_height,
+            entity,
+        ));
     }
     if let Some((id, name)) = ui_edit(|state| state.delete_confirm.clone()) {
         layer = layer.child(delete_dialog(&id, &name, entity));
     }
     if let Some(is_official) = ui_edit(|state| state.lock_dialog) {
-        layer = layer.child(lock_dialog(is_official, view, entity));
+        layer = layer.child(lock_dialog(is_official, &view, entity));
     }
     let (compat_open, compat_target) = ui_edit(|state| (state.compat.open, state.compat.target));
     if compat_open {
-        layer = layer.child(compat_dialog(view, compat_target, entity));
+        layer = layer.child(compat_dialog(&view, compat_target, entity));
     }
     layer
 }
 
+/// `fixed inset-0 ... bg-black/55 p-4 flex items-center justify-center`.
 fn dialog_backdrop() -> Div {
     div()
         .absolute()
         .top(px(0.0))
         .left(px(0.0))
         .size_full()
-        .p(px(20.0))
+        .p(px(16.0))
         .flex()
         .items_center()
         .justify_center()
@@ -1600,12 +1628,13 @@ fn dialog_backdrop() -> Div {
 }
 
 /// The source's `w-full max-w-[920px] max-h-[88vh] rounded-xl border shadow-2xl
-/// flex flex-col` editor/create panel.
-fn editor_panel(width: f32) -> Div {
+/// flex flex-col` editor/create panel. 88 % is of the *viewport*, not of the
+/// padded backdrop's content box.
+fn editor_panel(width: f32, viewport_height: f32) -> Div {
     div()
         .w_full()
         .max_w(px(width))
-        .max_h(px(620.0))
+        .max_h(px(viewport_height * 0.88))
         .rounded(px(12.0))
         .border_1()
         .border_color(rgb(BORDER_STRONG))
@@ -1613,6 +1642,8 @@ fn editor_panel(width: f32) -> Div {
         .overflow_hidden()
         .flex()
         .flex_col()
+        // `shadow-2xl`: `0 25px 50px -12px rgb(0 0 0 / 0.25)`.
+        .shadow(vec![shadow(0.0, 25.0, 50.0, -12.0, with_alpha(BLACK, 0x40))])
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
 }
 
@@ -1644,10 +1675,12 @@ fn editor_header(
                         .child(title.to_owned()),
                 )
                 .child(
+                    // `.ui-meta`: `--font-size-sm` (13) at the indicator tone,
+                    // line-height inherited (1.45).
                     div()
-                        .text_size(px(11.0))
-                        .line_height(px(11.0 * LINE_HEIGHT_SNUG))
-                        .text_color(rgb(TEXT_MUTED))
+                        .text_size(px(FONT_SM))
+                        .line_height(px(FONT_SM * 1.45))
+                        .text_color(rgb(INDICATOR))
                         .child(subtitle),
                 ),
         )
@@ -2404,6 +2437,7 @@ fn editor_dialog(
     view: &View,
     material_id: &str,
     draft: &MaterialDraft,
+    viewport_height: f32,
     entity: &WeakEntity<DragonFruit>,
 ) -> Div {
     let material = material_by_id(view, material_id);
@@ -2505,7 +2539,7 @@ fn editor_dialog(
         },
     );
 
-    let panel = editor_panel(920.0)
+    let panel = editor_panel(920.0, viewport_height)
         .child(editor_header(
             "Material Profile Settings",
             subtitle,
@@ -2538,13 +2572,29 @@ fn editor_dialog(
                         .child(save),
                 ),
         );
+    let panel = automation::measure_children(
+        panel,
+        &[
+            "material-editor-header",
+            "material-editor-body",
+            "material-editor-footer",
+        ],
+    );
 
-    dialog_backdrop()
-        .on_mouse_down(MouseButton::Left, backdrop_close)
-        .child(panel)
+    automation::measure_children(
+        dialog_backdrop()
+            .on_mouse_down(MouseButton::Left, backdrop_close)
+            .child(panel),
+        &["material-editor-card"],
+    )
 }
 
-fn create_dialog(view: &View, draft: &MaterialDraft, entity: &WeakEntity<DragonFruit>) -> Div {
+fn create_dialog(
+    view: &View,
+    draft: &MaterialDraft,
+    viewport_height: f32,
+    entity: &WeakEntity<DragonFruit>,
+) -> Div {
     let subtitle = view.printer_name.clone();
 
     let close_entity = entity.clone();
@@ -2600,7 +2650,7 @@ fn create_dialog(view: &View, draft: &MaterialDraft, entity: &WeakEntity<DragonF
         },
     );
 
-    let panel = editor_panel(920.0)
+    let panel = editor_panel(920.0, viewport_height)
         .child(editor_header(
             "Create Material Profile",
             subtitle,
@@ -2626,10 +2676,21 @@ fn create_dialog(view: &View, draft: &MaterialDraft, entity: &WeakEntity<DragonF
                 .child(cancel)
                 .child(save),
         );
+    let panel = automation::measure_children(
+        panel,
+        &[
+            "material-create-header",
+            "material-create-body",
+            "material-create-footer",
+        ],
+    );
 
-    dialog_backdrop()
-        .on_mouse_down(MouseButton::Left, backdrop_close)
-        .child(panel)
+    automation::measure_children(
+        dialog_backdrop()
+            .on_mouse_down(MouseButton::Left, backdrop_close)
+            .child(panel),
+        &["material-create-card"],
+    )
 }
 
 fn brand_of_draft(draft: &MaterialDraft) -> String {

@@ -42,6 +42,7 @@ use gpui_ui::ui::{
 };
 
 use crate::DragonFruit;
+use crate::app::automation;
 use crate::features::printer_profiles::model::{self, PrinterProfile};
 
 const WHITE: u32 = 0xffffff;
@@ -632,7 +633,7 @@ fn action_band(
         .border_color(rgb(BORDER_SUBTLE))
         .bg(rgb(mix(SURFACE_2, SURFACE_1, 0.92)))
         .p(px(8.0))
-        .child(
+        .child(automation::measure_children(
             div()
                 .flex()
                 .flex_wrap()
@@ -640,7 +641,8 @@ fn action_band(
                 .gap(px(8.0))
                 .child(edit)
                 .child(remove),
-        )
+            &["printer-profiles-edit", "printer-profiles-remove"],
+        ))
 }
 
 /// `sanitizePlatformBadge`'s `#rrggbb` reader (the badge colour the preset

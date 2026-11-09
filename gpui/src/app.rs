@@ -414,6 +414,11 @@ pub(crate) struct DragonFruit {
     /// The viewport width from the last frame, handed to the top bar's
     /// responsive layout (`app_bar::State::window_width`).
     pub(crate) window_width: f32,
+    /// The viewport height from the last frame. The profile modals' `88vh`
+    /// caps are viewport percentages, and a percentage in GPUI would resolve
+    /// against the padded overlay instead, so `automation`'s geometry facts
+    /// need the real height.
+    pub(crate) window_height: f32,
     /// An OS file drag is over the canvas (`isPrepareDragActive`).
     pub(crate) drag_active: bool,
     /// The dragged paths contain no supported extension
@@ -575,6 +580,7 @@ impl DragonFruit {
             recent_files: Vec::new(),
             reopen_error: None,
             window_width: 0.0,
+            window_height: 0.0,
             drag_active: false,
             drag_unsupported: false,
             editor_menu: None,
@@ -2550,6 +2556,7 @@ impl Render for DragonFruit {
         let layer = self.layer;
 
         self.window_width = window.viewport_size().width.0;
+        self.window_height = window.viewport_size().height.0;
         if !self.focused {
             window.focus(&self.focus, cx);
             self.focused = true;
@@ -3017,6 +3024,7 @@ impl Render for DragonFruit {
             // modal opens for its Add flow.
             .child(features::printer_profiles::printer_profiles(
                 self.show_printer_profiles,
+                self.window_height,
                 entity.clone(),
             ))
             // The bar's printer picker: the library sheet and the nested

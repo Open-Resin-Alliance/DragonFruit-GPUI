@@ -76,8 +76,10 @@
 //!    source's track widths.
 //! 7. `bg-black/55` is `rgba(BLACK, 0x8c)`; `backdrop-blur`, `transition-*`
 //!    and `tracking-wide` have no GPUI equivalent and are omitted.
-//! 8. `max-h-[88vh]` is `max_h(relative(0.88))` against the overlay, which is
-//!    the window-sized layer the source's `fixed inset-0` paints.
+//! 8. `max-h-[88vh]` is 88 % of the window height, handed in as
+//!    `viewport_height`. A percentage length here would resolve against the
+//!    padded backdrop's content box (the window minus `p-4`), which is not
+//!    what `vh` means.
 //!
 //! `model::PrinterProfile` carries every field this pane reads; nothing is
 //! synthesised. The transient dropdown-open state lives in [`UI`] because the
@@ -100,6 +102,7 @@ use gpui_ui::ui::{
 
 use crate::features::settings::fields::{locked_box, number_on_blur, text_input};
 use crate::DragonFruit;
+use crate::app::automation;
 
 use super::model::{self, BitDepth, PixelSize, PrinterProfile, SafetyMarginMm};
 
@@ -658,6 +661,7 @@ fn accent_secondary_action() -> (u32, u32) {
 /// its backdrop is `absolute` and sized to that parent.
 pub fn printer_editor(
     profile: model::PrinterProfile,
+    viewport_height: f32,
     entity: WeakEntity<DragonFruit>,
 ) -> impl IntoElement {
     let official = profile.is_official;
@@ -770,10 +774,13 @@ pub fn printer_editor(
         );
 
     // `fixed inset-0 z-[60] flex items-center justify-center bg-black/55 p-4`.
+    // `max-h-[88vh]` is 88 % of the *viewport*; percentage lengths in this
+    // tree resolve against the padded containing block, so the height is
+    // computed from the window instead.
     let card = div()
         .w_full()
         .max_w(px(960.0))
-        .max_h(relative(0.88))
+        .max_h(px(viewport_height * 0.88))
         .rounded(px(ROUNDED_XL))
         .border_1()
         .border_color(rgb(BORDER_STRONG))
@@ -785,18 +792,29 @@ pub fn printer_editor(
         .child(header)
         .child(body)
         .child(footer);
+    let card = automation::measure_children(
+        card,
+        &[
+            "printer-editor-header",
+            "printer-editor-body",
+            "printer-editor-footer",
+        ],
+    );
 
-    div()
-        .absolute()
-        .top(px(0.0))
-        .left(px(0.0))
-        .size_full()
-        .flex()
-        .items_center()
-        .justify_center()
-        .p(px(16.0))
-        .bg(rgba(with_alpha(BLACK, 0x8c)))
-        .child(card)
+    automation::measure_children(
+        div()
+            .absolute()
+            .top(px(0.0))
+            .left(px(0.0))
+            .size_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .p(px(16.0))
+            .bg(rgba(with_alpha(BLACK, 0x8c)))
+            .child(card),
+        &["printer-editor-card"],
+    )
 }
 
 // ── Sections ────────────────────────────────────────────────────────────────
